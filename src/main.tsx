@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { Download, FileImage, FileText, RefreshCw, SlidersHorizontal, SwatchBook } from "lucide-react";
 import "./styles.css";
 
+type TraceMode = "outline" | "paint" | "extra";
+
 type Settings = {
   finishedHeightIn: number;
   threshold: number;
@@ -52,6 +54,8 @@ const defaultSettings: Settings = {
 function App() {
   const [image, setImage] = useState<File | null>(null);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const [traceMode, setTraceMode] = useState<TraceMode>("paint");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -112,6 +116,18 @@ function App() {
     setAnalysis(null);
   }
 
+  function applyTraceMode(mode: TraceMode) {
+    setTraceMode(mode);
+    const next = traceModeSettings(mode, settings);
+    setSettings(next);
+    setAnalysis(null);
+  }
+
+  function updateInteriorDetail(value: number) {
+    updateSetting("detailCleanup", 100 - value);
+    setTraceMode("paint");
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -152,28 +168,44 @@ function App() {
             value={settings.finishedHeightIn}
             onChange={(value) => updateSetting("finishedHeightIn", value)}
           />
-          <RangeField label="Threshold" min={0} max={180} value={settings.threshold} onChange={(value) => updateSetting("threshold", value)} />
-          <RangeField label="Smoothing" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
-          <RangeField label="Remove specks" min={0} max={600} value={settings.speckArea} onChange={(value) => updateSetting("speckArea", value)} />
-          <RangeField label="Fill holes" min={0} max={1500} value={settings.holeArea} onChange={(value) => updateSetting("holeArea", value)} />
-          <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => updateSetting("paletteSize", value)} />
 
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={settings.detailLines}
-              onChange={(event) => updateSetting("detailLines", event.target.checked)}
-            />
-            <span>Show interior detail lines</span>
-          </label>
+          <div className="choice-group" aria-label="Trace style">
+            <span className="choice-label">Trace style</span>
+            <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
+              <strong>Cut outline</strong>
+              <small>Outer shape only</small>
+            </button>
+            <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
+              <strong>Paint tracing</strong>
+              <small>Clean inside lines</small>
+            </button>
+            <button className={traceMode === "extra" ? "choice selected" : "choice"} onClick={() => applyTraceMode("extra")}>
+              <strong>More detail</strong>
+              <small>Shows smaller lines</small>
+            </button>
+          </div>
+
+          <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
           {settings.detailLines ? (
             <RangeField
-              label="Detail cleanup"
+              label="Inside detail"
               min={0}
               max={100}
-              value={settings.detailCleanup}
-              onChange={(value) => updateSetting("detailCleanup", value)}
+              value={100 - settings.detailCleanup}
+              onChange={updateInteriorDetail}
             />
+          ) : null}
+          <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => updateSetting("paletteSize", value)} />
+
+          <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
+            {advancedOpen ? "Hide advanced cleanup" : "Show advanced cleanup"}
+          </button>
+          {advancedOpen ? (
+            <div className="advanced-panel">
+              <RangeField label="Background sensitivity" min={0} max={180} value={settings.threshold} onChange={(value) => updateSetting("threshold", value)} />
+              <RangeField label="Remove tiny marks" min={0} max={600} value={settings.speckArea} onChange={(value) => updateSetting("speckArea", value)} />
+              <RangeField label="Close small gaps" min={0} max={1500} value={settings.holeArea} onChange={(value) => updateSetting("holeArea", value)} />
+            </div>
           ) : null}
 
           <button className="secondary-action" onClick={() => analyze()} disabled={!canAnalyze}>
@@ -244,6 +276,33 @@ function App() {
       </section>
     </main>
   );
+}
+
+function traceModeSettings(mode: TraceMode, current: Settings): Settings {
+  if (mode === "outline") {
+    return {
+      ...current,
+      smoothing: Math.max(current.smoothing, 3),
+      speckArea: Math.max(current.speckArea, 80),
+      holeArea: Math.max(current.holeArea, 260),
+      detailLines: false,
+      detailCleanup: 100
+    };
+  }
+  if (mode === "extra") {
+    return {
+      ...current,
+      smoothing: Math.max(2, current.smoothing),
+      detailLines: true,
+      detailCleanup: 35
+    };
+  }
+  return {
+    ...current,
+    smoothing: Math.max(current.smoothing, 3),
+    detailLines: true,
+    detailCleanup: 55
+  };
 }
 
 function PanelTitle({ icon, title }: { icon: ReactNode; title: string }) {
