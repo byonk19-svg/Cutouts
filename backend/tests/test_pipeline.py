@@ -12,7 +12,7 @@ from backend.cutout_studio.pipeline import (
     load_paint_catalog,
     match_paints,
     tile_grid,
-    DETAIL_LINE_COLOR,
+    _detail_line_mask,
     _line_art,
 )
 
@@ -90,6 +90,11 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertEqual(analysis.finished_height_in, 24)
         self.assertEqual(analysis.tile_count, analysis.tile_cols * analysis.tile_rows)
         self.assertGreater(len(analysis.preview_png), 1000)
+        self.assertGreater(len(analysis.outer_line_png), 1000)
+        self.assertGreater(len(analysis.detail_line_png), 1000)
+        self.assertGreater(len(analysis.paint_guide_png), 1000)
+        self.assertGreater(analysis.preview_width_px, 0)
+        self.assertGreater(analysis.preview_height_px, 0)
         self.assertGreaterEqual(len(analysis.palette), 1)
 
     def test_white_background_image_uses_threshold_to_find_subject(self) -> None:
@@ -154,19 +159,19 @@ class PrintPipelineTest(unittest.TestCase):
     def test_detail_cleanup_reduces_noisy_interior_lines(self) -> None:
         image, mask = noisy_detail_fixture()
 
-        noisy = _line_art(image, mask, True, line_width=3, detail_cleanup=0, print_scale=False)
-        cleaned = _line_art(image, mask, True, line_width=3, detail_cleanup=100, print_scale=False)
+        noisy = _detail_line_mask(image, mask, cleanup=0, print_scale=False)
+        cleaned = _detail_line_mask(image, mask, cleanup=100, print_scale=False)
 
-        noisy_gray_pixels = self._count_gray_detail_pixels(noisy)
-        cleaned_gray_pixels = self._count_gray_detail_pixels(cleaned)
+        noisy_gray_pixels = self._count_mask_pixels(noisy)
+        cleaned_gray_pixels = self._count_mask_pixels(cleaned)
         self.assertLess(cleaned_gray_pixels, noisy_gray_pixels // 2)
 
     def test_high_detail_cleanup_keeps_broad_color_boundaries(self) -> None:
         image, mask = broad_color_detail_fixture()
 
-        cleaned = _line_art(image, mask, True, line_width=3, detail_cleanup=55, print_scale=False)
+        cleaned = _detail_line_mask(image, mask, cleanup=55, print_scale=False)
 
-        gray_pixels = self._count_gray_detail_pixels(cleaned)
+        gray_pixels = self._count_mask_pixels(cleaned)
         subject_pixels = sum(1 for pixel in list(mask.get_flattened_data()) if pixel > 0)
         self.assertGreater(gray_pixels, 500)
         self.assertLess(gray_pixels, subject_pixels * 0.2)
@@ -174,14 +179,36 @@ class PrintPipelineTest(unittest.TestCase):
     def test_detail_lines_do_not_trace_smooth_shading_as_many_contours(self) -> None:
         image, mask = smooth_gradient_fixture()
 
-        cleaned = _line_art(image, mask, True, line_width=3, detail_cleanup=55, print_scale=False)
+        cleaned = _detail_line_mask(image, mask, cleanup=55, print_scale=False)
 
-        gray_pixels = self._count_gray_detail_pixels(cleaned)
+        gray_pixels = self._count_mask_pixels(cleaned)
         subject_pixels = sum(1 for pixel in list(mask.get_flattened_data()) if pixel > 0)
         self.assertLess(gray_pixels, subject_pixels * 0.08)
 
-    def _count_gray_detail_pixels(self, image: Image.Image) -> int:
-        return sum(1 for pixel in list(image.get_flattened_data()) if pixel == DETAIL_LINE_COLOR)
+    def test_printable_line_art_is_black_and_white_only(self) -> None:
+        image, mask = broad_color_detail_fixture()
+
+        line_art = _line_art(image, mask, True, line_width=3, detail_cleanup=55, print_scale=False)
+
+        colors = {pixel for pixel in line_art.get_flattened_data()}
+        self.assertLessEqual(colors, {(0, 0, 0), (255, 255, 255)})
+
+    def test_pdf_accepts_edited_detail_layer(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=40, palette_size=3)
+        edited = Image.new("RGBA", (120, 160), (255, 255, 255, 0))
+        draw = ImageDraw.Draw(edited)
+        draw.line((20, 80, 100, 80), fill=(0, 0, 0, 255), width=8)
+        out = io.BytesIO()
+        edited.save(out, format="PNG")
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings, edited_detail_png=out.getvalue())
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+
+        self.assertGreater(len(pdf_bytes), 10_000)
+        self.assertGreaterEqual(len(reader.pages), 3)
+
+    def _count_mask_pixels(self, image: Image.Image) -> int:
+        return sum(1 for pixel in list(image.convert("L").get_flattened_data()) if pixel > 0)
 
 
 if __name__ == "__main__":

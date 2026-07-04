@@ -25,13 +25,13 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
-            image_bytes, settings = self._read_template_request()
+            image_bytes, settings, edited_detail = self._read_template_request()
             if self.path == "/api/analyze":
                 analysis = analyze_template(image_bytes, settings)
                 self._send_json(analysis.to_json())
                 return
             if self.path == "/api/export":
-                pdf = build_template_pdf(image_bytes, settings)
+                pdf = build_template_pdf(image_bytes, settings, edited_detail_png=edited_detail)
                 self._send_bytes(
                     pdf,
                     content_type="application/pdf",
@@ -47,7 +47,7 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         print(f"{self.address_string()} - {format % args}")
 
-    def _read_template_request(self) -> tuple[bytes, TemplateSettings]:
+    def _read_template_request(self) -> tuple[bytes, TemplateSettings, bytes | None]:
         content_type = self.headers.get("Content-Type", "")
         if not content_type.startswith("multipart/form-data"):
             raise ValueError("Request must be multipart/form-data.")
@@ -63,7 +63,8 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
             settings_data = json.loads(settings_payload)
         except json.JSONDecodeError as exc:
             raise ValueError("Settings must be valid JSON.") from exc
-        return image_bytes, TemplateSettings.from_mapping(settings_data)
+        edited_detail = form.get("editedDetail")
+        return image_bytes, TemplateSettings.from_mapping(settings_data), edited_detail
 
     def _send_empty(self, status: int) -> None:
         self.send_response(status)

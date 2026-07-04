@@ -6,6 +6,7 @@ Cutout Studio is a local developer-run web app for making personal wood cutout t
 
 - Upload one PNG or JPG source image with a simple removable background.
 - Generate an adjustable outer cut line with deterministic cleanup settings.
+- Use a Clean Template Editor to erase noisy interior detail lines, draw missing feature lines, undo mistakes, reset details, and show the original image as a faint tracing reference.
 - Set finished cutout height in inches while preserving aspect ratio.
 - Export a US-letter PDF template pack with:
   - overview page
@@ -14,6 +15,8 @@ Cutout Studio is a local developer-run web app for making personal wood cutout t
   - page numbers
   - overlap guides
   - 1 inch calibration marks
+
+The exported trace pages are black-and-white only: a thick locked outer cut line plus thinner black interior detail lines. Paint colors stay in the separate color guide instead of driving the printable tracing lines.
 
 ## Setup
 

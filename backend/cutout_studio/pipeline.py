@@ -24,6 +24,7 @@ OVERLAP_IN = 0.25
 PREVIEW_MAX_PX = 960
 PRINT_DPI = 144
 DETAIL_LINE_COLOR = (118, 118, 118)
+BLACK_LINE_COLOR = (0, 0, 0, 255)
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,11 @@ class TemplateAnalysis:
     tile_rows: int
     tile_count: int
     preview_png: bytes
+    outer_line_png: bytes
+    detail_line_png: bytes
+    paint_guide_png: bytes
+    preview_width_px: int
+    preview_height_px: int
     palette: tuple[PaletteColor, ...]
 
     def to_json(self) -> dict[str, Any]:
@@ -99,6 +105,11 @@ class TemplateAnalysis:
             "tileRows": self.tile_rows,
             "tileCount": self.tile_count,
             "previewPngDataUrl": "data:image/png;base64," + base64.b64encode(self.preview_png).decode("ascii"),
+            "outerLinePngDataUrl": "data:image/png;base64," + base64.b64encode(self.outer_line_png).decode("ascii"),
+            "detailLinePngDataUrl": "data:image/png;base64," + base64.b64encode(self.detail_line_png).decode("ascii"),
+            "paintGuidePngDataUrl": "data:image/png;base64," + base64.b64encode(self.paint_guide_png).decode("ascii"),
+            "previewWidthPx": self.preview_width_px,
+            "previewHeightPx": self.preview_height_px,
             "palette": [
                 {
                     "rgb": color.rgb,
@@ -129,7 +140,7 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
     cropped_mask = mask.crop(bounds)
     finished_width = settings.finished_height_in * (cropped_source.width / cropped_source.height)
     tile_cols, tile_rows = tile_grid(finished_width, settings.finished_height_in)
-    preview = _make_preview(cropped_source, cropped_mask, settings)
+    preview, outer_line, detail_line, paint_guide = _make_preview_layers(cropped_source, cropped_mask, settings)
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
 
     return TemplateAnalysis(
@@ -142,11 +153,16 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
         tile_rows=tile_rows,
         tile_count=tile_cols * tile_rows,
         preview_png=preview,
+        outer_line_png=outer_line,
+        detail_line_png=detail_line,
+        paint_guide_png=paint_guide,
+        preview_width_px=Image.open(io.BytesIO(preview)).width,
+        preview_height_px=Image.open(io.BytesIO(preview)).height,
         palette=palette,
     )
 
 
-def build_template_pdf(image_bytes: bytes, settings: TemplateSettings) -> bytes:
+def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_detail_png: bytes | None = None) -> bytes:
     source = _load_image(image_bytes)
     mask = _subject_mask(source, settings)
     bounds = _mask_bounds(mask)
@@ -154,7 +170,7 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings) -> bytes:
     cropped_mask = mask.crop(bounds)
     finished_width = settings.finished_height_in * (cropped_source.width / cropped_source.height)
     tile_cols, tile_rows = tile_grid(finished_width, settings.finished_height_in)
-    trace = _make_trace_image(cropped_source, cropped_mask, settings, finished_width, settings.finished_height_in)
+    trace = _make_trace_image(cropped_source, cropped_mask, settings, finished_width, settings.finished_height_in, edited_detail_png)
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
 
     out = io.BytesIO()
@@ -329,18 +345,32 @@ def _mask_bounds(mask: Image.Image) -> tuple[int, int, int, int]:
     )
 
 
-def _make_preview(image: Image.Image, mask: Image.Image, settings: TemplateSettings) -> bytes:
-    line = _line_art(
-        image,
-        mask,
+def _make_preview_layers(image: Image.Image, mask: Image.Image, settings: TemplateSettings) -> tuple[bytes, bytes, bytes, bytes]:
+    preview_image = image.copy()
+    preview_mask = mask.copy()
+    preview_image.thumbnail((PREVIEW_MAX_PX, PREVIEW_MAX_PX), Image.Resampling.LANCZOS)
+    preview_mask = preview_mask.resize(preview_image.size, Image.Resampling.NEAREST)
+    composed, outer, detail = _line_art_layers(
+        preview_image,
+        preview_mask,
         settings.detail_lines,
-        line_width=3,
+        outer_line_width=3,
+        detail_line_width=2,
         detail_cleanup=settings.detail_cleanup,
         print_scale=False,
     )
-    line.thumbnail((PREVIEW_MAX_PX, PREVIEW_MAX_PX))
+    paint_guide = _on_white(preview_image)
+    return (
+        _png_bytes(composed),
+        _png_bytes(outer),
+        _png_bytes(detail),
+        _png_bytes(paint_guide),
+    )
+
+
+def _png_bytes(image: Image.Image) -> bytes:
     out = io.BytesIO()
-    line.save(out, format="PNG")
+    image.save(out, format="PNG")
     return out.getvalue()
 
 
@@ -350,6 +380,7 @@ def _make_trace_image(
     settings: TemplateSettings,
     width_in: float,
     height_in: float,
+    edited_detail_png: bytes | None = None,
 ) -> Image.Image:
     target_px = (max(1, round(width_in * PRINT_DPI)), max(1, round(height_in * PRINT_DPI)))
     scaled_image = image.resize(target_px, Image.Resampling.LANCZOS)
@@ -357,14 +388,19 @@ def _make_trace_image(
     if settings.smoothing > 0:
         scaled_mask = scaled_mask.filter(ImageFilter.GaussianBlur(radius=max(1, settings.smoothing * 2)))
     scaled_mask = scaled_mask.point(lambda px: 255 if px >= 128 else 0)
-    return _line_art(
+    composed, outer, detail = _line_art_layers(
         scaled_image,
         scaled_mask,
         settings.detail_lines,
-        line_width=9,
+        outer_line_width=9,
+        detail_line_width=5,
         detail_cleanup=settings.detail_cleanup,
         print_scale=True,
     )
+    if edited_detail_png:
+        edited_detail = _edited_detail_layer(edited_detail_png, target_px)
+        return _compose_line_layers(outer, edited_detail)
+    return composed
 
 
 def _line_art(
@@ -375,21 +411,74 @@ def _line_art(
     detail_cleanup: int,
     print_scale: bool,
 ) -> Image.Image:
+    composed, _outer, _detail = _line_art_layers(
+        image,
+        mask,
+        detail_lines,
+        outer_line_width=line_width,
+        detail_line_width=5 if print_scale else 3,
+        detail_cleanup=detail_cleanup,
+        print_scale=print_scale,
+    )
+    return composed
+
+
+def _line_art_layers(
+    image: Image.Image,
+    mask: Image.Image,
+    detail_lines: bool,
+    outer_line_width: int,
+    detail_line_width: int,
+    detail_cleanup: int,
+    print_scale: bool,
+) -> tuple[Image.Image, Image.Image, Image.Image]:
     mask_l = mask.convert("L")
     eroded = mask_l.filter(ImageFilter.MinFilter(3))
     boundary = Image.fromarray(np.maximum(0, np.asarray(mask_l, dtype=np.int16) - np.asarray(eroded, dtype=np.int16)).astype(np.uint8), mode="L")
-    line = Image.new("RGB", image.size, "white")
-    draw = ImageDraw.Draw(line)
+    outer = _transparent_line_layer(boundary.filter(ImageFilter.MaxFilter(outer_line_width)))
+    detail = Image.new("RGBA", image.size, (255, 255, 255, 0))
 
     if detail_lines:
-        detail = _detail_line_mask(image, mask_l, detail_cleanup, print_scale)
-        detail_width = 5 if print_scale else 3
-        if detail_width > 1:
-            detail = detail.filter(ImageFilter.MaxFilter(detail_width))
-        line.paste(DETAIL_LINE_COLOR, mask=detail)
+        detail_mask = _detail_line_mask(image, mask_l, detail_cleanup, print_scale)
+        if detail_line_width > 1:
+            detail_mask = detail_mask.filter(ImageFilter.MaxFilter(_odd_filter_size(detail_line_width)))
+        detail = _transparent_line_layer(detail_mask)
 
-    draw.bitmap((0, 0), boundary.filter(ImageFilter.MaxFilter(line_width)), fill=(0, 0, 0))
-    return line
+    return _compose_line_layers(outer, detail), outer, detail
+
+
+def _transparent_line_layer(mask: Image.Image) -> Image.Image:
+    layer = Image.new("RGBA", mask.size, BLACK_LINE_COLOR)
+    layer.putalpha(mask.convert("L"))
+    return layer
+
+
+def _compose_line_layers(outer: Image.Image, detail: Image.Image) -> Image.Image:
+    base = Image.new("RGBA", outer.size, (255, 255, 255, 255))
+    base.alpha_composite(detail.convert("RGBA"))
+    base.alpha_composite(outer.convert("RGBA"))
+    return base.convert("RGB")
+
+
+def _edited_detail_layer(edited_detail_png: bytes, target_size: tuple[int, int]) -> Image.Image:
+    try:
+        if edited_detail_png.startswith(b"data:image"):
+            payload = edited_detail_png.decode("utf-8")
+            edited_detail_png = base64.b64decode(payload.split(",", 1)[1])
+        layer = Image.open(io.BytesIO(edited_detail_png)).convert("RGBA")
+    except Exception as exc:
+        raise ValueError("Edited detail layer must be a readable PNG image.") from exc
+    if layer.size != target_size:
+        layer = layer.resize(target_size, Image.Resampling.LANCZOS)
+    alpha = layer.getchannel("A")
+    dark = layer.convert("L").point(lambda px: 255 if px < 230 else 0)
+    mask = Image.fromarray(np.minimum(np.asarray(alpha), np.asarray(dark)).astype(np.uint8), mode="L")
+    return _transparent_line_layer(mask)
+
+
+def _odd_filter_size(size: int) -> int:
+    size = max(1, size)
+    return size if size % 2 == 1 else size + 1
 
 
 def _detail_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:

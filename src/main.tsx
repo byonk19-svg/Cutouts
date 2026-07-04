@@ -1,9 +1,11 @@
-import { StrictMode, useState, type ReactNode } from "react";
+import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, FileImage, FileText, RefreshCw, SlidersHorizontal, SwatchBook } from "lucide-react";
+import { Download, Eraser, Eye, FileImage, FileText, Pencil, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Undo2 } from "lucide-react";
 import "./styles.css";
 
 type TraceMode = "outline" | "paint" | "extra";
+type EditorTool = "erase" | "draw";
+type BrushSize = "small" | "medium" | "large";
 
 type Settings = {
   finishedHeightIn: number;
@@ -37,6 +39,11 @@ type Analysis = {
   tileRows: number;
   tileCount: number;
   previewPngDataUrl: string;
+  outerLinePngDataUrl: string;
+  detailLinePngDataUrl: string;
+  paintGuidePngDataUrl: string;
+  previewWidthPx: number;
+  previewHeightPx: number;
   palette: PaletteColor[];
 };
 
@@ -57,11 +64,32 @@ function App() {
   const [traceMode, setTraceMode] = useState<TraceMode>("paint");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorTool, setEditorTool] = useState<EditorTool>("erase");
+  const [brushSize, setBrushSize] = useState<BrushSize>("medium");
+  const [showReference, setShowReference] = useState(false);
+  const [referenceOpacity, setReferenceOpacity] = useState(35);
+  const [history, setHistory] = useState<string[]>([]);
+  const [editedDetailDataUrl, setEditedDetailDataUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawingRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
+
+  useEffect(() => {
+    setEditorOpen(false);
+    setHistory([]);
+    setEditedDetailDataUrl(null);
+  }, [analysis]);
+
+  useEffect(() => {
+    if (!analysis || !editorOpen) return;
+    loadDetailCanvas(editedDetailDataUrl ?? analysis.detailLinePngDataUrl);
+  }, [analysis, editorOpen, editedDetailDataUrl]);
 
   async function analyze(nextSettings = settings) {
     if (!image) return;
@@ -75,6 +103,9 @@ function App() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to analyze image.");
       setAnalysis(body);
+      setEditorOpen(false);
+      setHistory([]);
+      setEditedDetailDataUrl(null);
     } catch (err) {
       setAnalysis(null);
       setError(err instanceof Error ? err.message : "Unable to analyze image.");
@@ -91,6 +122,8 @@ function App() {
       const payload = new FormData();
       payload.append("image", image);
       payload.append("settings", JSON.stringify(settings));
+      const editedDetail = currentDetailDataUrl();
+      if (editedDetail) payload.append("editedDetail", editedDetail);
       const response = await fetch("/api/export", { method: "POST", body: payload });
       if (!response.ok) {
         const body = await response.json();
@@ -126,6 +159,102 @@ function App() {
   function updateInteriorDetail(value: number) {
     updateSetting("detailCleanup", 100 - value);
     setTraceMode("paint");
+  }
+
+  function loadDetailCanvas(src: string) {
+    const canvas = detailCanvasRef.current;
+    if (!canvas) return;
+    const image = new Image();
+    image.onload = () => {
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0);
+    };
+    image.src = src;
+  }
+
+  function currentDetailDataUrl() {
+    const canvas = detailCanvasRef.current;
+    if (!canvas || !analysis) return editedDetailDataUrl;
+    return canvas.toDataURL("image/png");
+  }
+
+  function saveHistorySnapshot() {
+    const current = currentDetailDataUrl();
+    if (!current) return;
+    setHistory((items) => [...items.slice(-19), current]);
+  }
+
+  function undoDetailEdit() {
+    const previous = history[history.length - 1];
+    if (!previous) return;
+    setHistory((items) => items.slice(0, -1));
+    setEditedDetailDataUrl(previous);
+    loadDetailCanvas(previous);
+  }
+
+  function resetDetailLayer() {
+    if (!analysis) return;
+    saveHistorySnapshot();
+    setEditedDetailDataUrl(null);
+    loadDetailCanvas(analysis.detailLinePngDataUrl);
+  }
+
+  function beginStroke(event: PointerEvent<HTMLCanvasElement>) {
+    if (!analysis) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    saveHistorySnapshot();
+    drawingRef.current = true;
+    const point = canvasPoint(event);
+    lastPointRef.current = point;
+    drawStrokeSegment(point, point);
+  }
+
+  function continueStroke(event: PointerEvent<HTMLCanvasElement>) {
+    if (!drawingRef.current) return;
+    const point = canvasPoint(event);
+    const previous = lastPointRef.current ?? point;
+    drawStrokeSegment(previous, point);
+    lastPointRef.current = point;
+  }
+
+  function endStroke(event: PointerEvent<HTMLCanvasElement>) {
+    if (drawingRef.current) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      setEditedDetailDataUrl(event.currentTarget.toDataURL("image/png"));
+    }
+    drawingRef.current = false;
+    lastPointRef.current = null;
+  }
+
+  function canvasPoint(event: PointerEvent<HTMLCanvasElement>) {
+    const canvas = event.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((event.clientY - rect.top) / rect.height) * canvas.height
+    };
+  }
+
+  function drawStrokeSegment(from: { x: number; y: number }, to: { x: number; y: number }) {
+    const canvas = detailCanvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.save();
+    context.globalCompositeOperation = editorTool === "erase" ? "destination-out" : "source-over";
+    context.strokeStyle = "#000000";
+    context.lineWidth = brushPixels(brushSize);
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.beginPath();
+    context.moveTo(from.x, from.y);
+    context.lineTo(to.x, to.y);
+    context.stroke();
+    context.restore();
   }
 
   return (
@@ -172,16 +301,16 @@ function App() {
           <div className="choice-group" aria-label="Trace style">
             <span className="choice-label">Trace style</span>
             <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
-              <strong>Cut outline</strong>
+              <strong>Cut Only</strong>
               <small>Outer shape only</small>
             </button>
             <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
-              <strong>Paint tracing</strong>
-              <small>Clean inside lines</small>
+              <strong>Clean Character Template</strong>
+              <small>Simple black feature lines</small>
             </button>
             <button className={traceMode === "extra" ? "choice selected" : "choice"} onClick={() => applyTraceMode("extra")}>
-              <strong>More detail</strong>
-              <small>Shows smaller lines</small>
+              <strong>Detailed Paint Map</strong>
+              <small>More color boundaries</small>
             </button>
           </div>
 
@@ -218,14 +347,87 @@ function App() {
           {analysis ? (
             <div className="page-preview">
               <div className="preview-strip">
-                <span>Trace preview</span>
+                <span>{editorOpen ? "Clean Template Editor" : "Trace preview"}</span>
                 <span>{analysis.tileCols} x {analysis.tileRows} pages</span>
               </div>
-              <img src={analysis.previewPngDataUrl} alt="Generated cut line preview" />
+              {editorOpen ? (
+                <div className="editor-wrap">
+                  <div className="editor-tools" aria-label="Template editor tools">
+                    <SegmentedButton
+                      selected={editorTool === "erase"}
+                      onClick={() => setEditorTool("erase")}
+                      icon={<Eraser size={15} />}
+                      label="Erase details"
+                    />
+                    <SegmentedButton
+                      selected={editorTool === "draw"}
+                      onClick={() => setEditorTool("draw")}
+                      icon={<Pencil size={15} />}
+                      label="Draw details"
+                    />
+                    <select value={brushSize} onChange={(event) => setBrushSize(event.target.value as BrushSize)} aria-label="Brush size">
+                      <option value="small">Small brush</option>
+                      <option value="medium">Medium brush</option>
+                      <option value="large">Large brush</option>
+                    </select>
+                    <button className="tool-button" onClick={undoDetailEdit} disabled={history.length === 0}>
+                      <Undo2 size={15} />
+                      Undo
+                    </button>
+                    <button className="tool-button" onClick={resetDetailLayer}>
+                      <RotateCcw size={15} />
+                      Reset details
+                    </button>
+                    <button className={showReference ? "tool-button selected" : "tool-button"} onClick={() => setShowReference((shown) => !shown)}>
+                      <Eye size={15} />
+                      Show original
+                    </button>
+                    {showReference ? (
+                      <label className="opacity-control">
+                        <span>Opacity</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={referenceOpacity}
+                          onChange={(event) => setReferenceOpacity(Number(event.target.value))}
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                  <div className="template-editor" style={{ aspectRatio: `${analysis.previewWidthPx} / ${analysis.previewHeightPx}` }}>
+                    {showReference ? (
+                      <img
+                        src={analysis.paintGuidePngDataUrl}
+                        alt=""
+                        className="reference-layer"
+                        style={{ opacity: referenceOpacity / 100 }}
+                      />
+                    ) : null}
+                    <canvas
+                      ref={detailCanvasRef}
+                      className="detail-line-layer"
+                      width={analysis.previewWidthPx}
+                      height={analysis.previewHeightPx}
+                      onPointerDown={beginStroke}
+                      onPointerMove={continueStroke}
+                      onPointerUp={endStroke}
+                      onPointerCancel={endStroke}
+                      aria-label="Editable interior detail lines"
+                    />
+                    <img src={analysis.outerLinePngDataUrl} alt="" className="outer-line-layer" draggable={false} />
+                  </div>
+                </div>
+              ) : (
+                <img src={analysis.previewPngDataUrl} alt="Generated cut line preview" />
+              )}
               <div className="tile-hint">
                 {Array.from({ length: Math.min(analysis.tileCount, 12) }, (_, index) => (
                   <span key={index}>{index + 1}</span>
                 ))}
+                <button className="edit-toggle" onClick={() => setEditorOpen((open) => !open)}>
+                  {editorOpen ? "Preview template" : "Edit Template"}
+                </button>
               </div>
             </div>
           ) : (
@@ -275,6 +477,31 @@ function App() {
         </aside>
       </section>
     </main>
+  );
+}
+
+function brushPixels(size: BrushSize) {
+  if (size === "small") return 10;
+  if (size === "large") return 34;
+  return 20;
+}
+
+function SegmentedButton({
+  selected,
+  onClick,
+  icon,
+  label
+}: {
+  selected: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+  label: string;
+}) {
+  return (
+    <button className={selected ? "tool-button selected" : "tool-button"} onClick={onClick}>
+      {icon}
+      {label}
+    </button>
   );
 }
 

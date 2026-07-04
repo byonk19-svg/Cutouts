@@ -38,6 +38,14 @@ The small set of representative colors extracted from a source image for paintin
 
 An optional interior line printed on the template to help trace paint boundaries or character details. Detail lines can be shown or hidden because too many extracted image edges can make a template harder to use.
 
+### Clean Template Editor
+
+The manual cleanup step after automatic tracing. The editor locks the outer cut line and lets the maker erase or draw only the interior detail layer before exporting the tiled PDF. This exists because Etsy-style craft templates are cleaned-up line art, not raw automatic image traces.
+
+### Feature Line
+
+A deliberate interior line that helps the maker transfer important character features such as eyes, mouth, clothing seams, hands, boots, hair outline, or accessories. Feature lines are separate from paint-region boundaries and should remain black-and-white on trace pages.
+
 ### Source Image
 
 The image provided by the maker as the basis for a cutout template. In the first version, a source image is expected to contain one clear subject on a simple background.
