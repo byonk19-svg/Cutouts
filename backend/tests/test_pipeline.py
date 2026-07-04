@@ -49,6 +49,19 @@ def noisy_detail_fixture() -> tuple[Image.Image, Image.Image]:
     return image, mask
 
 
+def broad_color_detail_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGBA", (180, 220), (255, 255, 255, 0))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((35, 24, 145, 196), radius=32, fill=255)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((35, 24, 145, 196), radius=32, fill=(214, 64, 50, 255))
+    draw.ellipse((62, 62, 96, 96), fill=(252, 227, 82, 255))
+    draw.ellipse((102, 62, 136, 96), fill=(37, 92, 162, 255))
+    draw.rectangle((76, 132, 112, 190), fill=(55, 128, 70, 255))
+    return image, mask
+
+
 class PrintPipelineTest(unittest.TestCase):
     def test_analyze_transparent_image_returns_preview_and_tile_summary(self) -> None:
         settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
@@ -131,6 +144,13 @@ class PrintPipelineTest(unittest.TestCase):
         noisy_gray_pixels = self._count_gray_detail_pixels(noisy)
         cleaned_gray_pixels = self._count_gray_detail_pixels(cleaned)
         self.assertLess(cleaned_gray_pixels, noisy_gray_pixels // 2)
+
+    def test_high_detail_cleanup_keeps_broad_color_boundaries(self) -> None:
+        image, mask = broad_color_detail_fixture()
+
+        cleaned = _line_art(image, mask, True, line_width=3, detail_cleanup=90, print_scale=False)
+
+        self.assertGreater(self._count_gray_detail_pixels(cleaned), 1000)
 
     def _count_gray_detail_pixels(self, image: Image.Image) -> int:
         return sum(1 for pixel in list(image.get_flattened_data()) if pixel == (180, 180, 180))

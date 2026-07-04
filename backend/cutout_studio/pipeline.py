@@ -390,13 +390,25 @@ def _line_art(
 
 
 def _detail_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
-    gray = image.convert("L")
-    blur_radius = 0.6 + (cleanup / 100) * (1.8 if print_scale else 1.2)
-    edge_threshold = 42 + round((cleanup / 100) * 118)
-    gray = gray.filter(ImageFilter.GaussianBlur(radius=blur_radius)).filter(ImageFilter.FIND_EDGES)
-    detail_arr = (np.asarray(gray) > edge_threshold) & (np.asarray(mask.convert("L")) > 0)
+    blur_radius = 0.3 + (cleanup / 100) * (1.0 if print_scale else 0.75)
+    smoothed = image.convert("RGB").filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    rgb = np.asarray(smoothed, dtype=float)
+    mask_arr = np.asarray(mask.convert("L")) > 0
+    threshold = 16 + round((cleanup / 100) * 44)
+
+    detail_arr = np.zeros(mask_arr.shape, dtype=bool)
+    horizontal_delta = np.linalg.norm(rgb[:, 1:, :] - rgb[:, :-1, :], axis=2)
+    vertical_delta = np.linalg.norm(rgb[1:, :, :] - rgb[:-1, :, :], axis=2)
+    horizontal_edges = horizontal_delta > threshold
+    vertical_edges = vertical_delta > threshold
+    detail_arr[:, 1:] |= horizontal_edges
+    detail_arr[:, :-1] |= horizontal_edges
+    detail_arr[1:, :] |= vertical_edges
+    detail_arr[:-1, :] |= vertical_edges
+    detail_arr &= mask_arr
+
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
-    min_area = 4 + round((cleanup / 100) * (180 if print_scale else 42))
+    min_area = 3 + round((cleanup / 100) * (36 if print_scale else 8))
     if min_area > 4:
         detail = _remove_small_components(detail, min_area)
     return detail
