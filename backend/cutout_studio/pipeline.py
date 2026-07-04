@@ -538,6 +538,9 @@ def _detail_line_mask(
     detail_arr[:-1, :] |= vertical_edges
     detail_arr &= mask_arr
 
+    if template_style == "clean":
+        detail_arr |= _dark_feature_arr(work_image, work_mask, cleanup)
+
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
     min_area = 4 + round((cleanup / 100) * (110 if print_scale else 28))
     if template_style == "clean":
@@ -547,6 +550,20 @@ def _detail_line_mask(
     if detail.size != original_size:
         detail = detail.resize(original_size, Image.Resampling.NEAREST)
     return detail
+
+
+def _dark_feature_arr(image: Image.Image, mask: Image.Image, cleanup: int) -> np.ndarray:
+    mask_l = mask.convert("L")
+    mask_arr = np.asarray(mask_l) > 0
+    inner_mask = np.asarray(mask_l.filter(ImageFilter.MinFilter(9))) > 0
+    edge_band = mask_arr & ~inner_mask
+    gray = np.asarray(image.convert("L"), dtype=np.uint8)
+    dark_threshold = 92 + round(((100 - cleanup) / 100) * 30)
+    dark = (gray < dark_threshold) & mask_arr & ~edge_band
+    dark_mask = Image.fromarray(dark.astype(np.uint8) * 255, mode="L")
+    dark_mask = _remove_small_components(dark_mask, 10 + round((cleanup / 100) * 18))
+    dark_mask = dark_mask.filter(ImageFilter.MaxFilter(3))
+    return np.asarray(dark_mask.convert("L")) > 0
 
 
 def _detail_work_image(image: Image.Image, mask: Image.Image) -> tuple[Image.Image, Image.Image, tuple[int, int]]:

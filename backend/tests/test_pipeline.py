@@ -78,6 +78,20 @@ def smooth_gradient_fixture() -> tuple[Image.Image, Image.Image]:
     return image, mask
 
 
+def dark_feature_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGBA", (180, 220), (255, 255, 255, 0))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((35, 24, 145, 196), radius=32, fill=255)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((35, 24, 145, 196), radius=32, fill=(230, 205, 145, 255))
+    draw.ellipse((62, 70, 76, 88), outline=(10, 10, 10, 255), width=3)
+    draw.ellipse((104, 70, 118, 88), outline=(10, 10, 10, 255), width=3)
+    draw.arc((76, 104, 114, 132), start=15, end=165, fill=(10, 10, 10, 255), width=3)
+    draw.line((86, 92, 90, 102), fill=(10, 10, 10, 255), width=2)
+    return image, mask
+
+
 class PrintPipelineTest(unittest.TestCase):
     def test_analyze_transparent_image_returns_preview_and_tile_summary(self) -> None:
         settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
@@ -193,6 +207,13 @@ class PrintPipelineTest(unittest.TestCase):
 
         self.assertLess(self._count_mask_pixels(clean), self._count_mask_pixels(detailed) // 3)
 
+    def test_clean_template_style_recovers_dark_character_features(self) -> None:
+        image, mask = dark_feature_fixture()
+
+        clean = _detail_line_mask(image, mask, cleanup=92, print_scale=False, template_style="clean")
+
+        self.assertGreater(self._count_region_pixels(clean, (58, 66, 122, 136)), 120)
+
     def test_printable_line_art_is_black_and_white_only(self) -> None:
         image, mask = broad_color_detail_fixture()
 
@@ -217,6 +238,9 @@ class PrintPipelineTest(unittest.TestCase):
 
     def _count_mask_pixels(self, image: Image.Image) -> int:
         return sum(1 for pixel in list(image.convert("L").get_flattened_data()) if pixel > 0)
+
+    def _count_region_pixels(self, image: Image.Image, box: tuple[int, int, int, int]) -> int:
+        return self._count_mask_pixels(image.crop(box))
 
 
 if __name__ == "__main__":
