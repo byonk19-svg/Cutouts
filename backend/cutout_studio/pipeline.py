@@ -563,8 +563,15 @@ def _dark_feature_arr(image: Image.Image, mask: Image.Image, cleanup: int) -> np
     dark_mask = Image.fromarray(dark.astype(np.uint8) * 255, mode="L")
     dark_mask = _remove_small_components(dark_mask, 10 + round((cleanup / 100) * 18))
     dark_mask = _keep_traceable_dark_components(dark_mask, mask_l)
-    dark_mask = dark_mask.filter(ImageFilter.MaxFilter(3))
+    dark_mask = _component_outline_mask(dark_mask).filter(ImageFilter.MaxFilter(3))
     return np.asarray(dark_mask.convert("L")) > 0
+
+
+def _component_outline_mask(mask: Image.Image) -> Image.Image:
+    mask_l = mask.convert("L")
+    eroded = mask_l.filter(ImageFilter.MinFilter(3))
+    outline = np.maximum(0, np.asarray(mask_l, dtype=np.int16) - np.asarray(eroded, dtype=np.int16))
+    return Image.fromarray(outline.astype(np.uint8), mode="L")
 
 
 def _keep_traceable_dark_components(mask: Image.Image, subject_mask: Image.Image) -> Image.Image:
