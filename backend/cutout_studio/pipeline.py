@@ -33,6 +33,7 @@ class TemplateSettings:
     speck_area: int = 60
     hole_area: int = 220
     detail_lines: bool = True
+    detail_cleanup: int = 70
     palette_size: int = 6
 
     @classmethod
@@ -44,6 +45,7 @@ class TemplateSettings:
             speck_area=_bounded_int(data.get("speckArea"), 0, 2000, cls.speck_area),
             hole_area=_bounded_int(data.get("holeArea"), 0, 5000, cls.hole_area),
             detail_lines=bool(data.get("detailLines", cls.detail_lines)),
+            detail_cleanup=_bounded_int(data.get("detailCleanup"), 0, 100, cls.detail_cleanup),
             palette_size=_bounded_int(data.get("paletteSize"), 2, 12, cls.palette_size),
         )
 
@@ -327,7 +329,14 @@ def _mask_bounds(mask: Image.Image) -> tuple[int, int, int, int]:
 
 
 def _make_preview(image: Image.Image, mask: Image.Image, settings: TemplateSettings) -> bytes:
-    line = _line_art(image, mask, settings.detail_lines, line_width=3)
+    line = _line_art(
+        image,
+        mask,
+        settings.detail_lines,
+        line_width=3,
+        detail_cleanup=settings.detail_cleanup,
+        print_scale=False,
+    )
     line.thumbnail((PREVIEW_MAX_PX, PREVIEW_MAX_PX))
     out = io.BytesIO()
     line.save(out, format="PNG")
@@ -347,10 +356,24 @@ def _make_trace_image(
     if settings.smoothing > 0:
         scaled_mask = scaled_mask.filter(ImageFilter.GaussianBlur(radius=max(1, settings.smoothing * 2)))
     scaled_mask = scaled_mask.point(lambda px: 255 if px >= 128 else 0)
-    return _line_art(scaled_image, scaled_mask, settings.detail_lines, line_width=9)
+    return _line_art(
+        scaled_image,
+        scaled_mask,
+        settings.detail_lines,
+        line_width=9,
+        detail_cleanup=settings.detail_cleanup,
+        print_scale=True,
+    )
 
 
-def _line_art(image: Image.Image, mask: Image.Image, detail_lines: bool, line_width: int) -> Image.Image:
+def _line_art(
+    image: Image.Image,
+    mask: Image.Image,
+    detail_lines: bool,
+    line_width: int,
+    detail_cleanup: int,
+    print_scale: bool,
+) -> Image.Image:
     mask_l = mask.convert("L")
     eroded = mask_l.filter(ImageFilter.MinFilter(3))
     boundary = Image.fromarray(np.maximum(0, np.asarray(mask_l, dtype=np.int16) - np.asarray(eroded, dtype=np.int16)).astype(np.uint8), mode="L")
@@ -358,13 +381,25 @@ def _line_art(image: Image.Image, mask: Image.Image, detail_lines: bool, line_wi
     draw = ImageDraw.Draw(line)
 
     if detail_lines:
-        gray = image.convert("L").filter(ImageFilter.FIND_EDGES)
-        detail = Image.fromarray(((np.asarray(gray) > 38) & (np.asarray(mask_l) > 0)).astype(np.uint8) * 255, mode="L")
+        detail = _detail_line_mask(image, mask_l, detail_cleanup, print_scale)
         detail = detail.filter(ImageFilter.MaxFilter(max(3, line_width // 2 * 2 + 1)))
         line.paste((180, 180, 180), mask=detail)
 
     draw.bitmap((0, 0), boundary.filter(ImageFilter.MaxFilter(line_width)), fill=(0, 0, 0))
     return line
+
+
+def _detail_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
+    gray = image.convert("L")
+    blur_radius = 0.6 + (cleanup / 100) * (1.8 if print_scale else 1.2)
+    edge_threshold = 42 + round((cleanup / 100) * 118)
+    gray = gray.filter(ImageFilter.GaussianBlur(radius=blur_radius)).filter(ImageFilter.FIND_EDGES)
+    detail_arr = (np.asarray(gray) > edge_threshold) & (np.asarray(mask.convert("L")) > 0)
+    detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
+    min_area = 4 + round((cleanup / 100) * (180 if print_scale else 42))
+    if min_area > 4:
+        detail = _remove_small_components(detail, min_area)
+    return detail
 
 
 def _draw_overview_page(

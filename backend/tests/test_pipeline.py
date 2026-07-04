@@ -12,6 +12,7 @@ from backend.cutout_studio.pipeline import (
     load_paint_catalog,
     match_paints,
     tile_grid,
+    _line_art,
 )
 
 
@@ -32,6 +33,20 @@ def white_background_fixture() -> bytes:
     out = io.BytesIO()
     image.save(out, format="JPEG", quality=95)
     return out.getvalue()
+
+
+def noisy_detail_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGBA", (180, 220), (255, 255, 255, 0))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((35, 24, 145, 196), radius=32, fill=255)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((35, 24, 145, 196), radius=32, fill=(222, 196, 62, 255))
+    for x in range(40, 140, 7):
+        for y in range(30, 190, 11):
+            color = (138, 122, 54, 255) if (x + y) % 3 else (244, 232, 125, 255)
+            draw.point((x, y), fill=color)
+    return image, mask
 
 
 class PrintPipelineTest(unittest.TestCase):
@@ -106,6 +121,19 @@ class PrintPipelineTest(unittest.TestCase):
 
         self.assertLessEqual(len(palette), 2)
         self.assertGreater(len(palette[0].matches), 0)
+
+    def test_detail_cleanup_reduces_noisy_interior_lines(self) -> None:
+        image, mask = noisy_detail_fixture()
+
+        noisy = _line_art(image, mask, True, line_width=3, detail_cleanup=0, print_scale=False)
+        cleaned = _line_art(image, mask, True, line_width=3, detail_cleanup=100, print_scale=False)
+
+        noisy_gray_pixels = self._count_gray_detail_pixels(noisy)
+        cleaned_gray_pixels = self._count_gray_detail_pixels(cleaned)
+        self.assertLess(cleaned_gray_pixels, noisy_gray_pixels // 2)
+
+    def _count_gray_detail_pixels(self, image: Image.Image) -> int:
+        return sum(1 for pixel in list(image.get_flattened_data()) if pixel == (180, 180, 180))
 
 
 if __name__ == "__main__":

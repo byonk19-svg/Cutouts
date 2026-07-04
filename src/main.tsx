@@ -10,6 +10,7 @@ type Settings = {
   speckArea: number;
   holeArea: number;
   detailLines: boolean;
+  detailCleanup: number;
   paletteSize: number;
 };
 
@@ -44,6 +45,7 @@ const defaultSettings: Settings = {
   speckArea: 60,
   holeArea: 220,
   detailLines: true,
+  detailCleanup: 70,
   paletteSize: 6
 };
 
@@ -164,6 +166,15 @@ function App() {
             />
             <span>Show interior detail lines</span>
           </label>
+          {settings.detailLines ? (
+            <RangeField
+              label="Detail cleanup"
+              min={0}
+              max={100}
+              value={settings.detailCleanup}
+              onChange={(value) => updateSetting("detailCleanup", value)}
+            />
+          ) : null}
 
           <button className="secondary-action" onClick={() => analyze()} disabled={!canAnalyze}>
             <RefreshCw size={17} />
