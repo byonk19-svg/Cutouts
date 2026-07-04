@@ -105,18 +105,24 @@ def _parse_multipart(body: bytes, content_type: str) -> dict[str, bytes]:
     fields: dict[str, bytes] = {}
 
     for raw_part in body.split(delimiter):
-        part = raw_part.strip()
-        if not part or part == b"--":
+        part = raw_part
+        if not part or part in (b"--", b"--\r\n"):
             continue
+        if part.startswith(b"\r\n"):
+            part = part[2:]
+        if part.endswith(b"--\r\n"):
+            part = part[:-4]
         if part.endswith(b"--"):
-            part = part[:-2].strip()
+            part = part[:-2]
+        if part.endswith(b"\r\n"):
+            part = part[:-2]
         if b"\r\n\r\n" not in part:
             continue
         header_blob, value = part.split(b"\r\n\r\n", 1)
         headers = header_blob.decode("latin-1")
         name = _field_name(headers)
         if name:
-            fields[name] = value.rstrip(b"\r\n")
+            fields[name] = value
     return fields
 
 
