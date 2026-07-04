@@ -150,7 +150,10 @@ class PrintPipelineTest(unittest.TestCase):
 
         cleaned = _line_art(image, mask, True, line_width=3, detail_cleanup=90, print_scale=False)
 
-        self.assertGreater(self._count_gray_detail_pixels(cleaned), 1000)
+        gray_pixels = self._count_gray_detail_pixels(cleaned)
+        subject_pixels = sum(1 for pixel in list(mask.get_flattened_data()) if pixel > 0)
+        self.assertGreater(gray_pixels, 1000)
+        self.assertLess(gray_pixels, subject_pixels * 0.2)
 
     def _count_gray_detail_pixels(self, image: Image.Image) -> int:
         return sum(1 for pixel in list(image.get_flattened_data()) if pixel == (180, 180, 180))

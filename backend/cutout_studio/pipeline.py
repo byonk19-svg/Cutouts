@@ -382,7 +382,9 @@ def _line_art(
 
     if detail_lines:
         detail = _detail_line_mask(image, mask_l, detail_cleanup, print_scale)
-        detail = detail.filter(ImageFilter.MaxFilter(max(3, line_width // 2 * 2 + 1)))
+        detail_width = 3 if print_scale else 1
+        if detail_width > 1:
+            detail = detail.filter(ImageFilter.MaxFilter(detail_width))
         line.paste((180, 180, 180), mask=detail)
 
     draw.bitmap((0, 0), boundary.filter(ImageFilter.MaxFilter(line_width)), fill=(0, 0, 0))
@@ -390,17 +392,16 @@ def _line_art(
 
 
 def _detail_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
-    blur_radius = 0.3 + (cleanup / 100) * (1.0 if print_scale else 0.75)
+    blur_radius = 0.8 + (cleanup / 100) * (1.6 if print_scale else 1.2)
     smoothed = image.convert("RGB").filter(ImageFilter.GaussianBlur(radius=blur_radius))
-    rgb = np.asarray(smoothed, dtype=float)
+    rgb = np.asarray(smoothed, dtype=np.uint8)
     mask_arr = np.asarray(mask.convert("L")) > 0
-    threshold = 16 + round((cleanup / 100) * 44)
+    bucket_size = 28 + round((cleanup / 100) * 72)
+    quantized = rgb // bucket_size
 
     detail_arr = np.zeros(mask_arr.shape, dtype=bool)
-    horizontal_delta = np.linalg.norm(rgb[:, 1:, :] - rgb[:, :-1, :], axis=2)
-    vertical_delta = np.linalg.norm(rgb[1:, :, :] - rgb[:-1, :, :], axis=2)
-    horizontal_edges = horizontal_delta > threshold
-    vertical_edges = vertical_delta > threshold
+    horizontal_edges = np.any(quantized[:, 1:, :] != quantized[:, :-1, :], axis=2)
+    vertical_edges = np.any(quantized[1:, :, :] != quantized[:-1, :, :], axis=2)
     detail_arr[:, 1:] |= horizontal_edges
     detail_arr[:, :-1] |= horizontal_edges
     detail_arr[1:, :] |= vertical_edges
@@ -408,7 +409,7 @@ def _detail_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print
     detail_arr &= mask_arr
 
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
-    min_area = 3 + round((cleanup / 100) * (36 if print_scale else 8))
+    min_area = 4 + round((cleanup / 100) * (70 if print_scale else 18))
     if min_area > 4:
         detail = _remove_small_components(detail, min_area)
     return detail
