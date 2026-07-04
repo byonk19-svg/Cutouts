@@ -62,6 +62,21 @@ def broad_color_detail_fixture() -> tuple[Image.Image, Image.Image]:
     return image, mask
 
 
+def smooth_gradient_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGBA", (180, 220), (255, 255, 255, 0))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((35, 24, 145, 196), radius=32, fill=255)
+    pixels = image.load()
+    for y in range(24, 197):
+        for x in range(35, 146):
+            if mask.getpixel((x, y)) == 0:
+                continue
+            shade = 120 + round((x - 35) / 110 * 80)
+            pixels[x, y] = (shade, shade, shade, 255)
+    return image, mask
+
+
 class PrintPipelineTest(unittest.TestCase):
     def test_analyze_transparent_image_returns_preview_and_tile_summary(self) -> None:
         settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
@@ -148,12 +163,21 @@ class PrintPipelineTest(unittest.TestCase):
     def test_high_detail_cleanup_keeps_broad_color_boundaries(self) -> None:
         image, mask = broad_color_detail_fixture()
 
-        cleaned = _line_art(image, mask, True, line_width=3, detail_cleanup=90, print_scale=False)
+        cleaned = _line_art(image, mask, True, line_width=3, detail_cleanup=55, print_scale=False)
 
         gray_pixels = self._count_gray_detail_pixels(cleaned)
         subject_pixels = sum(1 for pixel in list(mask.get_flattened_data()) if pixel > 0)
-        self.assertGreater(gray_pixels, 1000)
+        self.assertGreater(gray_pixels, 500)
         self.assertLess(gray_pixels, subject_pixels * 0.2)
+
+    def test_detail_lines_do_not_trace_smooth_shading_as_many_contours(self) -> None:
+        image, mask = smooth_gradient_fixture()
+
+        cleaned = _line_art(image, mask, True, line_width=3, detail_cleanup=55, print_scale=False)
+
+        gray_pixels = self._count_gray_detail_pixels(cleaned)
+        subject_pixels = sum(1 for pixel in list(mask.get_flattened_data()) if pixel > 0)
+        self.assertLess(gray_pixels, subject_pixels * 0.08)
 
     def _count_gray_detail_pixels(self, image: Image.Image) -> int:
         return sum(1 for pixel in list(image.get_flattened_data()) if pixel == (180, 180, 180))

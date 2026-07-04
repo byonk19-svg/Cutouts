@@ -392,16 +392,31 @@ def _line_art(
 
 
 def _detail_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
-    blur_radius = 0.8 + (cleanup / 100) * (1.6 if print_scale else 1.2)
-    smoothed = image.convert("RGB").filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    work_image, work_mask, original_size = _detail_work_image(image, mask)
+    blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
+    smoothed = work_image.convert("RGB").filter(ImageFilter.GaussianBlur(radius=blur_radius))
     rgb = np.asarray(smoothed, dtype=np.uint8)
-    mask_arr = np.asarray(mask.convert("L")) > 0
-    bucket_size = 28 + round((cleanup / 100) * 72)
-    quantized = rgb // bucket_size
+    mask_arr = np.asarray(work_mask.convert("L")) > 0
+    cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
+    labels = _cluster_subject_colors(rgb, mask_arr, cluster_count)
 
     detail_arr = np.zeros(mask_arr.shape, dtype=bool)
-    horizontal_edges = np.any(quantized[:, 1:, :] != quantized[:, :-1, :], axis=2)
-    vertical_edges = np.any(quantized[1:, :, :] != quantized[:-1, :, :], axis=2)
+    rgb_float = rgb.astype(float)
+    local_threshold = 8 + round((cleanup / 100) * 12)
+    horizontal_delta = np.linalg.norm(rgb_float[:, 1:, :] - rgb_float[:, :-1, :], axis=2)
+    vertical_delta = np.linalg.norm(rgb_float[1:, :, :] - rgb_float[:-1, :, :], axis=2)
+    horizontal_edges = (
+        (labels[:, 1:] != labels[:, :-1])
+        & (labels[:, 1:] >= 0)
+        & (labels[:, :-1] >= 0)
+        & (horizontal_delta > local_threshold)
+    )
+    vertical_edges = (
+        (labels[1:, :] != labels[:-1, :])
+        & (labels[1:, :] >= 0)
+        & (labels[:-1, :] >= 0)
+        & (vertical_delta > local_threshold)
+    )
     detail_arr[:, 1:] |= horizontal_edges
     detail_arr[:, :-1] |= horizontal_edges
     detail_arr[1:, :] |= vertical_edges
@@ -409,10 +424,67 @@ def _detail_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print
     detail_arr &= mask_arr
 
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
-    min_area = 4 + round((cleanup / 100) * (70 if print_scale else 18))
+    min_area = 4 + round((cleanup / 100) * (110 if print_scale else 28))
     if min_area > 4:
         detail = _remove_small_components(detail, min_area)
+    if detail.size != original_size:
+        detail = detail.resize(original_size, Image.Resampling.NEAREST)
     return detail
+
+
+def _detail_work_image(image: Image.Image, mask: Image.Image) -> tuple[Image.Image, Image.Image, tuple[int, int]]:
+    original_size = image.size
+    max_edge = max(original_size)
+    if max_edge <= 1400:
+        return image, mask, original_size
+    scale = 1400 / max_edge
+    size = (max(1, round(original_size[0] * scale)), max(1, round(original_size[1] * scale)))
+    return image.resize(size, Image.Resampling.LANCZOS), mask.resize(size, Image.Resampling.NEAREST), original_size
+
+
+def _cluster_subject_colors(rgb: np.ndarray, mask_arr: np.ndarray, cluster_count: int) -> np.ndarray:
+    pixels = rgb[mask_arr].astype(float)
+    if len(pixels) == 0:
+        return np.full(mask_arr.shape, -1, dtype=np.int16)
+
+    if len(pixels) > 20000:
+        stride = max(1, len(pixels) // 20000)
+        sample = pixels[::stride]
+    else:
+        sample = pixels
+
+    centers = _initial_color_centers(sample, cluster_count)
+    for _ in range(7):
+        distances = np.linalg.norm(sample[:, None, :] - centers[None, :, :], axis=2)
+        sample_labels = np.argmin(distances, axis=1)
+        next_centers = centers.copy()
+        for idx in range(len(centers)):
+            members = sample[sample_labels == idx]
+            if len(members) > 0:
+                next_centers[idx] = members.mean(axis=0)
+        if np.allclose(centers, next_centers, atol=0.5):
+            break
+        centers = next_centers
+
+    labels = np.full(mask_arr.shape, -1, dtype=np.int16)
+    for start in range(0, rgb.shape[0], 160):
+        stop = min(rgb.shape[0], start + 160)
+        chunk = rgb[start:stop].astype(float)
+        distances = np.linalg.norm(chunk[:, :, None, :] - centers[None, None, :, :], axis=3)
+        chunk_labels = np.argmin(distances, axis=2).astype(np.int16)
+        labels[start:stop] = np.where(mask_arr[start:stop], chunk_labels, -1)
+    return labels
+
+
+def _initial_color_centers(sample: np.ndarray, cluster_count: int) -> np.ndarray:
+    quantized = (sample.astype(np.uint8) // 36) * 36 + 18
+    values, counts = np.unique(quantized, axis=0, return_counts=True)
+    order = np.argsort(counts)[::-1]
+    centers = values[order[:cluster_count]].astype(float)
+    if len(centers) >= cluster_count:
+        return centers
+    fallback = np.linspace(0, len(sample) - 1, cluster_count, dtype=int)
+    return sample[fallback].astype(float)
 
 
 def _draw_overview_page(
