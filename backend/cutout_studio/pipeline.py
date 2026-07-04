@@ -23,6 +23,7 @@ TILE_HEADER_IN = 0.42
 OVERLAP_IN = 0.25
 PREVIEW_MAX_PX = 960
 PRINT_DPI = 144
+DETAIL_LINE_COLOR = (118, 118, 118)
 
 
 @dataclass(frozen=True)
@@ -382,10 +383,10 @@ def _line_art(
 
     if detail_lines:
         detail = _detail_line_mask(image, mask_l, detail_cleanup, print_scale)
-        detail_width = 3 if print_scale else 1
+        detail_width = 5 if print_scale else 3
         if detail_width > 1:
             detail = detail.filter(ImageFilter.MaxFilter(detail_width))
-        line.paste((180, 180, 180), mask=detail)
+        line.paste(DETAIL_LINE_COLOR, mask=detail)
 
     draw.bitmap((0, 0), boundary.filter(ImageFilter.MaxFilter(line_width)), fill=(0, 0, 0))
     return line

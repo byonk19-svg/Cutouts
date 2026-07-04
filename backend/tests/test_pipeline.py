@@ -12,6 +12,7 @@ from backend.cutout_studio.pipeline import (
     load_paint_catalog,
     match_paints,
     tile_grid,
+    DETAIL_LINE_COLOR,
     _line_art,
 )
 
@@ -180,7 +181,7 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertLess(gray_pixels, subject_pixels * 0.08)
 
     def _count_gray_detail_pixels(self, image: Image.Image) -> int:
-        return sum(1 for pixel in list(image.get_flattened_data()) if pixel == (180, 180, 180))
+        return sum(1 for pixel in list(image.get_flattened_data()) if pixel == DETAIL_LINE_COLOR)
 
 
 if __name__ == "__main__":
