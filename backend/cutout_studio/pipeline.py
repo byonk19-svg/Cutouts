@@ -562,8 +562,34 @@ def _dark_feature_arr(image: Image.Image, mask: Image.Image, cleanup: int) -> np
     dark = (gray < dark_threshold) & mask_arr & ~edge_band
     dark_mask = Image.fromarray(dark.astype(np.uint8) * 255, mode="L")
     dark_mask = _remove_small_components(dark_mask, 10 + round((cleanup / 100) * 18))
+    dark_mask = _keep_traceable_dark_components(dark_mask, mask_l)
     dark_mask = dark_mask.filter(ImageFilter.MaxFilter(3))
     return np.asarray(dark_mask.convert("L")) > 0
+
+
+def _keep_traceable_dark_components(mask: Image.Image, subject_mask: Image.Image) -> Image.Image:
+    arr = np.asarray(mask.convert("L")) > 0
+    subject_pixels = int(np.count_nonzero(np.asarray(subject_mask.convert("L")) > 0))
+    max_area = max(900, round(subject_pixels * 0.025))
+    keep = np.zeros(arr.shape, dtype=bool)
+    visited = np.zeros(arr.shape, dtype=bool)
+    height, width = arr.shape
+    for y in range(height):
+        for x in range(width):
+            if visited[y, x] or not arr[y, x]:
+                continue
+            pixels = _flood(arr, visited, x, y, target=True)
+            if len(pixels) > max_area:
+                continue
+            xs = [px for px, _py in pixels]
+            ys = [py for _px, py in pixels]
+            component_width = max(xs) - min(xs) + 1
+            component_height = max(ys) - min(ys) + 1
+            if component_width > width * 0.45 or component_height > height * 0.45:
+                continue
+            for px, py in pixels:
+                keep[py, px] = True
+    return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 
 def _detail_work_image(image: Image.Image, mask: Image.Image) -> tuple[Image.Image, Image.Image, tuple[int, int]]:

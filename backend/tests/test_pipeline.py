@@ -92,6 +92,13 @@ def dark_feature_fixture() -> tuple[Image.Image, Image.Image]:
     return image, mask
 
 
+def dark_fill_with_features_fixture() -> tuple[Image.Image, Image.Image]:
+    image, mask = dark_feature_fixture()
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((52, 138, 128, 188), fill=(8, 8, 8, 255))
+    return image, mask
+
+
 class PrintPipelineTest(unittest.TestCase):
     def test_analyze_transparent_image_returns_preview_and_tile_summary(self) -> None:
         settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
@@ -213,6 +220,14 @@ class PrintPipelineTest(unittest.TestCase):
         clean = _detail_line_mask(image, mask, cleanup=92, print_scale=False, template_style="clean")
 
         self.assertGreater(self._count_region_pixels(clean, (58, 66, 122, 136)), 120)
+
+    def test_clean_template_style_does_not_fill_large_dark_regions(self) -> None:
+        image, mask = dark_fill_with_features_fixture()
+
+        clean = _detail_line_mask(image, mask, cleanup=92, print_scale=False, template_style="clean")
+
+        self.assertGreater(self._count_region_pixels(clean, (58, 66, 122, 136)), 120)
+        self.assertLess(self._count_region_pixels(clean, (52, 138, 128, 188)), 300)
 
     def test_printable_line_art_is_black_and_white_only(self) -> None:
         image, mask = broad_color_detail_fixture()
