@@ -86,7 +86,7 @@ def dark_feature_fixture() -> tuple[Image.Image, Image.Image]:
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle((35, 24, 145, 196), radius=32, fill=(230, 205, 145, 255))
     draw.ellipse((62, 70, 76, 88), outline=(10, 10, 10, 255), width=3)
-    draw.ellipse((104, 70, 118, 88), outline=(10, 10, 10, 255), width=3)
+    draw.ellipse((104, 70, 118, 88), fill=(10, 10, 10, 255))
     draw.arc((76, 104, 114, 132), start=15, end=165, fill=(10, 10, 10, 255), width=3)
     draw.line((86, 92, 90, 102), fill=(10, 10, 10, 255), width=2)
     return image, mask
@@ -220,6 +220,7 @@ class PrintPipelineTest(unittest.TestCase):
         clean = _detail_line_mask(image, mask, cleanup=92, print_scale=False, template_style="clean")
 
         self.assertGreater(self._count_region_pixels(clean, (58, 66, 122, 136)), 120)
+        self.assertGreater(self._count_region_pixels(clean, (107, 73, 115, 85)), 35)
 
     def test_clean_template_style_does_not_fill_large_dark_regions(self) -> None:
         image, mask = dark_fill_with_features_fixture()
