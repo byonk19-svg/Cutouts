@@ -15,6 +15,7 @@ type Settings = {
   holeArea: number;
   detailLines: boolean;
   detailCleanup: number;
+  templateStyle: TraceMode;
   paletteSize: number;
 };
 
@@ -54,7 +55,8 @@ const defaultSettings: Settings = {
   speckArea: 60,
   holeArea: 220,
   detailLines: true,
-  detailCleanup: 70,
+  detailCleanup: 82,
+  templateStyle: "paint",
   paletteSize: 6
 };
 
@@ -157,8 +159,10 @@ function App() {
   }
 
   function updateInteriorDetail(value: number) {
-    updateSetting("detailCleanup", 100 - value);
+    const detailCleanup = traceMode === "paint" ? Math.round(92 - (value / 60) * 16) : 100 - value;
+    setSettings((current) => ({ ...current, detailCleanup, detailLines: true, templateStyle: "paint" }));
     setTraceMode("paint");
+    setAnalysis(null);
   }
 
   function loadDetailCanvas(src: string) {
@@ -317,10 +321,10 @@ function App() {
           <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
           {settings.detailLines ? (
             <RangeField
-              label="Inside detail"
+              label={traceMode === "paint" ? "Auto feature lines" : "Inside detail"}
               min={0}
-              max={100}
-              value={100 - settings.detailCleanup}
+              max={traceMode === "paint" ? 60 : 100}
+              value={traceMode === "paint" ? cleanFeatureLineValue(settings.detailCleanup) : 100 - settings.detailCleanup}
               onChange={updateInteriorDetail}
             />
           ) : null}
@@ -486,6 +490,10 @@ function brushPixels(size: BrushSize) {
   return 20;
 }
 
+function cleanFeatureLineValue(cleanup: number) {
+  return Math.max(0, Math.min(60, Math.round(((92 - cleanup) / 16) * 60)));
+}
+
 function SegmentedButton({
   selected,
   onClick,
@@ -513,7 +521,8 @@ function traceModeSettings(mode: TraceMode, current: Settings): Settings {
       speckArea: Math.max(current.speckArea, 80),
       holeArea: Math.max(current.holeArea, 260),
       detailLines: false,
-      detailCleanup: 100
+      detailCleanup: 100,
+      templateStyle: mode
     };
   }
   if (mode === "extra") {
@@ -521,14 +530,16 @@ function traceModeSettings(mode: TraceMode, current: Settings): Settings {
       ...current,
       smoothing: Math.max(2, current.smoothing),
       detailLines: true,
-      detailCleanup: 35
+      detailCleanup: 35,
+      templateStyle: mode
     };
   }
   return {
     ...current,
-    smoothing: Math.max(current.smoothing, 3),
+    smoothing: Math.max(current.smoothing, 4),
     detailLines: true,
-    detailCleanup: 55
+    detailCleanup: 82,
+    templateStyle: mode
   };
 }
 

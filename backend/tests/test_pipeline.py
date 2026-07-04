@@ -91,7 +91,7 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertEqual(analysis.tile_count, analysis.tile_cols * analysis.tile_rows)
         self.assertGreater(len(analysis.preview_png), 1000)
         self.assertGreater(len(analysis.outer_line_png), 1000)
-        self.assertGreater(len(analysis.detail_line_png), 1000)
+        self.assertGreater(len(analysis.detail_line_png), 100)
         self.assertGreater(len(analysis.paint_guide_png), 1000)
         self.assertGreater(analysis.preview_width_px, 0)
         self.assertGreater(analysis.preview_height_px, 0)
@@ -184,6 +184,14 @@ class PrintPipelineTest(unittest.TestCase):
         gray_pixels = self._count_mask_pixels(cleaned)
         subject_pixels = sum(1 for pixel in list(mask.get_flattened_data()) if pixel > 0)
         self.assertLess(gray_pixels, subject_pixels * 0.08)
+
+    def test_clean_template_style_suppresses_more_texture_than_detailed_style(self) -> None:
+        image, mask = noisy_detail_fixture()
+
+        detailed = _detail_line_mask(image, mask, cleanup=35, print_scale=False, template_style="detailed")
+        clean = _detail_line_mask(image, mask, cleanup=35, print_scale=False, template_style="clean")
+
+        self.assertLess(self._count_mask_pixels(clean), self._count_mask_pixels(detailed) // 3)
 
     def test_printable_line_art_is_black_and_white_only(self) -> None:
         image, mask = broad_color_detail_fixture()

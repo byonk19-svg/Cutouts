@@ -16,6 +16,8 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 
+TEMPLATE_STYLES = {"cutOnly", "clean", "detailed"}
+TEMPLATE_STYLE_ALIASES = {"outline": "cutOnly", "paint": "clean", "extra": "detailed"}
 LETTER_WIDTH_IN = 8.5
 LETTER_HEIGHT_IN = 11.0
 PDF_MARGIN_IN = 0.35
@@ -36,10 +38,14 @@ class TemplateSettings:
     hole_area: int = 220
     detail_lines: bool = True
     detail_cleanup: int = 70
+    template_style: str = "clean"
     palette_size: int = 6
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "TemplateSettings":
+        template_style = TEMPLATE_STYLE_ALIASES.get(str(data.get("templateStyle", cls.template_style)), str(data.get("templateStyle", cls.template_style)))
+        if template_style not in TEMPLATE_STYLES:
+            template_style = cls.template_style
         return cls(
             finished_height_in=_bounded_float(data.get("finishedHeightIn"), 6.0, 96.0, cls.finished_height_in),
             threshold=_bounded_int(data.get("threshold"), 0, 180, cls.threshold),
@@ -48,6 +54,7 @@ class TemplateSettings:
             hole_area=_bounded_int(data.get("holeArea"), 0, 5000, cls.hole_area),
             detail_lines=bool(data.get("detailLines", cls.detail_lines)),
             detail_cleanup=_bounded_int(data.get("detailCleanup"), 0, 100, cls.detail_cleanup),
+            template_style=template_style,
             palette_size=_bounded_int(data.get("paletteSize"), 2, 12, cls.palette_size),
         )
 
@@ -355,8 +362,9 @@ def _make_preview_layers(image: Image.Image, mask: Image.Image, settings: Templa
         preview_mask,
         settings.detail_lines,
         outer_line_width=3,
-        detail_line_width=2,
+        detail_line_width=_detail_line_width(settings, print_scale=False),
         detail_cleanup=settings.detail_cleanup,
+        template_style=settings.template_style,
         print_scale=False,
     )
     paint_guide = _on_white(preview_image)
@@ -393,8 +401,9 @@ def _make_trace_image(
         scaled_mask,
         settings.detail_lines,
         outer_line_width=9,
-        detail_line_width=5,
+        detail_line_width=_detail_line_width(settings, print_scale=True),
         detail_cleanup=settings.detail_cleanup,
+        template_style=settings.template_style,
         print_scale=True,
     )
     if edited_detail_png:
@@ -418,6 +427,7 @@ def _line_art(
         outer_line_width=line_width,
         detail_line_width=5 if print_scale else 3,
         detail_cleanup=detail_cleanup,
+        template_style="detailed",
         print_scale=print_scale,
     )
     return composed
@@ -430,6 +440,7 @@ def _line_art_layers(
     outer_line_width: int,
     detail_line_width: int,
     detail_cleanup: int,
+    template_style: str,
     print_scale: bool,
 ) -> tuple[Image.Image, Image.Image, Image.Image]:
     mask_l = mask.convert("L")
@@ -439,7 +450,7 @@ def _line_art_layers(
     detail = Image.new("RGBA", image.size, (255, 255, 255, 0))
 
     if detail_lines:
-        detail_mask = _detail_line_mask(image, mask_l, detail_cleanup, print_scale)
+        detail_mask = _detail_line_mask(image, mask_l, detail_cleanup, print_scale, template_style=template_style)
         if detail_line_width > 1:
             detail_mask = detail_mask.filter(ImageFilter.MaxFilter(_odd_filter_size(detail_line_width)))
         detail = _transparent_line_layer(detail_mask)
@@ -481,18 +492,32 @@ def _odd_filter_size(size: int) -> int:
     return size if size % 2 == 1 else size + 1
 
 
-def _detail_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
+def _detail_line_width(settings: TemplateSettings, print_scale: bool) -> int:
+    if settings.template_style == "clean":
+        return 3 if print_scale else 1
+    return 5 if print_scale else 3
+
+
+def _detail_line_mask(
+    image: Image.Image,
+    mask: Image.Image,
+    cleanup: int,
+    print_scale: bool,
+    template_style: str = "detailed",
+) -> Image.Image:
+    if template_style == "clean":
+        cleanup = max(cleanup, 76)
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
     smoothed = work_image.convert("RGB").filter(ImageFilter.GaussianBlur(radius=blur_radius))
     rgb = np.asarray(smoothed, dtype=np.uint8)
     mask_arr = np.asarray(work_mask.convert("L")) > 0
-    cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
+    cluster_count = 2 + round(((100 - cleanup) / 100) * (2 if template_style == "clean" else 4))
     labels = _cluster_subject_colors(rgb, mask_arr, cluster_count)
 
     detail_arr = np.zeros(mask_arr.shape, dtype=bool)
     rgb_float = rgb.astype(float)
-    local_threshold = 8 + round((cleanup / 100) * 12)
+    local_threshold = 8 + round((cleanup / 100) * (18 if template_style == "clean" else 12))
     horizontal_delta = np.linalg.norm(rgb_float[:, 1:, :] - rgb_float[:, :-1, :], axis=2)
     vertical_delta = np.linalg.norm(rgb_float[1:, :, :] - rgb_float[:-1, :, :], axis=2)
     horizontal_edges = (
@@ -515,6 +540,8 @@ def _detail_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print
 
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
     min_area = 4 + round((cleanup / 100) * (110 if print_scale else 28))
+    if template_style == "clean":
+        min_area = max(min_area, 4 + round((cleanup / 100) * (780 if print_scale else 240)))
     if min_area > 4:
         detail = _remove_small_components(detail, min_area)
     if detail.size != original_size:
