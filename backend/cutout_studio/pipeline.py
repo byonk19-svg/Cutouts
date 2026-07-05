@@ -543,6 +543,15 @@ def _detail_line_width(settings: TemplateSettings, print_scale: bool) -> int:
     return 5 if print_scale else 3
 
 
+def _clean_detail_tuning(cleanup: int, print_scale: bool) -> tuple[float, int, int, int]:
+    extra = max(0.0, (cleanup - 92) / 8.0)
+    blur_radius = 1.0 + (cleanup / 100) * (1.4 if print_scale else 1.2) + extra * (1.2 if print_scale else 0.8)
+    cluster_count = max(2, 4 + round((100 - cleanup) / 10) - round(extra * 2))
+    local_threshold = 6 + round((cleanup / 100) * 10) + round(extra * 6)
+    contrast_threshold = 22 + round((cleanup / 100) * 14) + round(extra * 10)
+    return blur_radius, cluster_count, local_threshold, contrast_threshold
+
+
 def _detail_line_mask(
     image: Image.Image,
     mask: Image.Image,
@@ -554,21 +563,19 @@ def _detail_line_mask(
         cleanup = max(cleanup, 76)
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     if template_style == "clean":
-        blur_radius = 1.0 + (cleanup / 100) * (1.4 if print_scale else 1.2)
+        blur_radius, cluster_count, local_threshold, contrast_threshold = _clean_detail_tuning(cleanup, print_scale)
     else:
         blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
+        cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
+        local_threshold = 6 + round((cleanup / 100) * 14)
+        contrast_threshold = 0
     smoothed = work_image.convert("RGB").filter(ImageFilter.GaussianBlur(radius=blur_radius))
     rgb = np.asarray(smoothed, dtype=np.uint8)
     mask_arr = np.asarray(work_mask.convert("L")) > 0
-    if template_style == "clean":
-        cluster_count = 4 + round((100 - cleanup) / 10)
-    else:
-        cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
     labels = _cluster_subject_colors(rgb, mask_arr, cluster_count)
 
     detail_arr = np.zeros(mask_arr.shape, dtype=bool)
     rgb_float = rgb.astype(float)
-    local_threshold = 6 + round((cleanup / 100) * (10 if template_style == "clean" else 14))
     horizontal_delta = np.linalg.norm(rgb_float[:, 1:, :] - rgb_float[:, :-1, :], axis=2)
     vertical_delta = np.linalg.norm(rgb_float[1:, :, :] - rgb_float[:-1, :, :], axis=2)
     horizontal_edges = (
@@ -589,7 +596,6 @@ def _detail_line_mask(
     detail_arr[:-1, :] |= vertical_edges
 
     if template_style == "clean":
-        contrast_threshold = 22 + round((cleanup / 100) * 14)
         horizontal_contrast = (
             (mask_arr[:, 1:] & mask_arr[:, :-1])
             & (horizontal_delta > contrast_threshold)

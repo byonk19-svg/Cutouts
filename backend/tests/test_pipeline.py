@@ -12,6 +12,7 @@ from backend.cutout_studio.pipeline import (
     load_paint_catalog,
     match_paints,
     tile_grid,
+    _clean_detail_tuning,
     _detail_line_mask,
     _line_art,
 )
@@ -328,6 +329,18 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(self._count_region_pixels(clean, (52, 90, 132, 178)), 120)
         self.assertLess(self._count_region_pixels(clean, (48, 224, 90, 244)), 25)
         self.assertLess(self._count_region_pixels(clean, (98, 224, 132, 244)), 25)
+
+    def test_clean_template_max_cleanup_gets_extra_shading_suppression(self) -> None:
+        normal_blur, normal_clusters, normal_local, normal_contrast = _clean_detail_tuning(92, print_scale=False)
+        max_blur, max_clusters, max_local, max_contrast = _clean_detail_tuning(100, print_scale=False)
+
+        self.assertEqual(normal_clusters, 5)
+        self.assertEqual(normal_local, 15)
+        self.assertEqual(normal_contrast, 35)
+        self.assertGreater(max_blur, normal_blur)
+        self.assertEqual(max_clusters, 2)
+        self.assertGreater(max_local, normal_local)
+        self.assertGreater(max_contrast, normal_contrast)
 
     def test_printable_line_art_is_black_and_white_only(self) -> None:
         image, mask = broad_color_detail_fixture()
