@@ -1,10 +1,11 @@
 import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, Eraser, Eye, FileImage, FileText, Pencil, Redo2, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Undo2 } from "lucide-react";
+import { Download, Eraser, Eye, FileImage, FileText, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Undo2 } from "lucide-react";
+import { removeClickedDetailSegment } from "./detailEditor";
 import "./styles.css";
 
 type TraceMode = "outline" | "paint" | "extra";
-type EditorTool = "erase" | "draw";
+type EditorTool = "erase" | "draw" | "remove";
 type BrushSize = "small" | "medium" | "large";
 
 type Settings = {
@@ -224,16 +225,20 @@ function App() {
 
   function beginStroke(event: PointerEvent<HTMLCanvasElement>) {
     if (!analysis) return;
+    const point = canvasPoint(event);
+    if (editorTool === "remove") {
+      removeDetailLineAt(point);
+      return;
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
     saveHistorySnapshot();
     drawingRef.current = true;
-    const point = canvasPoint(event);
     lastPointRef.current = point;
     drawStrokeSegment(point, point);
   }
 
   function continueStroke(event: PointerEvent<HTMLCanvasElement>) {
-    if (!drawingRef.current) return;
+    if (!drawingRef.current || editorTool === "remove") return;
     const point = canvasPoint(event);
     const previous = lastPointRef.current ?? point;
     drawStrokeSegment(previous, point);
@@ -274,6 +279,19 @@ function App() {
     context.lineTo(to.x, to.y);
     context.stroke();
     context.restore();
+  }
+
+  function removeDetailLineAt(point: { x: number; y: number }) {
+    const canvas = detailCanvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const result = removeClickedDetailSegment(imageData.data, canvas.width, canvas.height, point);
+    if (!result.changed) return;
+    saveHistorySnapshot();
+    context.putImageData(imageData, 0, 0);
+    setEditedDetailDataUrl(canvas.toDataURL("image/png"));
   }
 
   return (
@@ -325,7 +343,7 @@ function App() {
             </button>
             <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
               <strong>Clean Character Template</strong>
-              <small>Bold outline and editable feature lines</small>
+              <small>Bold cutline with starter feature lines you can edit</small>
             </button>
             <button className={traceMode === "extra" ? "choice selected" : "choice"} onClick={() => applyTraceMode("extra")}>
               <strong>Detailed Paint Map</strong>
@@ -360,7 +378,7 @@ function App() {
 
           <button className="secondary-action" onClick={() => analyze()} disabled={!canAnalyze}>
             <RefreshCw size={17} />
-            {busy ? "Working..." : "Generate Preview"}
+            {busy ? "Working..." : "Generate Starting Template"}
           </button>
         </aside>
 
@@ -385,6 +403,12 @@ function App() {
                       onClick={() => setEditorTool("draw")}
                       icon={<Pencil size={15} />}
                       label="Draw details"
+                    />
+                    <SegmentedButton
+                      selected={editorTool === "remove"}
+                      onClick={() => setEditorTool("remove")}
+                      icon={<MousePointerClick size={15} />}
+                      label="Click to remove line"
                     />
                     <select value={brushSize} onChange={(event) => setBrushSize(event.target.value as BrushSize)} aria-label="Brush size">
                       <option value="small">Small brush</option>
@@ -420,6 +444,7 @@ function App() {
                       </label>
                     ) : null}
                   </div>
+                  <p className="editor-note">Best results: erase extra marks, draw missing face/clothing lines, then export.</p>
                   <div className="template-editor" style={{ aspectRatio: `${analysis.previewWidthPx} / ${analysis.previewHeightPx}` }}>
                     {showReference ? (
                       <img
@@ -459,7 +484,7 @@ function App() {
             <div className="empty-preview">
               <FileText size={44} />
               <h2>Upload a simple-background image</h2>
-              <p>Generate a black-and-white cut line preview before exporting the full-size PDF pack.</p>
+              <p>Generate a starting template, clean up feature lines, then export the full-size PDF pack.</p>
             </div>
           )}
         </section>

@@ -354,6 +354,13 @@ button:disabled {
   gap: 8px;
 }
 
+.editor-note {
+  margin: 0;
+  color: #65736c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .tool-button,
 .editor-tools select,
 .edit-toggle {
