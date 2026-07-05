@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, Eraser, Eye, FileImage, FileText, Pencil, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Undo2 } from "lucide-react";
+import { Download, Eraser, Eye, FileImage, FileText, Pencil, Redo2, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Undo2 } from "lucide-react";
 import "./styles.css";
 
 type TraceMode = "outline" | "paint" | "extra";
@@ -72,6 +72,7 @@ function App() {
   const [showReference, setShowReference] = useState(false);
   const [referenceOpacity, setReferenceOpacity] = useState(35);
   const [history, setHistory] = useState<string[]>([]);
+  const [redoHistory, setRedoHistory] = useState<string[]>([]);
   const [editedDetailDataUrl, setEditedDetailDataUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +86,7 @@ function App() {
   useEffect(() => {
     setEditorOpen(false);
     setHistory([]);
+    setRedoHistory([]);
     setEditedDetailDataUrl(null);
   }, [analysis]);
 
@@ -107,6 +109,7 @@ function App() {
       setAnalysis(body);
       setEditorOpen(false);
       setHistory([]);
+      setRedoHistory([]);
       setEditedDetailDataUrl(null);
     } catch (err) {
       setAnalysis(null);
@@ -190,14 +193,27 @@ function App() {
     const current = currentDetailDataUrl();
     if (!current) return;
     setHistory((items) => [...items.slice(-19), current]);
+    setRedoHistory([]);
   }
 
   function undoDetailEdit() {
+    const current = currentDetailDataUrl();
     const previous = history[history.length - 1];
     if (!previous) return;
     setHistory((items) => items.slice(0, -1));
+    if (current) setRedoHistory((items) => [...items.slice(-19), current]);
     setEditedDetailDataUrl(previous);
     loadDetailCanvas(previous);
+  }
+
+  function redoDetailEdit() {
+    const current = currentDetailDataUrl();
+    const next = redoHistory[redoHistory.length - 1];
+    if (!next) return;
+    if (current) setHistory((items) => [...items.slice(-19), current]);
+    setRedoHistory((items) => items.slice(0, -1));
+    setEditedDetailDataUrl(next);
+    loadDetailCanvas(next);
   }
 
   function resetDetailLayer() {
@@ -310,7 +326,7 @@ function App() {
             </button>
             <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
               <strong>Clean Character Template</strong>
-              <small>Simplified paint boundary lines</small>
+              <small>Bold outline and editable feature lines</small>
             </button>
             <button className={traceMode === "extra" ? "choice selected" : "choice"} onClick={() => applyTraceMode("extra")}>
               <strong>Detailed Paint Map</strong>
@@ -321,7 +337,7 @@ function App() {
           <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
           {settings.detailLines ? (
             <RangeField
-              label={traceMode === "paint" ? "Paint boundary detail" : "Inside detail"}
+              label={traceMode === "paint" ? "Starting line detail" : "Inside detail"}
               min={0}
               max={traceMode === "paint" ? 60 : 100}
               value={traceMode === "paint" ? cleanFeatureLineValue(settings.detailCleanup) : 100 - settings.detailCleanup}
@@ -377,6 +393,10 @@ function App() {
                     <button className="tool-button" onClick={undoDetailEdit} disabled={history.length === 0}>
                       <Undo2 size={15} />
                       Undo
+                    </button>
+                    <button className="tool-button" onClick={redoDetailEdit} disabled={redoHistory.length === 0}>
+                      <Redo2 size={15} />
+                      Redo
                     </button>
                     <button className="tool-button" onClick={resetDetailLayer}>
                       <RotateCcw size={15} />

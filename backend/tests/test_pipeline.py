@@ -158,6 +158,21 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(analysis.preview_height_px, 0)
         self.assertGreaterEqual(len(analysis.palette), 1)
 
+    def test_analyze_returns_separate_trace_layers_and_color_guide(self) -> None:
+        settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
+
+        analysis = analyze_template(transparent_fixture(), settings)
+
+        outer = Image.open(io.BytesIO(analysis.outer_line_png)).convert("RGBA")
+        detail = Image.open(io.BytesIO(analysis.detail_line_png)).convert("RGBA")
+        paint_guide = Image.open(io.BytesIO(analysis.paint_guide_png)).convert("RGB")
+
+        self.assertTrue(self._has_transparent_background(outer))
+        self.assertTrue(self._has_transparent_background(detail))
+        self.assertTrue(self._is_transparent_black_layer(outer))
+        self.assertTrue(self._is_transparent_black_layer(detail))
+        self.assertGreater(len(set(paint_guide.get_flattened_data())), 2)
+
     def test_white_background_image_uses_threshold_to_find_subject(self) -> None:
         settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)
 
@@ -321,6 +336,17 @@ class PrintPipelineTest(unittest.TestCase):
 
     def _count_region_pixels(self, image: Image.Image, box: tuple[int, int, int, int]) -> int:
         return self._count_mask_pixels(image.crop(box))
+
+    def _has_transparent_background(self, image: Image.Image) -> bool:
+        return any(pixel[3] == 0 for pixel in image.get_flattened_data())
+
+    def _is_transparent_black_layer(self, image: Image.Image) -> bool:
+        for red, green, blue, alpha in image.get_flattened_data():
+            if alpha == 0:
+                continue
+            if (red, green, blue) != (0, 0, 0):
+                return False
+        return True
 
 
 if __name__ == "__main__":
