@@ -139,6 +139,16 @@ def simple_character_color_regions_fixture() -> tuple[Image.Image, Image.Image]:
     return image, mask
 
 
+def simple_character_with_lower_texture_fixture() -> tuple[Image.Image, Image.Image]:
+    image, mask = simple_character_color_regions_fixture()
+    draw = ImageDraw.Draw(image)
+    draw.line((55, 229, 67, 231), fill=(8, 8, 8, 255), width=4)
+    draw.line((105, 231, 117, 233), fill=(8, 8, 8, 255), width=4)
+    draw.line((68, 186, 80, 187), fill=(8, 8, 8, 255), width=4)
+    draw.line((104, 189, 116, 191), fill=(8, 8, 8, 255), width=4)
+    return image, mask
+
+
 class PrintPipelineTest(unittest.TestCase):
     def test_analyze_transparent_image_returns_preview_and_tile_summary(self) -> None:
         settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
@@ -308,6 +318,16 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(self._count_region_pixels(clean, (52, 90, 132, 178)), 120)
         self.assertGreater(self._count_region_pixels(clean, (60, 176, 120, 226)), 80)
         self.assertLess(self._count_region_pixels(clean, (46, 96, 58, 168)), 30)
+
+    def test_clean_template_style_drops_lower_body_texture_fragments(self) -> None:
+        image, mask = simple_character_with_lower_texture_fixture()
+
+        clean = _detail_line_mask(image, mask, cleanup=82, print_scale=False, template_style="clean")
+
+        self.assertGreater(self._count_region_pixels(clean, (50, 18, 130, 95)), 120)
+        self.assertGreater(self._count_region_pixels(clean, (52, 90, 132, 178)), 120)
+        self.assertLess(self._count_region_pixels(clean, (48, 224, 90, 244)), 25)
+        self.assertLess(self._count_region_pixels(clean, (98, 224, 132, 244)), 25)
 
     def test_printable_line_art_is_black_and_white_only(self) -> None:
         image, mask = broad_color_detail_fixture()

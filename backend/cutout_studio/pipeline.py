@@ -305,6 +305,51 @@ def _remove_small_components(mask: Image.Image, min_area: int) -> Image.Image:
     return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 
+def _filter_clean_detail_components(mask: Image.Image) -> Image.Image:
+    arr = np.asarray(mask.convert("L")) > 0
+    keep = np.zeros(arr.shape, dtype=bool)
+    visited = np.zeros(arr.shape, dtype=bool)
+    height, width = arr.shape
+    scale = max(1.0, min(width, height) / 380)
+    area_scale = scale * scale
+    upper_min_area = round(24 * area_scale)
+    base_min_area = round(75 * area_scale)
+    lower_min_area = round(120 * area_scale)
+    lower_span_min = round(42 * scale)
+    compact_lower_min_area = round(48 * area_scale)
+    compact_lower_max_area = round(150 * area_scale)
+    upper_zone = height * 0.36
+    lower_zone = height * 0.62
+    foot_zone = height * 0.84
+
+    for y in range(height):
+        for x in range(width):
+            if visited[y, x] or not arr[y, x]:
+                continue
+            pixels = _flood(arr, visited, x, y, target=True)
+            xs = [px for px, _py in pixels]
+            ys = [py for _px, py in pixels]
+            area = len(pixels)
+            center_y = (min(ys) + max(ys)) / 2
+            span = max(max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
+            should_keep = area >= base_min_area
+            if center_y <= upper_zone:
+                should_keep = area >= upper_min_area
+            elif min(ys) >= foot_zone:
+                should_keep = span >= lower_span_min
+            elif center_y >= lower_zone:
+                should_keep = (
+                    span >= lower_span_min
+                    or area >= lower_min_area
+                    or compact_lower_min_area <= area <= compact_lower_max_area
+                )
+            if should_keep:
+                for px, py in pixels:
+                    keep[py, px] = True
+
+    return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
+
+
 def _fill_small_holes(mask: Image.Image, max_area: int) -> Image.Image:
     arr = np.asarray(mask.convert("L")) > 0
     visited = np.zeros(arr.shape, dtype=bool)
@@ -568,6 +613,8 @@ def _detail_line_mask(
         min_area = 28 + round((cleanup / 100) * (120 if print_scale else 34))
     if min_area > 4:
         detail = _remove_small_components(detail, min_area)
+    if template_style == "clean":
+        detail = _filter_clean_detail_components(detail)
     if detail.size != original_size:
         detail = detail.resize(original_size, Image.Resampling.NEAREST)
     return detail
