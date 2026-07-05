@@ -565,7 +565,7 @@ def _detail_line_mask(
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
     min_area = 4 + round((cleanup / 100) * (110 if print_scale else 28))
     if template_style == "clean":
-        min_area = 5 + round((cleanup / 100) * (40 if print_scale else 6))
+        min_area = 28 + round((cleanup / 100) * (120 if print_scale else 34))
     if min_area > 4:
         detail = _remove_small_components(detail, min_area)
     if detail.size != original_size:
