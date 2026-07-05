@@ -310,7 +310,7 @@ function App() {
             </button>
             <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
               <strong>Clean Character Template</strong>
-              <small>Simple black feature lines</small>
+              <small>Simplified paint boundary lines</small>
             </button>
             <button className={traceMode === "extra" ? "choice selected" : "choice"} onClick={() => applyTraceMode("extra")}>
               <strong>Detailed Paint Map</strong>
@@ -321,7 +321,7 @@ function App() {
           <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
           {settings.detailLines ? (
             <RangeField
-              label={traceMode === "paint" ? "Auto feature lines" : "Inside detail"}
+              label={traceMode === "paint" ? "Paint boundary detail" : "Inside detail"}
               min={0}
               max={traceMode === "paint" ? 60 : 100}
               value={traceMode === "paint" ? cleanFeatureLineValue(settings.detailCleanup) : 100 - settings.detailCleanup}

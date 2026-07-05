@@ -423,7 +423,7 @@ button:disabled {
 }
 
 .detail-line-layer {
-  z-index: 2;
+  z-index: 4;
   cursor: crosshair;
 }
 

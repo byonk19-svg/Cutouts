@@ -226,15 +226,15 @@ class PrintPipelineTest(unittest.TestCase):
         detailed = _detail_line_mask(image, mask, cleanup=35, print_scale=False, template_style="detailed")
         clean = _detail_line_mask(image, mask, cleanup=35, print_scale=False, template_style="clean")
 
-        self.assertLess(self._count_mask_pixels(clean), self._count_mask_pixels(detailed) // 3)
+        self.assertLess(self._count_mask_pixels(clean), self._count_mask_pixels(detailed) * 0.5)
 
-    def test_clean_template_style_recovers_dark_character_features(self) -> None:
+    def test_clean_template_style_traces_dark_character_boundaries_without_filling(self) -> None:
         image, mask = dark_feature_fixture()
 
         clean = _detail_line_mask(image, mask, cleanup=92, print_scale=False, template_style="clean")
 
         self.assertGreater(self._count_region_pixels(clean, (58, 66, 122, 136)), 120)
-        self.assertGreater(self._count_region_pixels(clean, (107, 73, 115, 85)), 35)
+        self.assertLess(self._count_region_pixels(clean, (107, 73, 115, 85)), 15)
 
     def test_clean_template_style_does_not_fill_large_dark_regions(self) -> None:
         image, mask = dark_fill_with_features_fixture()
@@ -244,12 +244,12 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(self._count_region_pixels(clean, (58, 66, 122, 136)), 120)
         self.assertLess(self._count_region_pixels(clean, (62, 148, 118, 178)), 80)
 
-    def test_clean_template_style_outlines_wide_dark_marks(self) -> None:
+    def test_clean_template_style_does_not_fill_wide_dark_marks(self) -> None:
         image, mask = elongated_dark_feature_fixture()
 
         clean = _detail_line_mask(image, mask, cleanup=92, print_scale=False, template_style="clean")
 
-        self.assertLess(self._count_region_pixels(clean, (58, 154, 108, 160)), 120)
+        self.assertLess(self._count_region_pixels(clean, (70, 155, 105, 160)), 25)
 
     def test_clean_template_style_suppresses_lower_body_dark_marks(self) -> None:
         image, mask = lower_body_compact_dark_feature_fixture()

@@ -536,79 +536,35 @@ def _detail_line_mask(
     detail_arr[:, :-1] |= horizontal_edges
     detail_arr[1:, :] |= vertical_edges
     detail_arr[:-1, :] |= vertical_edges
-    detail_arr &= mask_arr
 
     if template_style == "clean":
-        detail_arr |= _dark_feature_arr(work_image, work_mask, cleanup)
+        contrast_threshold = 26 + round((cleanup / 100) * 14)
+        horizontal_contrast = (
+            (mask_arr[:, 1:] & mask_arr[:, :-1])
+            & (horizontal_delta > contrast_threshold)
+        )
+        vertical_contrast = (
+            (mask_arr[1:, :] & mask_arr[:-1, :])
+            & (vertical_delta > contrast_threshold)
+        )
+        detail_arr[:, 1:] |= horizontal_contrast
+        detail_arr[:, :-1] |= horizontal_contrast
+        detail_arr[1:, :] |= vertical_contrast
+        detail_arr[:-1, :] |= vertical_contrast
+    detail_arr &= mask_arr
+    if template_style == "clean":
+        interior_arr = np.asarray(work_mask.convert("L").filter(ImageFilter.MinFilter(9))) > 0
+        detail_arr &= interior_arr
 
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
     min_area = 4 + round((cleanup / 100) * (110 if print_scale else 28))
     if template_style == "clean":
-        min_area = max(min_area, 4 + round((cleanup / 100) * (780 if print_scale else 240)))
+        min_area = 6 + round((cleanup / 100) * (60 if print_scale else 8))
     if min_area > 4:
         detail = _remove_small_components(detail, min_area)
     if detail.size != original_size:
         detail = detail.resize(original_size, Image.Resampling.NEAREST)
     return detail
-
-
-def _dark_feature_arr(image: Image.Image, mask: Image.Image, cleanup: int) -> np.ndarray:
-    mask_l = mask.convert("L")
-    mask_arr = np.asarray(mask_l) > 0
-    inner_mask = np.asarray(mask_l.filter(ImageFilter.MinFilter(9))) > 0
-    edge_band = mask_arr & ~inner_mask
-    gray = np.asarray(image.convert("L"), dtype=np.uint8)
-    dark_threshold = 92 + round(((100 - cleanup) / 100) * 30)
-    dark = (gray < dark_threshold) & mask_arr & ~edge_band
-    dark_mask = Image.fromarray(dark.astype(np.uint8) * 255, mode="L")
-    dark_mask = _remove_small_components(dark_mask, 10 + round((cleanup / 100) * 18))
-    dark_mask = _traceable_dark_feature_mask(dark_mask, mask_l).filter(ImageFilter.MaxFilter(3))
-    return np.asarray(dark_mask.convert("L")) > 0
-
-
-def _component_outline_mask(mask: Image.Image) -> Image.Image:
-    mask_l = mask.convert("L")
-    eroded = mask_l.filter(ImageFilter.MinFilter(3))
-    outline = np.maximum(0, np.asarray(mask_l, dtype=np.int16) - np.asarray(eroded, dtype=np.int16))
-    return Image.fromarray(outline.astype(np.uint8), mode="L")
-
-
-def _traceable_dark_feature_mask(mask: Image.Image, subject_mask: Image.Image) -> Image.Image:
-    arr = np.asarray(mask.convert("L")) > 0
-    height, width = arr.shape
-    subject_pixels = int(np.count_nonzero(np.asarray(subject_mask.convert("L")) > 0))
-    max_area = max(900, round(subject_pixels * 0.025))
-    fill_area = max(240, round(subject_pixels * 0.008))
-    fill_span = max(20, round(min(width, height) * 0.12))
-    keep_arr = np.zeros(arr.shape, dtype=np.uint8)
-    visited = np.zeros(arr.shape, dtype=bool)
-    for y in range(height):
-        for x in range(width):
-            if visited[y, x] or not arr[y, x]:
-                continue
-            pixels = _flood(arr, visited, x, y, target=True)
-            if len(pixels) > max_area:
-                continue
-            xs = [px for px, _py in pixels]
-            ys = [py for _px, py in pixels]
-            component_width = max(xs) - min(xs) + 1
-            component_height = max(ys) - min(ys) + 1
-            component_center_y = (min(ys) + max(ys)) / 2
-            is_upper_feature = component_center_y < height * 0.45
-            if not is_upper_feature:
-                continue
-            if component_width > width * 0.45 or component_height > height * 0.45:
-                continue
-            component_arr = np.zeros(arr.shape, dtype=np.uint8)
-            for px, py in pixels:
-                component_arr[py, px] = 255
-            component = Image.fromarray(component_arr, mode="L")
-            should_fill = len(pixels) <= fill_area and component_width <= fill_span and component_height <= fill_span
-            if not should_fill:
-                component = _component_outline_mask(component)
-            component_arr = np.asarray(component.convert("L")) > 0
-            keep_arr[component_arr] = 255
-    return Image.fromarray(keep_arr, mode="L")
 
 
 def _detail_work_image(image: Image.Image, mask: Image.Image) -> tuple[Image.Image, Image.Image, tuple[int, int]]:
