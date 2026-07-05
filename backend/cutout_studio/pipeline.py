@@ -508,16 +508,22 @@ def _detail_line_mask(
     if template_style == "clean":
         cleanup = max(cleanup, 76)
     work_image, work_mask, original_size = _detail_work_image(image, mask)
-    blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
+    if template_style == "clean":
+        blur_radius = 1.0 + (cleanup / 100) * (1.4 if print_scale else 1.2)
+    else:
+        blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
     smoothed = work_image.convert("RGB").filter(ImageFilter.GaussianBlur(radius=blur_radius))
     rgb = np.asarray(smoothed, dtype=np.uint8)
     mask_arr = np.asarray(work_mask.convert("L")) > 0
-    cluster_count = 2 + round(((100 - cleanup) / 100) * (2 if template_style == "clean" else 4))
+    if template_style == "clean":
+        cluster_count = 4 + round((100 - cleanup) / 10)
+    else:
+        cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
     labels = _cluster_subject_colors(rgb, mask_arr, cluster_count)
 
     detail_arr = np.zeros(mask_arr.shape, dtype=bool)
     rgb_float = rgb.astype(float)
-    local_threshold = 8 + round((cleanup / 100) * (18 if template_style == "clean" else 12))
+    local_threshold = 6 + round((cleanup / 100) * (10 if template_style == "clean" else 14))
     horizontal_delta = np.linalg.norm(rgb_float[:, 1:, :] - rgb_float[:, :-1, :], axis=2)
     vertical_delta = np.linalg.norm(rgb_float[1:, :, :] - rgb_float[:-1, :, :], axis=2)
     horizontal_edges = (
@@ -538,7 +544,7 @@ def _detail_line_mask(
     detail_arr[:-1, :] |= vertical_edges
 
     if template_style == "clean":
-        contrast_threshold = 26 + round((cleanup / 100) * 14)
+        contrast_threshold = 22 + round((cleanup / 100) * 14)
         horizontal_contrast = (
             (mask_arr[:, 1:] & mask_arr[:, :-1])
             & (horizontal_delta > contrast_threshold)
@@ -559,7 +565,7 @@ def _detail_line_mask(
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
     min_area = 4 + round((cleanup / 100) * (110 if print_scale else 28))
     if template_style == "clean":
-        min_area = 6 + round((cleanup / 100) * (60 if print_scale else 8))
+        min_area = 5 + round((cleanup / 100) * (40 if print_scale else 6))
     if min_area > 4:
         detail = _remove_small_components(detail, min_area)
     if detail.size != original_size:

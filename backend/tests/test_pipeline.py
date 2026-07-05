@@ -113,6 +113,32 @@ def lower_body_compact_dark_feature_fixture() -> tuple[Image.Image, Image.Image]
     return image, mask
 
 
+def simple_character_color_regions_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGBA", (180, 260), (255, 255, 255, 0))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((50, 18, 130, 92), fill=255)
+    mask_draw.rounded_rectangle((46, 88, 134, 178), radius=14, fill=255)
+    mask_draw.rectangle((66, 176, 84, 226), fill=255)
+    mask_draw.rectangle((96, 176, 114, 226), fill=255)
+    mask_draw.rounded_rectangle((44, 218, 86, 246), radius=10, fill=255)
+    mask_draw.rounded_rectangle((94, 218, 136, 246), radius=10, fill=255)
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((50, 18, 130, 92), fill=(228, 190, 148, 255))
+    draw.pieslice((38, 8, 142, 110), start=190, end=350, fill=(12, 20, 58, 255))
+    draw.rounded_rectangle((46, 88, 134, 178), radius=14, fill=(225, 195, 38, 255))
+    draw.line((58, 88, 126, 178), fill=(116, 32, 78, 255), width=10)
+    draw.rectangle((60, 176, 120, 204), fill=(125, 32, 48, 255))
+    draw.rectangle((66, 204, 84, 226), fill=(40, 48, 62, 255))
+    draw.rectangle((96, 204, 114, 226), fill=(40, 48, 62, 255))
+    draw.rounded_rectangle((44, 218, 86, 246), radius=10, fill=(190, 158, 42, 255))
+    draw.rounded_rectangle((94, 218, 136, 246), radius=10, fill=(190, 158, 42, 255))
+    draw.ellipse((70, 48, 82, 62), fill=(20, 20, 20, 255))
+    draw.ellipse((100, 48, 112, 62), fill=(20, 20, 20, 255))
+    draw.arc((76, 64, 110, 82), start=10, end=160, fill=(80, 12, 42, 255), width=3)
+    return image, mask
+
+
 class PrintPipelineTest(unittest.TestCase):
     def test_analyze_transparent_image_returns_preview_and_tile_summary(self) -> None:
         settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
@@ -257,6 +283,16 @@ class PrintPipelineTest(unittest.TestCase):
         clean = _detail_line_mask(image, mask, cleanup=92, print_scale=False, template_style="clean")
 
         self.assertLess(self._count_region_pixels(clean, (82, 154, 90, 164)), 10)
+
+    def test_clean_template_style_keeps_major_character_paint_boundaries(self) -> None:
+        image, mask = simple_character_color_regions_fixture()
+
+        clean = _detail_line_mask(image, mask, cleanup=82, print_scale=False, template_style="clean")
+
+        self.assertGreater(self._count_region_pixels(clean, (50, 18, 130, 95)), 120)
+        self.assertGreater(self._count_region_pixels(clean, (52, 90, 132, 178)), 120)
+        self.assertGreater(self._count_region_pixels(clean, (60, 176, 120, 226)), 80)
+        self.assertLess(self._count_region_pixels(clean, (46, 96, 58, 168)), 30)
 
     def test_printable_line_art_is_black_and_white_only(self) -> None:
         image, mask = broad_color_detail_fixture()
