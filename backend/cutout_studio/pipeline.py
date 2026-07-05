@@ -593,13 +593,15 @@ def _traceable_dark_feature_mask(mask: Image.Image, subject_mask: Image.Image) -
             ys = [py for _px, py in pixels]
             component_width = max(xs) - min(xs) + 1
             component_height = max(ys) - min(ys) + 1
+            component_center_y = (min(ys) + max(ys)) / 2
             if component_width > width * 0.45 or component_height > height * 0.45:
                 continue
             component_arr = np.zeros(arr.shape, dtype=np.uint8)
             for px, py in pixels:
                 component_arr[py, px] = 255
             component = Image.fromarray(component_arr, mode="L")
-            should_fill = len(pixels) <= fill_area and component_width <= fill_span and component_height <= fill_span
+            is_upper_feature = component_center_y < height * 0.45
+            should_fill = is_upper_feature and len(pixels) <= fill_area and component_width <= fill_span and component_height <= fill_span
             if not should_fill:
                 component = _component_outline_mask(component)
             component_arr = np.asarray(component.convert("L")) > 0

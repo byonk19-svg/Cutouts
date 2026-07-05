@@ -106,6 +106,13 @@ def elongated_dark_feature_fixture() -> tuple[Image.Image, Image.Image]:
     return image, mask
 
 
+def lower_body_compact_dark_feature_fixture() -> tuple[Image.Image, Image.Image]:
+    image, mask = dark_feature_fixture()
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((78, 150, 94, 168), fill=(8, 8, 8, 255))
+    return image, mask
+
+
 class PrintPipelineTest(unittest.TestCase):
     def test_analyze_transparent_image_returns_preview_and_tile_summary(self) -> None:
         settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
@@ -243,6 +250,13 @@ class PrintPipelineTest(unittest.TestCase):
         clean = _detail_line_mask(image, mask, cleanup=92, print_scale=False, template_style="clean")
 
         self.assertLess(self._count_region_pixels(clean, (58, 154, 108, 160)), 120)
+
+    def test_clean_template_style_outlines_lower_body_dark_marks(self) -> None:
+        image, mask = lower_body_compact_dark_feature_fixture()
+
+        clean = _detail_line_mask(image, mask, cleanup=92, print_scale=False, template_style="clean")
+
+        self.assertLess(self._count_region_pixels(clean, (82, 154, 90, 164)), 25)
 
     def test_printable_line_art_is_black_and_white_only(self) -> None:
         image, mask = broad_color_detail_fixture()
