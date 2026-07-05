@@ -51,7 +51,7 @@ type Analysis = {
 const defaultSettings: Settings = {
   finishedHeightIn: 36,
   threshold: 42,
-  smoothing: 2,
+  smoothing: 4,
   speckArea: 60,
   holeArea: 220,
   detailLines: true,
@@ -162,9 +162,8 @@ function App() {
   }
 
   function updateInteriorDetail(value: number) {
-    const detailCleanup = traceMode === "paint" ? Math.round(92 - (value / 60) * 16) : 100 - value;
-    setSettings((current) => ({ ...current, detailCleanup, detailLines: true, templateStyle: "paint" }));
-    setTraceMode("paint");
+    const detailCleanup = traceMode === "paint" ? value : 100 - value;
+    setSettings((current) => ({ ...current, detailCleanup, detailLines: true, templateStyle: traceMode }));
     setAnalysis(null);
   }
 
@@ -337,11 +336,13 @@ function App() {
           <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
           {settings.detailLines ? (
             <RangeField
-              label={traceMode === "paint" ? "Starting line detail" : "Inside detail"}
-              min={0}
-              max={traceMode === "paint" ? 60 : 100}
-              value={traceMode === "paint" ? cleanFeatureLineValue(settings.detailCleanup) : 100 - settings.detailCleanup}
+              label={traceMode === "paint" ? "Cleanup strength" : "Inside detail"}
+              min={traceMode === "paint" ? 76 : 0}
+              max={100}
+              value={traceMode === "paint" ? settings.detailCleanup : 100 - settings.detailCleanup}
               onChange={updateInteriorDetail}
+              lowLabel={traceMode === "paint" ? "More lines" : undefined}
+              highLabel={traceMode === "paint" ? "Cleaner" : undefined}
             />
           ) : null}
           <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => updateSetting("paletteSize", value)} />
@@ -510,10 +511,6 @@ function brushPixels(size: BrushSize) {
   return 20;
 }
 
-function cleanFeatureLineValue(cleanup: number) {
-  return Math.max(0, Math.min(60, Math.round(((92 - cleanup) / 16) * 60)));
-}
-
 function SegmentedButton({
   selected,
   onClick,
@@ -572,7 +569,23 @@ function PanelTitle({ icon, title }: { icon: ReactNode; title: string }) {
   );
 }
 
-function RangeField({ label, min, max, value, onChange }: { label: string; min: number; max: number; value: number; onChange: (value: number) => void }) {
+function RangeField({
+  label,
+  min,
+  max,
+  value,
+  onChange,
+  lowLabel,
+  highLabel
+}: {
+  label: string;
+  min: number;
+  max: number;
+  value: number;
+  onChange: (value: number) => void;
+  lowLabel?: string;
+  highLabel?: string;
+}) {
   return (
     <label className="field">
       <span>
@@ -580,6 +593,12 @@ function RangeField({ label, min, max, value, onChange }: { label: string; min: 
         <strong>{value}</strong>
       </span>
       <input type="range" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+      {lowLabel && highLabel ? (
+        <small className="range-hints">
+          <span>{lowLabel}</span>
+          <span>{highLabel}</span>
+        </small>
+      ) : null}
     </label>
   );
 }

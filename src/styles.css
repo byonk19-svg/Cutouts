@@ -161,6 +161,14 @@ button {
   width: 100%;
 }
 
+.range-hints {
+  display: flex;
+  justify-content: space-between;
+  color: #65736c;
+  font-size: 11px;
+  line-height: 1;
+}
+
 .choice-label {
   font-size: 13px;
   color: #43524c;
