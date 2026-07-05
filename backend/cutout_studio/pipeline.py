@@ -575,12 +575,13 @@ def _component_outline_mask(mask: Image.Image) -> Image.Image:
 
 def _traceable_dark_feature_mask(mask: Image.Image, subject_mask: Image.Image) -> Image.Image:
     arr = np.asarray(mask.convert("L")) > 0
+    height, width = arr.shape
     subject_pixels = int(np.count_nonzero(np.asarray(subject_mask.convert("L")) > 0))
     max_area = max(900, round(subject_pixels * 0.025))
-    fill_area = max(280, round(subject_pixels * 0.01))
+    fill_area = max(240, round(subject_pixels * 0.008))
+    fill_span = max(20, round(min(width, height) * 0.12))
     keep_arr = np.zeros(arr.shape, dtype=np.uint8)
     visited = np.zeros(arr.shape, dtype=bool)
-    height, width = arr.shape
     for y in range(height):
         for x in range(width):
             if visited[y, x] or not arr[y, x]:
@@ -598,7 +599,8 @@ def _traceable_dark_feature_mask(mask: Image.Image, subject_mask: Image.Image) -
             for px, py in pixels:
                 component_arr[py, px] = 255
             component = Image.fromarray(component_arr, mode="L")
-            if len(pixels) > fill_area:
+            should_fill = len(pixels) <= fill_area and component_width <= fill_span and component_height <= fill_span
+            if not should_fill:
                 component = _component_outline_mask(component)
             component_arr = np.asarray(component.convert("L")) > 0
             keep_arr[component_arr] = 255
