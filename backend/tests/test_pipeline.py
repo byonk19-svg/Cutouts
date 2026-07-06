@@ -156,6 +156,17 @@ def simple_character_with_lower_texture_fixture() -> tuple[Image.Image, Image.Im
     return image, mask
 
 
+def same_luminance_color_regions_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGBA", (180, 220), (255, 255, 255, 0))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((35, 24, 145, 196), radius=28, fill=255)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((35, 24, 145, 196), radius=28, fill=(200, 40, 40, 255))
+    draw.rectangle((90, 24, 145, 196), fill=(42, 80, 250, 255))
+    return image, mask
+
+
 class PrintPipelineTest(unittest.TestCase):
     def test_analyze_transparent_image_returns_preview_and_tile_summary(self) -> None:
         settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
@@ -346,6 +357,13 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(self._count_region_pixels(clean, (52, 90, 132, 178)), 120)
         self.assertLess(self._count_region_pixels(clean, (46, 96, 58, 168)), 30)
         self.assertLess(self._count_region_pixels(clean, (60, 176, 120, 226)), 30)
+
+    def test_clean_template_style_keeps_same_luminance_color_boundaries(self) -> None:
+        image, mask = same_luminance_color_regions_fixture()
+
+        clean = _detail_line_mask(image, mask, cleanup=88, print_scale=False, template_style="clean")
+
+        self.assertGreater(self._count_region_pixels(clean, (84, 34, 96, 186)), 100)
 
     def test_clean_template_style_drops_lower_body_texture_fragments(self) -> None:
         image, mask = simple_character_with_lower_texture_fixture()

@@ -604,13 +604,39 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
     detail = _remove_small_components(detail, min_area)
     detail = _filter_clean_detail_components(detail)
     detail_arr = np.asarray(detail.convert("L")) > 0
+    color_detail_arr = np.asarray(_clean_color_boundary_mask(work_image, work_mask, cleanup, print_scale).convert("L")) > 0
     head_detail_arr = np.asarray(_head_feature_boost_mask(work_image, work_mask, cleanup).convert("L")) > 0
-    detail = Image.fromarray(((detail_arr | head_detail_arr).astype(np.uint8) * 255), mode="L")
+    detail = Image.fromarray(((detail_arr | color_detail_arr | head_detail_arr).astype(np.uint8) * 255), mode="L")
     detail = _remove_small_components(detail, max(24, min_area - 14))
     detail = _filter_clean_detail_components(detail)
     if detail.size != original_size:
         detail = detail.resize(original_size, Image.Resampling.NEAREST)
     return detail
+
+
+def _clean_color_boundary_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    blur_sigma = 1.1 + ((cleanup - 76) / 24) * (0.7 if print_scale else 0.45)
+    smoothed = cv2.GaussianBlur(rgb, ksize=(0, 0), sigmaX=blur_sigma, sigmaY=blur_sigma)
+    lab = cv2.cvtColor(smoothed, cv2.COLOR_RGB2LAB).astype(np.int16)
+    mask_arr = np.asarray(mask.convert("L")) > 0
+    interior_arr = np.asarray(_erode_mask(mask, 9)) > 0
+    threshold = 12 + round(((cleanup - 76) / 24) * (8 if print_scale else 6))
+
+    horizontal_delta = np.linalg.norm(lab[:, 1:, :] - lab[:, :-1, :], axis=2)
+    vertical_delta = np.linalg.norm(lab[1:, :, :] - lab[:-1, :, :], axis=2)
+    detail_arr = np.zeros(mask_arr.shape, dtype=bool)
+    horizontal_edges = horizontal_delta > threshold
+    vertical_edges = vertical_delta > threshold
+    detail_arr[:, 1:] |= horizontal_edges
+    detail_arr[:, :-1] |= horizontal_edges
+    detail_arr[1:, :] |= vertical_edges
+    detail_arr[:-1, :] |= vertical_edges
+    detail_arr &= mask_arr & interior_arr
+    y_grid = np.arange(mask_arr.shape[0])[:, None]
+    detail_arr &= y_grid < mask_arr.shape[0] * 0.68
+
+    return Image.fromarray((detail_arr.astype(np.uint8) * 255), mode="L")
 
 
 def _head_feature_boost_mask(image: Image.Image, mask: Image.Image, cleanup: int) -> Image.Image:
