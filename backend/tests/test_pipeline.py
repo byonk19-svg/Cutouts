@@ -1,5 +1,6 @@
 import io
 import unittest
+from pathlib import Path
 
 from PIL import Image, ImageDraw
 from pypdf import PdfReader
@@ -16,6 +17,9 @@ from backend.cutout_studio.pipeline import (
     _detail_line_mask,
     _line_art,
 )
+
+
+CORALINE_FIXTURE_DIR = Path(__file__).with_name("fixtures") / "coraline"
 
 
 def transparent_fixture() -> bytes:
@@ -340,6 +344,20 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(max_threshold, normal_threshold)
         self.assertGreater(max_min_area, normal_min_area)
 
+    def test_coraline_golden_outputs_remain_clean_template_baseline(self) -> None:
+        composed = Image.open(CORALINE_FIXTURE_DIR / "coraline-best-clean-outline.png").convert("RGBA")
+        outer = Image.open(CORALINE_FIXTURE_DIR / "coraline-cut-only-outline.png").convert("RGBA")
+        detail = Image.open(CORALINE_FIXTURE_DIR / "coraline-detail-layer.png").convert("RGBA")
+
+        self.assertEqual(composed.size, (359, 900))
+        self.assertEqual(outer.size, composed.size)
+        self.assertEqual(detail.size, composed.size)
+        self.assertTrue(self._is_black_and_white_image(composed))
+        self.assertTrue(self._is_transparent_black_layer(outer))
+        self.assertTrue(self._is_transparent_black_layer(detail))
+        self.assertGreater(self._count_mask_pixels(detail.getchannel("A")), 4_500)
+        self.assertLess(self._count_mask_pixels(detail.getchannel("A")), 6_500)
+
     def test_printable_line_art_is_black_and_white_only(self) -> None:
         image, mask = broad_color_detail_fixture()
 
@@ -378,6 +396,9 @@ class PrintPipelineTest(unittest.TestCase):
             if (red, green, blue) != (0, 0, 0):
                 return False
         return True
+
+    def _is_black_and_white_image(self, image: Image.Image) -> bool:
+        return set(image.convert("RGB").get_flattened_data()) <= {(0, 0, 0), (255, 255, 255)}
 
 
 if __name__ == "__main__":

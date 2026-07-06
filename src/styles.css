@@ -507,6 +507,48 @@ button:disabled {
   font-size: 14px;
 }
 
+.cleanup-card {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 12px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #f7fbf9;
+}
+
+.cleanup-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1d5d55;
+}
+
+.cleanup-title h3 {
+  margin: 0;
+  color: #17201d;
+  font-size: 13px;
+}
+
+.cleanup-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cleanup-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #31413b;
+  font-size: 12px;
+}
+
+.cleanup-step input {
+  width: 16px;
+  height: 16px;
+  accent-color: #1d7a70;
+}
+
 .palette-list {
   display: grid;
   gap: 11px;

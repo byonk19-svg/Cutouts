@@ -1,12 +1,13 @@
 import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, Eraser, Eye, FileImage, FileText, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Undo2 } from "lucide-react";
+import { Download, Eraser, Eye, FileImage, FileText, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Undo2 } from "lucide-react";
 import { removeClickedDetailSegment } from "./detailEditor";
 import "./styles.css";
 
 type TraceMode = "outline" | "paint" | "extra";
-type EditorTool = "erase" | "draw" | "remove";
+type EditorTool = "erase" | "draw" | "smoothDraw" | "remove";
 type BrushSize = "small" | "medium" | "large";
+type CleanupStep = "cutline" | "remove" | "draw" | "export";
 
 type Settings = {
   finishedHeightIn: number;
@@ -61,6 +62,13 @@ const defaultSettings: Settings = {
   paletteSize: 6
 };
 
+const cleanupStepLabels: Record<CleanupStep, string> = {
+  cutline: "Review cutline",
+  remove: "Remove extra marks",
+  draw: "Draw missing details",
+  export: "Export printable template"
+};
+
 function App() {
   const [image, setImage] = useState<File | null>(null);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
@@ -72,6 +80,12 @@ function App() {
   const [brushSize, setBrushSize] = useState<BrushSize>("medium");
   const [showReference, setShowReference] = useState(false);
   const [referenceOpacity, setReferenceOpacity] = useState(35);
+  const [cleanupChecks, setCleanupChecks] = useState<Record<CleanupStep, boolean>>({
+    cutline: false,
+    remove: false,
+    draw: false,
+    export: false
+  });
   const [history, setHistory] = useState<string[]>([]);
   const [redoHistory, setRedoHistory] = useState<string[]>([]);
   const [editedDetailDataUrl, setEditedDetailDataUrl] = useState<string | null>(null);
@@ -80,6 +94,7 @@ function App() {
   const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const smoothAnchorRef = useRef<{ x: number; y: number } | null>(null);
 
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
@@ -112,6 +127,7 @@ function App() {
       setHistory([]);
       setRedoHistory([]);
       setEditedDetailDataUrl(null);
+      resetCleanupChecks();
     } catch (err) {
       setAnalysis(null);
       setError(err instanceof Error ? err.message : "Unable to analyze image.");
@@ -223,6 +239,19 @@ function App() {
     loadDetailCanvas(analysis.detailLinePngDataUrl);
   }
 
+  function resetCleanupChecks() {
+    setCleanupChecks({
+      cutline: false,
+      remove: false,
+      draw: false,
+      export: false
+    });
+  }
+
+  function toggleCleanupStep(step: CleanupStep) {
+    setCleanupChecks((current) => ({ ...current, [step]: !current[step] }));
+  }
+
   function beginStroke(event: PointerEvent<HTMLCanvasElement>) {
     if (!analysis) return;
     const point = canvasPoint(event);
@@ -234,6 +263,7 @@ function App() {
     saveHistorySnapshot();
     drawingRef.current = true;
     lastPointRef.current = point;
+    smoothAnchorRef.current = point;
     drawStrokeSegment(point, point);
   }
 
@@ -241,17 +271,28 @@ function App() {
     if (!drawingRef.current || editorTool === "remove") return;
     const point = canvasPoint(event);
     const previous = lastPointRef.current ?? point;
-    drawStrokeSegment(previous, point);
+    if (editorTool === "smoothDraw") {
+      const anchor = smoothAnchorRef.current ?? previous;
+      const mid = midpoint(previous, point);
+      drawSmoothStrokeSegment(anchor, previous, mid);
+      smoothAnchorRef.current = mid;
+    } else {
+      drawStrokeSegment(previous, point);
+    }
     lastPointRef.current = point;
   }
 
   function endStroke(event: PointerEvent<HTMLCanvasElement>) {
     if (drawingRef.current) {
+      if (editorTool === "smoothDraw" && smoothAnchorRef.current && lastPointRef.current) {
+        drawStrokeSegment(smoothAnchorRef.current, lastPointRef.current);
+      }
       event.currentTarget.releasePointerCapture(event.pointerId);
       setEditedDetailDataUrl(event.currentTarget.toDataURL("image/png"));
     }
     drawingRef.current = false;
     lastPointRef.current = null;
+    smoothAnchorRef.current = null;
   }
 
   function canvasPoint(event: PointerEvent<HTMLCanvasElement>) {
@@ -277,6 +318,28 @@ function App() {
     context.beginPath();
     context.moveTo(from.x, from.y);
     context.lineTo(to.x, to.y);
+    context.stroke();
+    context.restore();
+  }
+
+  function drawSmoothStrokeSegment(
+    from: { x: number; y: number },
+    control: { x: number; y: number },
+    to: { x: number; y: number }
+  ) {
+    const canvas = detailCanvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.save();
+    context.globalCompositeOperation = "source-over";
+    context.strokeStyle = "#000000";
+    context.lineWidth = brushPixels(brushSize);
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.beginPath();
+    context.moveTo(from.x, from.y);
+    context.quadraticCurveTo(control.x, control.y, to.x, to.y);
     context.stroke();
     context.restore();
   }
@@ -405,6 +468,12 @@ function App() {
                       label="Draw details"
                     />
                     <SegmentedButton
+                      selected={editorTool === "smoothDraw"}
+                      onClick={() => setEditorTool("smoothDraw")}
+                      icon={<Pencil size={15} />}
+                      label="Smooth curve"
+                    />
+                    <SegmentedButton
                       selected={editorTool === "remove"}
                       onClick={() => setEditorTool("remove")}
                       icon={<MousePointerClick size={15} />}
@@ -507,6 +576,24 @@ function App() {
                   <dd>US letter, 100%</dd>
                 </div>
               </dl>
+              <div className="cleanup-card">
+                <div className="cleanup-title">
+                  <ListChecks size={17} />
+                  <h3>Template Cleanup</h3>
+                </div>
+                <div className="cleanup-list">
+                  {(Object.keys(cleanupStepLabels) as CleanupStep[]).map((step) => (
+                    <label key={step} className="cleanup-step">
+                      <input
+                        type="checkbox"
+                        checked={cleanupChecks[step]}
+                        onChange={() => toggleCleanupStep(step)}
+                      />
+                      <span>{cleanupStepLabels[step]}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div className="palette-list">
                 {analysis.palette.map((color, index) => (
                   <article className="palette-row" key={`${color.hex}-${index}`}>
@@ -534,6 +621,13 @@ function brushPixels(size: BrushSize) {
   if (size === "small") return 10;
   if (size === "large") return 34;
   return 20;
+}
+
+function midpoint(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2
+  };
 }
 
 function SegmentedButton({
