@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 from reportlab.lib import colors
@@ -291,24 +292,15 @@ def _subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image
 
 def _remove_small_components(mask: Image.Image, min_area: int) -> Image.Image:
     arr = np.asarray(mask.convert("L")) > 0
-    keep = np.zeros(arr.shape, dtype=bool)
-    visited = np.zeros(arr.shape, dtype=bool)
-    height, width = arr.shape
-    for y in range(height):
-        for x in range(width):
-            if visited[y, x] or not arr[y, x]:
-                continue
-            pixels = _flood(arr, visited, x, y, target=True)
-            if len(pixels) >= min_area:
-                for px, py in pixels:
-                    keep[py, px] = True
+    labels, stats = _connected_components(arr)
+    areas = stats[:, cv2.CC_STAT_AREA]
+    keep_labels = np.flatnonzero(areas >= min_area)
+    keep = (labels > 0) & np.isin(labels, keep_labels)
     return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 
 def _filter_clean_detail_components(mask: Image.Image) -> Image.Image:
     arr = np.asarray(mask.convert("L")) > 0
-    keep = np.zeros(arr.shape, dtype=bool)
-    visited = np.zeros(arr.shape, dtype=bool)
     height, width = arr.shape
     scale = max(1.0, min(width, height) / 380)
     area_scale = scale * scale
@@ -321,66 +313,64 @@ def _filter_clean_detail_components(mask: Image.Image) -> Image.Image:
     upper_zone = height * 0.36
     lower_zone = height * 0.62
     foot_zone = height * 0.84
+    labels, stats = _connected_components(arr)
+    keep_labels = []
 
-    for y in range(height):
-        for x in range(width):
-            if visited[y, x] or not arr[y, x]:
-                continue
-            pixels = _flood(arr, visited, x, y, target=True)
-            xs = [px for px, _py in pixels]
-            ys = [py for _px, py in pixels]
-            area = len(pixels)
-            center_y = (min(ys) + max(ys)) / 2
-            span = max(max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
-            should_keep = area >= base_min_area
-            if center_y <= upper_zone:
-                should_keep = area >= upper_min_area
-            elif min(ys) >= foot_zone:
-                should_keep = span >= lower_span_min
-            elif center_y >= lower_zone:
-                should_keep = (
-                    span >= lower_span_min
-                    or area >= lower_min_area
-                    or compact_lower_min_area <= area <= compact_lower_max_area
-                )
-            if should_keep:
-                for px, py in pixels:
-                    keep[py, px] = True
+    for label in range(1, len(stats)):
+        top = stats[label, cv2.CC_STAT_TOP]
+        component_width = stats[label, cv2.CC_STAT_WIDTH]
+        component_height = stats[label, cv2.CC_STAT_HEIGHT]
+        area = stats[label, cv2.CC_STAT_AREA]
+        center_y = top + (component_height - 1) / 2
+        span = max(component_width, component_height)
+        should_keep = area >= base_min_area
+        if center_y <= upper_zone:
+            should_keep = area >= upper_min_area
+        elif top >= foot_zone:
+            should_keep = span >= lower_span_min
+        elif center_y >= lower_zone:
+            should_keep = (
+                span >= lower_span_min
+                or area >= lower_min_area
+                or compact_lower_min_area <= area <= compact_lower_max_area
+            )
+        if should_keep:
+            keep_labels.append(label)
 
+    keep = (labels > 0) & np.isin(labels, keep_labels)
     return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 
 def _fill_small_holes(mask: Image.Image, max_area: int) -> Image.Image:
     arr = np.asarray(mask.convert("L")) > 0
-    visited = np.zeros(arr.shape, dtype=bool)
     filled = arr.copy()
-    height, width = arr.shape
-    for y in range(height):
-        for x in range(width):
-            if visited[y, x] or arr[y, x]:
-                continue
-            pixels = _flood(arr, visited, x, y, target=False)
-            touches_edge = any(px == 0 or py == 0 or px == width - 1 or py == height - 1 for px, py in pixels)
-            if not touches_edge and len(pixels) <= max_area:
-                for px, py in pixels:
-                    filled[py, px] = True
+    labels, stats = _connected_components(~arr)
+    edge_labels = set(np.unique(labels[0, :]))
+    edge_labels.update(np.unique(labels[-1, :]))
+    edge_labels.update(np.unique(labels[:, 0]))
+    edge_labels.update(np.unique(labels[:, -1]))
+    for label in range(1, len(stats)):
+        if label in edge_labels:
+            continue
+        if stats[label, cv2.CC_STAT_AREA] <= max_area:
+            filled[labels == label] = True
     return Image.fromarray((filled.astype(np.uint8) * 255), mode="L")
 
 
-def _flood(arr: np.ndarray, visited: np.ndarray, start_x: int, start_y: int, target: bool) -> list[tuple[int, int]]:
-    height, width = arr.shape
-    stack = [(start_x, start_y)]
-    visited[start_y, start_x] = True
-    pixels = []
-    while stack:
-        x, y = stack.pop()
-        pixels.append((x, y))
-        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
-            if nx < 0 or ny < 0 or nx >= width or ny >= height or visited[ny, nx] or arr[ny, nx] != target:
-                continue
-            visited[ny, nx] = True
-            stack.append((nx, ny))
-    return pixels
+def _connected_components(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    _count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        arr.astype(np.uint8),
+        connectivity=8,
+    )
+    return labels, stats
+
+
+def _erode_mask(mask: Image.Image, kernel_size: int) -> Image.Image:
+    kernel_size = _odd_filter_size(kernel_size)
+    arr = np.asarray(mask.convert("L"), dtype=np.uint8)
+    kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+    eroded = cv2.erode(arr, kernel, iterations=1)
+    return Image.fromarray(eroded, mode="L")
 
 
 def _mask_bounds(mask: Image.Image) -> tuple[int, int, int, int]:
@@ -489,7 +479,7 @@ def _line_art_layers(
     print_scale: bool,
 ) -> tuple[Image.Image, Image.Image, Image.Image]:
     mask_l = mask.convert("L")
-    eroded = mask_l.filter(ImageFilter.MinFilter(3))
+    eroded = _erode_mask(mask_l, 3)
     boundary = Image.fromarray(np.maximum(0, np.asarray(mask_l, dtype=np.int16) - np.asarray(eroded, dtype=np.int16)).astype(np.uint8), mode="L")
     outer = _transparent_line_layer(boundary.filter(ImageFilter.MaxFilter(outer_line_width)))
     detail = Image.new("RGBA", image.size, (255, 255, 255, 0))
@@ -607,7 +597,7 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
     gray = work_image.convert("L").filter(ImageFilter.GaussianBlur(radius=blur_radius))
     edge_arr = np.asarray(gray.filter(ImageFilter.FIND_EDGES), dtype=np.uint8) > edge_threshold
     mask_arr = np.asarray(work_mask.convert("L")) > 0
-    interior_arr = np.asarray(work_mask.convert("L").filter(ImageFilter.MinFilter(9))) > 0
+    interior_arr = np.asarray(_erode_mask(work_mask, 9)) > 0
     detail_arr = edge_arr & mask_arr & interior_arr
 
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
@@ -628,7 +618,7 @@ def _head_feature_boost_mask(image: Image.Image, mask: Image.Image, cleanup: int
     background = np.asarray(image.convert("L").filter(ImageFilter.GaussianBlur(11)), dtype=np.int16)
     mask_l = mask.convert("L")
     mask_arr = np.asarray(mask_l) > 0
-    interior_arr = np.asarray(mask_l.filter(ImageFilter.MinFilter(9))) > 0
+    interior_arr = np.asarray(_erode_mask(mask_l, 9)) > 0
     height, width = mask_arr.shape
     cleanup_ratio = (cleanup - 76) / 24
     dark_delta = 18 + round(cleanup_ratio * 8)
@@ -637,31 +627,27 @@ def _head_feature_boost_mask(image: Image.Image, mask: Image.Image, cleanup: int
     dark_features = ((background - gray) > dark_delta) & (gray < 165) & mask_arr & interior_arr & (y_grid < head_zone)
 
     dark_mask = Image.fromarray((dark_features.astype(np.uint8) * 255), mode="L")
-    eroded = dark_mask.filter(ImageFilter.MinFilter(3))
+    eroded = _erode_mask(dark_mask, 3)
     outline_arr = np.maximum(0, np.asarray(dark_mask, dtype=np.int16) - np.asarray(eroded, dtype=np.int16)).astype(np.uint8)
     outline = Image.fromarray(outline_arr, mode="L")
     arr = np.asarray(outline) > 0
-    keep = np.zeros(arr.shape, dtype=bool)
-    visited = np.zeros(arr.shape, dtype=bool)
     scale = max(1.0, min(width, height) / 380)
     area_scale = scale * scale
     min_area = round(6 * area_scale)
     max_area = round(420 * area_scale)
     max_span = round(90 * scale)
+    labels, stats = _connected_components(arr)
+    keep_labels = []
 
-    for y in range(height):
-        for x in range(width):
-            if visited[y, x] or not arr[y, x]:
-                continue
-            pixels = _flood(arr, visited, x, y, target=True)
-            xs = [px for px, _py in pixels]
-            ys = [py for _px, py in pixels]
-            area = len(pixels)
-            span = max(max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
-            if min_area <= area <= max_area and span <= max_span:
-                for px, py in pixels:
-                    keep[py, px] = True
+    for label in range(1, len(stats)):
+        component_width = stats[label, cv2.CC_STAT_WIDTH]
+        component_height = stats[label, cv2.CC_STAT_HEIGHT]
+        area = stats[label, cv2.CC_STAT_AREA]
+        span = max(component_width, component_height)
+        if min_area <= area <= max_area and span <= max_span:
+            keep_labels.append(label)
 
+    keep = (labels > 0) & np.isin(labels, keep_labels)
     return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 

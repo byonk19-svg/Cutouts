@@ -15,7 +15,9 @@ from backend.cutout_studio.pipeline import (
     tile_grid,
     _clean_feature_line_tuning,
     _detail_line_mask,
+    _fill_small_holes,
     _line_art,
+    _remove_small_components,
 )
 
 
@@ -256,6 +258,26 @@ class PrintPipelineTest(unittest.TestCase):
         noisy_gray_pixels = self._count_mask_pixels(noisy)
         cleaned_gray_pixels = self._count_mask_pixels(cleaned)
         self.assertLess(cleaned_gray_pixels, noisy_gray_pixels // 2)
+
+    def test_component_cleanup_preserves_thin_diagonal_detail_strokes(self) -> None:
+        mask = Image.new("L", (16, 16), 0)
+        draw = ImageDraw.Draw(mask)
+        for index in range(3, 9):
+            draw.point((index, index), fill=255)
+
+        cleaned = _remove_small_components(mask, min_area=5)
+
+        self.assertGreaterEqual(self._count_mask_pixels(cleaned), 6)
+
+    def test_hole_cleanup_does_not_fill_diagonal_escape_to_background(self) -> None:
+        mask = Image.new("L", (9, 9), 255)
+        pixels = mask.load()
+        for point in ((0, 0), (1, 1), (2, 2), (3, 3)):
+            pixels[point] = 0
+
+        filled = _fill_small_holes(mask, max_area=8)
+
+        self.assertEqual(filled.getpixel((3, 3)), 0)
 
     def test_high_detail_cleanup_keeps_broad_color_boundaries(self) -> None:
         image, mask = broad_color_detail_fixture()
