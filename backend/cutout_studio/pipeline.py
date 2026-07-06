@@ -37,7 +37,7 @@ class TemplateSettings:
     speck_area: int = 60
     hole_area: int = 220
     detail_lines: bool = True
-    detail_cleanup: int = 70
+    detail_cleanup: int = 88
     template_style: str = "clean"
     palette_size: int = 6
 
@@ -543,13 +543,12 @@ def _detail_line_width(settings: TemplateSettings, print_scale: bool) -> int:
     return 5 if print_scale else 3
 
 
-def _clean_detail_tuning(cleanup: int, print_scale: bool) -> tuple[float, int, int, int]:
-    extra = max(0.0, (cleanup - 92) / 8.0)
-    blur_radius = 1.0 + (cleanup / 100) * (1.4 if print_scale else 1.2) + extra * (1.2 if print_scale else 0.8)
-    cluster_count = max(2, 4 + round((100 - cleanup) / 10) - round(extra * 2))
-    local_threshold = 6 + round((cleanup / 100) * 10) + round(extra * 6)
-    contrast_threshold = 22 + round((cleanup / 100) * 14) + round(extra * 10)
-    return blur_radius, cluster_count, local_threshold, contrast_threshold
+def _clean_feature_line_tuning(cleanup: int, print_scale: bool) -> tuple[float, int, int]:
+    cleanup_ratio = (cleanup - 76) / 24
+    blur_radius = (1.15 if print_scale else 1.0) + cleanup_ratio * (0.95 if print_scale else 0.7)
+    edge_threshold = 13 + round(cleanup_ratio * (14 if print_scale else 8))
+    min_area = 26 + round((cleanup / 100) * (100 if print_scale else 32))
+    return blur_radius, edge_threshold, min_area
 
 
 def _detail_line_mask(
@@ -561,14 +560,11 @@ def _detail_line_mask(
 ) -> Image.Image:
     if template_style == "clean":
         cleanup = max(cleanup, 76)
+        return _clean_feature_line_mask(image, mask, cleanup, print_scale)
     work_image, work_mask, original_size = _detail_work_image(image, mask)
-    if template_style == "clean":
-        blur_radius, cluster_count, local_threshold, contrast_threshold = _clean_detail_tuning(cleanup, print_scale)
-    else:
-        blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
-        cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
-        local_threshold = 6 + round((cleanup / 100) * 14)
-        contrast_threshold = 0
+    blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
+    cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
+    local_threshold = 6 + round((cleanup / 100) * 14)
     smoothed = work_image.convert("RGB").filter(ImageFilter.GaussianBlur(radius=blur_radius))
     rgb = np.asarray(smoothed, dtype=np.uint8)
     mask_arr = np.asarray(work_mask.convert("L")) > 0
@@ -594,33 +590,29 @@ def _detail_line_mask(
     detail_arr[:, :-1] |= horizontal_edges
     detail_arr[1:, :] |= vertical_edges
     detail_arr[:-1, :] |= vertical_edges
-
-    if template_style == "clean":
-        horizontal_contrast = (
-            (mask_arr[:, 1:] & mask_arr[:, :-1])
-            & (horizontal_delta > contrast_threshold)
-        )
-        vertical_contrast = (
-            (mask_arr[1:, :] & mask_arr[:-1, :])
-            & (vertical_delta > contrast_threshold)
-        )
-        detail_arr[:, 1:] |= horizontal_contrast
-        detail_arr[:, :-1] |= horizontal_contrast
-        detail_arr[1:, :] |= vertical_contrast
-        detail_arr[:-1, :] |= vertical_contrast
     detail_arr &= mask_arr
-    if template_style == "clean":
-        interior_arr = np.asarray(work_mask.convert("L").filter(ImageFilter.MinFilter(9))) > 0
-        detail_arr &= interior_arr
 
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
     min_area = 4 + round((cleanup / 100) * (110 if print_scale else 28))
-    if template_style == "clean":
-        min_area = 28 + round((cleanup / 100) * (120 if print_scale else 34))
     if min_area > 4:
         detail = _remove_small_components(detail, min_area)
-    if template_style == "clean":
-        detail = _filter_clean_detail_components(detail)
+    if detail.size != original_size:
+        detail = detail.resize(original_size, Image.Resampling.NEAREST)
+    return detail
+
+
+def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
+    work_image, work_mask, original_size = _detail_work_image(image, mask)
+    blur_radius, edge_threshold, min_area = _clean_feature_line_tuning(cleanup, print_scale)
+    gray = work_image.convert("L").filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    edge_arr = np.asarray(gray.filter(ImageFilter.FIND_EDGES), dtype=np.uint8) > edge_threshold
+    mask_arr = np.asarray(work_mask.convert("L")) > 0
+    interior_arr = np.asarray(work_mask.convert("L").filter(ImageFilter.MinFilter(9))) > 0
+    detail_arr = edge_arr & mask_arr & interior_arr
+
+    detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
+    detail = _remove_small_components(detail, min_area)
+    detail = _filter_clean_detail_components(detail)
     if detail.size != original_size:
         detail = detail.resize(original_size, Image.Resampling.NEAREST)
     return detail

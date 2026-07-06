@@ -12,7 +12,7 @@ from backend.cutout_studio.pipeline import (
     load_paint_catalog,
     match_paints,
     tile_grid,
-    _clean_detail_tuning,
+    _clean_feature_line_tuning,
     _detail_line_mask,
     _line_art,
 )
@@ -310,15 +310,15 @@ class PrintPipelineTest(unittest.TestCase):
 
         self.assertLess(self._count_region_pixels(clean, (82, 154, 90, 164)), 10)
 
-    def test_clean_template_style_keeps_major_character_paint_boundaries(self) -> None:
+    def test_clean_template_style_keeps_major_character_feature_lines(self) -> None:
         image, mask = simple_character_color_regions_fixture()
 
         clean = _detail_line_mask(image, mask, cleanup=82, print_scale=False, template_style="clean")
 
         self.assertGreater(self._count_region_pixels(clean, (50, 18, 130, 95)), 120)
         self.assertGreater(self._count_region_pixels(clean, (52, 90, 132, 178)), 120)
-        self.assertGreater(self._count_region_pixels(clean, (60, 176, 120, 226)), 80)
         self.assertLess(self._count_region_pixels(clean, (46, 96, 58, 168)), 30)
+        self.assertLess(self._count_region_pixels(clean, (60, 176, 120, 226)), 30)
 
     def test_clean_template_style_drops_lower_body_texture_fragments(self) -> None:
         image, mask = simple_character_with_lower_texture_fixture()
@@ -330,17 +330,13 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertLess(self._count_region_pixels(clean, (48, 224, 90, 244)), 25)
         self.assertLess(self._count_region_pixels(clean, (98, 224, 132, 244)), 25)
 
-    def test_clean_template_max_cleanup_gets_extra_shading_suppression(self) -> None:
-        normal_blur, normal_clusters, normal_local, normal_contrast = _clean_detail_tuning(92, print_scale=False)
-        max_blur, max_clusters, max_local, max_contrast = _clean_detail_tuning(100, print_scale=False)
+    def test_clean_template_max_cleanup_gets_extra_feature_line_suppression(self) -> None:
+        normal_blur, normal_threshold, normal_min_area = _clean_feature_line_tuning(92, print_scale=False)
+        max_blur, max_threshold, max_min_area = _clean_feature_line_tuning(100, print_scale=False)
 
-        self.assertEqual(normal_clusters, 5)
-        self.assertEqual(normal_local, 15)
-        self.assertEqual(normal_contrast, 35)
         self.assertGreater(max_blur, normal_blur)
-        self.assertEqual(max_clusters, 2)
-        self.assertGreater(max_local, normal_local)
-        self.assertGreater(max_contrast, normal_contrast)
+        self.assertGreater(max_threshold, normal_threshold)
+        self.assertGreater(max_min_area, normal_min_area)
 
     def test_printable_line_art_is_black_and_white_only(self) -> None:
         image, mask = broad_color_detail_fixture()

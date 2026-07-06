@@ -56,7 +56,7 @@ const defaultSettings: Settings = {
   speckArea: 60,
   holeArea: 220,
   detailLines: true,
-  detailCleanup: 82,
+  detailCleanup: 88,
   templateStyle: "paint",
   paletteSize: 6
 };
@@ -580,7 +580,7 @@ function traceModeSettings(mode: TraceMode, current: Settings): Settings {
     ...current,
     smoothing: Math.max(current.smoothing, 4),
     detailLines: true,
-    detailCleanup: 82,
+    detailCleanup: 88,
     templateStyle: mode
   };
 }
