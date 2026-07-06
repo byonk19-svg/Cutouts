@@ -313,8 +313,9 @@ class PrintPipelineTest(unittest.TestCase):
     def test_clean_template_style_keeps_major_character_feature_lines(self) -> None:
         image, mask = simple_character_color_regions_fixture()
 
-        clean = _detail_line_mask(image, mask, cleanup=82, print_scale=False, template_style="clean")
+        clean = _detail_line_mask(image, mask, cleanup=88, print_scale=False, template_style="clean")
 
+        self.assertGreater(self._count_region_pixels(clean, (66, 42, 116, 84)), 180)
         self.assertGreater(self._count_region_pixels(clean, (50, 18, 130, 95)), 120)
         self.assertGreater(self._count_region_pixels(clean, (52, 90, 132, 178)), 120)
         self.assertLess(self._count_region_pixels(clean, (46, 96, 58, 168)), 30)
@@ -323,8 +324,9 @@ class PrintPipelineTest(unittest.TestCase):
     def test_clean_template_style_drops_lower_body_texture_fragments(self) -> None:
         image, mask = simple_character_with_lower_texture_fixture()
 
-        clean = _detail_line_mask(image, mask, cleanup=82, print_scale=False, template_style="clean")
+        clean = _detail_line_mask(image, mask, cleanup=88, print_scale=False, template_style="clean")
 
+        self.assertGreater(self._count_region_pixels(clean, (66, 42, 116, 84)), 180)
         self.assertGreater(self._count_region_pixels(clean, (50, 18, 130, 95)), 120)
         self.assertGreater(self._count_region_pixels(clean, (52, 90, 132, 178)), 120)
         self.assertLess(self._count_region_pixels(clean, (48, 224, 90, 244)), 25)

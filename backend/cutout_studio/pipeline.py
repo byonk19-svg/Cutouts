@@ -613,9 +613,56 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
     detail = _remove_small_components(detail, min_area)
     detail = _filter_clean_detail_components(detail)
+    detail_arr = np.asarray(detail.convert("L")) > 0
+    head_detail_arr = np.asarray(_head_feature_boost_mask(work_image, work_mask, cleanup).convert("L")) > 0
+    detail = Image.fromarray(((detail_arr | head_detail_arr).astype(np.uint8) * 255), mode="L")
+    detail = _remove_small_components(detail, max(24, min_area - 14))
+    detail = _filter_clean_detail_components(detail)
     if detail.size != original_size:
         detail = detail.resize(original_size, Image.Resampling.NEAREST)
     return detail
+
+
+def _head_feature_boost_mask(image: Image.Image, mask: Image.Image, cleanup: int) -> Image.Image:
+    gray = np.asarray(image.convert("L"), dtype=np.int16)
+    background = np.asarray(image.convert("L").filter(ImageFilter.GaussianBlur(11)), dtype=np.int16)
+    mask_l = mask.convert("L")
+    mask_arr = np.asarray(mask_l) > 0
+    interior_arr = np.asarray(mask_l.filter(ImageFilter.MinFilter(9))) > 0
+    height, width = mask_arr.shape
+    cleanup_ratio = (cleanup - 76) / 24
+    dark_delta = 18 + round(cleanup_ratio * 8)
+    head_zone = height * 0.32
+    y_grid = np.arange(height)[:, None]
+    dark_features = ((background - gray) > dark_delta) & (gray < 165) & mask_arr & interior_arr & (y_grid < head_zone)
+
+    dark_mask = Image.fromarray((dark_features.astype(np.uint8) * 255), mode="L")
+    eroded = dark_mask.filter(ImageFilter.MinFilter(3))
+    outline_arr = np.maximum(0, np.asarray(dark_mask, dtype=np.int16) - np.asarray(eroded, dtype=np.int16)).astype(np.uint8)
+    outline = Image.fromarray(outline_arr, mode="L")
+    arr = np.asarray(outline) > 0
+    keep = np.zeros(arr.shape, dtype=bool)
+    visited = np.zeros(arr.shape, dtype=bool)
+    scale = max(1.0, min(width, height) / 380)
+    area_scale = scale * scale
+    min_area = round(6 * area_scale)
+    max_area = round(420 * area_scale)
+    max_span = round(90 * scale)
+
+    for y in range(height):
+        for x in range(width):
+            if visited[y, x] or not arr[y, x]:
+                continue
+            pixels = _flood(arr, visited, x, y, target=True)
+            xs = [px for px, _py in pixels]
+            ys = [py for _px, py in pixels]
+            area = len(pixels)
+            span = max(max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
+            if min_area <= area <= max_area and span <= max_span:
+                for px, py in pixels:
+                    keep[py, px] = True
+
+    return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 
 def _detail_work_image(image: Image.Image, mask: Image.Image) -> tuple[Image.Image, Image.Image, tuple[int, int]]:
