@@ -17,7 +17,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 
-TEMPLATE_STYLES = {"cutOnly", "clean", "detailed"}
+TEMPLATE_STYLES = {"cutOnly", "clean", "marker", "detailed"}
 TEMPLATE_STYLE_ALIASES = {"outline": "cutOnly", "paint": "clean", "extra": "detailed"}
 LETTER_WIDTH_IN = 8.5
 LETTER_HEIGHT_IN = 11.0
@@ -528,6 +528,8 @@ def _odd_filter_size(size: int) -> int:
 
 
 def _detail_line_width(settings: TemplateSettings, print_scale: bool) -> int:
+    if settings.template_style == "marker":
+        return 7 if print_scale else 3
     if settings.template_style == "clean":
         return 3 if print_scale else 1
     return 5 if print_scale else 3
@@ -548,6 +550,9 @@ def _detail_line_mask(
     print_scale: bool,
     template_style: str = "detailed",
 ) -> Image.Image:
+    if template_style == "marker":
+        cleanup = max(cleanup, 90)
+        return _marker_template_line_mask(image, mask, cleanup, print_scale)
     if template_style == "clean":
         cleanup = max(cleanup, 76)
         return _clean_feature_line_mask(image, mask, cleanup, print_scale)
@@ -612,6 +617,54 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
     if detail.size != original_size:
         detail = detail.resize(original_size, Image.Resampling.NEAREST)
     return detail
+
+
+def _marker_template_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
+    clean = _clean_feature_line_mask(image, mask, cleanup, print_scale)
+    work_clean, work_mask, original_size = _detail_work_image(clean.convert("RGBA"), mask)
+    detail = _filter_marker_detail_components(work_clean.convert("L"), work_mask)
+    if detail.size != original_size:
+        detail = detail.resize(original_size, Image.Resampling.NEAREST)
+    return detail
+
+
+def _filter_marker_detail_components(detail: Image.Image, mask: Image.Image) -> Image.Image:
+    arr = np.asarray(detail.convert("L")) > 0
+    mask_arr = np.asarray(mask.convert("L")) > 0
+    height, width = arr.shape
+    scale = max(1.0, min(width, height) / 380)
+    area_scale = scale * scale
+    upper_zone = height * 0.38
+    lower_zone = height * 0.68
+    foot_zone = height * 0.84
+    base_min_area = round(145 * area_scale)
+    upper_min_area = round(58 * area_scale)
+    lower_min_area = round(210 * area_scale)
+    min_span = round(34 * scale)
+    lower_min_span = round(58 * scale)
+    foot_min_span = round(72 * scale)
+    labels, stats = _connected_components(arr & mask_arr)
+    keep_labels = []
+
+    for label in range(1, len(stats)):
+        top = stats[label, cv2.CC_STAT_TOP]
+        component_width = stats[label, cv2.CC_STAT_WIDTH]
+        component_height = stats[label, cv2.CC_STAT_HEIGHT]
+        area = stats[label, cv2.CC_STAT_AREA]
+        center_y = top + (component_height - 1) / 2
+        span = max(component_width, component_height)
+        should_keep = area >= base_min_area or (area >= round(80 * area_scale) and span >= min_span)
+        if center_y <= upper_zone:
+            should_keep = area >= upper_min_area and span >= round(16 * scale)
+        elif top >= foot_zone:
+            should_keep = area >= lower_min_area and span >= foot_min_span
+        elif center_y >= lower_zone:
+            should_keep = area >= lower_min_area or span >= lower_min_span
+        if should_keep:
+            keep_labels.append(label)
+
+    keep = (labels > 0) & np.isin(labels, keep_labels)
+    return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 
 def _clean_color_boundary_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:

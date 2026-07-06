@@ -4,7 +4,7 @@ import { Download, Eraser, Eye, FileImage, FileText, ListChecks, MousePointerCli
 import { removeClickedDetailSegment } from "./detailEditor";
 import "./styles.css";
 
-type TraceMode = "outline" | "paint" | "extra";
+type TraceMode = "outline" | "paint" | "marker" | "extra";
 type EditorTool = "erase" | "draw" | "smoothDraw" | "remove";
 type BrushSize = "small" | "medium" | "large";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
@@ -179,7 +179,7 @@ function App() {
   }
 
   function updateInteriorDetail(value: number) {
-    const detailCleanup = traceMode === "paint" ? value : 100 - value;
+    const detailCleanup = traceMode === "paint" || traceMode === "marker" ? value : 100 - value;
     setSettings((current) => ({ ...current, detailCleanup, detailLines: true, templateStyle: traceMode }));
     setAnalysis(null);
   }
@@ -408,6 +408,10 @@ function App() {
               <strong>Clean Character Template</strong>
               <small>Bold cutline with starter feature lines you can edit</small>
             </button>
+            <button className={traceMode === "marker" ? "choice selected" : "choice"} onClick={() => applyTraceMode("marker")}>
+              <strong>Marker Template</strong>
+              <small>Sparser Max-style lines for wood transfer</small>
+            </button>
             <button className={traceMode === "extra" ? "choice selected" : "choice"} onClick={() => applyTraceMode("extra")}>
               <strong>Detailed Paint Map</strong>
               <small>More color boundaries</small>
@@ -417,13 +421,13 @@ function App() {
           <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
           {settings.detailLines ? (
             <RangeField
-              label={traceMode === "paint" ? "Cleanup strength" : "Inside detail"}
-              min={traceMode === "paint" ? 76 : 0}
+              label={traceMode === "paint" || traceMode === "marker" ? "Cleanup strength" : "Inside detail"}
+              min={traceMode === "marker" ? 85 : traceMode === "paint" ? 76 : 0}
               max={100}
-              value={traceMode === "paint" ? settings.detailCleanup : 100 - settings.detailCleanup}
+              value={traceMode === "paint" || traceMode === "marker" ? settings.detailCleanup : 100 - settings.detailCleanup}
               onChange={updateInteriorDetail}
-              lowLabel={traceMode === "paint" ? "More lines" : undefined}
-              highLabel={traceMode === "paint" ? "Cleaner" : undefined}
+              lowLabel={traceMode === "paint" || traceMode === "marker" ? "More lines" : undefined}
+              highLabel={traceMode === "paint" || traceMode === "marker" ? "Cleaner" : undefined}
             />
           ) : null}
           <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => updateSetting("paletteSize", value)} />
@@ -449,7 +453,7 @@ function App() {
           {analysis ? (
             <div className="page-preview">
               <div className="preview-strip">
-                <span>{editorOpen ? "Clean Template Editor" : "Trace preview"}</span>
+                <span>{editorOpen ? `${traceModeLabel(traceMode)} Editor` : "Trace preview"}</span>
                 <span>{analysis.tileCols} x {analysis.tileRows} pages</span>
               </div>
               {editorOpen ? (
@@ -670,6 +674,17 @@ function traceModeSettings(mode: TraceMode, current: Settings): Settings {
       templateStyle: mode
     };
   }
+  if (mode === "marker") {
+    return {
+      ...current,
+      smoothing: Math.max(current.smoothing, 5),
+      speckArea: Math.max(current.speckArea, 120),
+      holeArea: Math.max(current.holeArea, 320),
+      detailLines: true,
+      detailCleanup: 94,
+      templateStyle: mode
+    };
+  }
   return {
     ...current,
     smoothing: Math.max(current.smoothing, 4),
@@ -677,6 +692,13 @@ function traceModeSettings(mode: TraceMode, current: Settings): Settings {
     detailCleanup: 88,
     templateStyle: mode
   };
+}
+
+function traceModeLabel(mode: TraceMode) {
+  if (mode === "outline") return "Cut Only";
+  if (mode === "marker") return "Marker Template";
+  if (mode === "extra") return "Detailed Paint Map";
+  return "Clean Character Template";
 }
 
 function PanelTitle({ icon, title }: { icon: ReactNode; title: string }) {

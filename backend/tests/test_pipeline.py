@@ -260,6 +260,11 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertLessEqual(len(palette), 2)
         self.assertGreater(len(palette[0].matches), 0)
 
+    def test_marker_template_style_is_accepted_from_settings(self) -> None:
+        settings = TemplateSettings.from_mapping({"templateStyle": "marker"})
+
+        self.assertEqual(settings.template_style, "marker")
+
     def test_detail_cleanup_reduces_noisy_interior_lines(self) -> None:
         image, mask = noisy_detail_fixture()
 
@@ -375,6 +380,17 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(self._count_region_pixels(clean, (52, 90, 132, 178)), 120)
         self.assertLess(self._count_region_pixels(clean, (48, 224, 90, 244)), 25)
         self.assertLess(self._count_region_pixels(clean, (98, 224, 132, 244)), 25)
+
+    def test_marker_template_style_keeps_major_features_and_drops_lower_texture(self) -> None:
+        image, mask = simple_character_with_lower_texture_fixture()
+
+        marker = _detail_line_mask(image, mask, cleanup=88, print_scale=False, template_style="marker")
+
+        self.assertGreater(self._count_region_pixels(marker, (66, 42, 116, 84)), 120)
+        self.assertGreater(self._count_region_pixels(marker, (50, 18, 130, 95)), 80)
+        self.assertGreater(self._count_region_pixels(marker, (52, 90, 132, 178)), 80)
+        self.assertLess(self._count_region_pixels(marker, (48, 224, 90, 244)), 12)
+        self.assertLess(self._count_region_pixels(marker, (98, 224, 132, 244)), 12)
 
     def test_clean_template_max_cleanup_gets_extra_feature_line_suppression(self) -> None:
         normal_blur, normal_threshold, normal_min_area = _clean_feature_line_tuning(92, print_scale=False)
