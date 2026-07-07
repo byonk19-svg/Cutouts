@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactN
 import { createRoot } from "react-dom/client";
 import { Download, Eraser, Eye, FileImage, FileText, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Undo2 } from "lucide-react";
 import { removeClickedDetailSegment } from "./detailEditor";
+import { createTraceStroke, drawTraceStrokes, eraseTraceStrokes, type TracePoint, type TraceStroke } from "./traceStrokes";
 import {
   opensEditorWithReference,
   traceModeHelp,
@@ -13,7 +14,7 @@ import {
 import "./styles.css";
 
 type EditorTool = "erase" | "draw" | "smoothDraw" | "remove";
-type BrushSize = "small" | "medium" | "large";
+type BrushSize = "thin" | "normal" | "bold";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
 
 type PaintMatch = {
@@ -72,7 +73,7 @@ function App() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTool, setEditorTool] = useState<EditorTool>("erase");
-  const [brushSize, setBrushSize] = useState<BrushSize>("medium");
+  const [brushSize, setBrushSize] = useState<BrushSize>("normal");
   const [showReference, setShowReference] = useState(false);
   const [referenceOpacity, setReferenceOpacity] = useState(35);
   const [cleanupChecks, setCleanupChecks] = useState<Record<CleanupStep, boolean>>({
@@ -81,6 +82,9 @@ function App() {
     draw: false,
     export: false
   });
+  const [manualStrokes, setManualStrokes] = useState<TraceStroke[]>([]);
+  const [manualHistory, setManualHistory] = useState<TraceStroke[][]>([]);
+  const [manualRedoHistory, setManualRedoHistory] = useState<TraceStroke[][]>([]);
   const [history, setHistory] = useState<string[]>([]);
   const [redoHistory, setRedoHistory] = useState<string[]>([]);
   const [editedDetailDataUrl, setEditedDetailDataUrl] = useState<string | null>(null);
@@ -88,23 +92,35 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
-  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
-  const smoothAnchorRef = useRef<{ x: number; y: number } | null>(null);
+  const lastPointRef = useRef<TracePoint | null>(null);
+  const smoothAnchorRef = useRef<TracePoint | null>(null);
+  const draftStrokeRef = useRef<TraceStroke | null>(null);
+  const strokeIdRef = useRef(0);
 
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
   const advancedTraceModeSelected = traceMode === "marker" || traceMode === "extra";
+  const traceStudioOpen = traceMode === "manual";
+  const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
+  const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
 
   useEffect(() => {
     setHistory([]);
     setRedoHistory([]);
     setEditedDetailDataUrl(null);
+    setManualStrokes([]);
+    setManualHistory([]);
+    setManualRedoHistory([]);
   }, [analysis]);
 
   useEffect(() => {
     if (!analysis || !editorOpen) return;
+    if (traceStudioOpen) {
+      renderManualTraceLayer(manualStrokes);
+      return;
+    }
     loadDetailCanvas(editedDetailDataUrl ?? analysis.detailLinePngDataUrl);
-  }, [analysis, editorOpen, editedDetailDataUrl]);
+  }, [analysis, editorOpen, editedDetailDataUrl, manualStrokes, traceStudioOpen]);
 
   async function analyze(nextSettings = settings) {
     if (!image) return;
@@ -199,6 +215,9 @@ function App() {
   function currentDetailDataUrl() {
     const canvas = detailCanvasRef.current;
     if (!canvas || !analysis) return editedDetailDataUrl;
+    if (traceStudioOpen) {
+      renderManualTraceLayer(manualStrokes);
+    }
     return canvas.toDataURL("image/png");
   }
 
@@ -210,6 +229,14 @@ function App() {
   }
 
   function undoDetailEdit() {
+    if (traceStudioOpen) {
+      const previous = manualHistory[manualHistory.length - 1];
+      if (!previous) return;
+      setManualHistory((items) => items.slice(0, -1));
+      setManualRedoHistory((items) => [...items.slice(-19), manualStrokes]);
+      setManualStrokes(previous);
+      return;
+    }
     const current = currentDetailDataUrl();
     const previous = history[history.length - 1];
     if (!previous) return;
@@ -220,6 +247,14 @@ function App() {
   }
 
   function redoDetailEdit() {
+    if (traceStudioOpen) {
+      const next = manualRedoHistory[manualRedoHistory.length - 1];
+      if (!next) return;
+      setManualHistory((items) => [...items.slice(-19), manualStrokes]);
+      setManualRedoHistory((items) => items.slice(0, -1));
+      setManualStrokes(next);
+      return;
+    }
     const current = currentDetailDataUrl();
     const next = redoHistory[redoHistory.length - 1];
     if (!next) return;
@@ -231,6 +266,12 @@ function App() {
 
   function resetDetailLayer() {
     if (!analysis) return;
+    if (traceStudioOpen) {
+      setManualHistory((items) => [...items.slice(-19), manualStrokes]);
+      setManualRedoHistory([]);
+      setManualStrokes([]);
+      return;
+    }
     saveHistorySnapshot();
     setEditedDetailDataUrl(null);
     loadDetailCanvas(analysis.detailLinePngDataUrl);
@@ -252,6 +293,19 @@ function App() {
   function beginStroke(event: PointerEvent<HTMLCanvasElement>) {
     if (!analysis) return;
     const point = canvasPoint(event);
+    if (traceStudioOpen) {
+      if (editorTool === "erase" || editorTool === "remove") {
+        removeManualStrokeAt(point);
+        return;
+      }
+      event.currentTarget.setPointerCapture(event.pointerId);
+      drawingRef.current = true;
+      lastPointRef.current = point;
+      smoothAnchorRef.current = point;
+      draftStrokeRef.current = createTraceStroke(nextStrokeId(), [point], brushPixels(brushSize));
+      renderManualTraceLayer(manualStrokes, draftStrokeRef.current);
+      return;
+    }
     if (editorTool === "remove") {
       removeDetailLineAt(point);
       return;
@@ -267,6 +321,17 @@ function App() {
   function continueStroke(event: PointerEvent<HTMLCanvasElement>) {
     if (!drawingRef.current || editorTool === "remove") return;
     const point = canvasPoint(event);
+    if (traceStudioOpen) {
+      const draft = draftStrokeRef.current;
+      if (!draft) return;
+      const previous = lastPointRef.current ?? point;
+      const nextPoint = editorTool === "smoothDraw" ? midpoint(previous, point) : point;
+      draftStrokeRef.current = createTraceStroke(draft.id, [...draft.points, nextPoint], draft.width);
+      lastPointRef.current = point;
+      smoothAnchorRef.current = nextPoint;
+      renderManualTraceLayer(manualStrokes, draftStrokeRef.current);
+      return;
+    }
     const previous = lastPointRef.current ?? point;
     if (editorTool === "smoothDraw") {
       const anchor = smoothAnchorRef.current ?? previous;
@@ -280,6 +345,22 @@ function App() {
   }
 
   function endStroke(event: PointerEvent<HTMLCanvasElement>) {
+    if (traceStudioOpen) {
+      if (drawingRef.current) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        const draft = draftStrokeRef.current;
+        if (draft && draft.points.length > 0) {
+          setManualHistory((items) => [...items.slice(-19), manualStrokes]);
+          setManualRedoHistory([]);
+          setManualStrokes((items) => [...items, draft]);
+        }
+      }
+      drawingRef.current = false;
+      lastPointRef.current = null;
+      smoothAnchorRef.current = null;
+      draftStrokeRef.current = null;
+      return;
+    }
     if (drawingRef.current) {
       if (editorTool === "smoothDraw" && smoothAnchorRef.current && lastPointRef.current) {
         drawStrokeSegment(smoothAnchorRef.current, lastPointRef.current);
@@ -292,7 +373,7 @@ function App() {
     smoothAnchorRef.current = null;
   }
 
-  function canvasPoint(event: PointerEvent<HTMLCanvasElement>) {
+  function canvasPoint(event: PointerEvent<HTMLCanvasElement>): TracePoint {
     const canvas = event.currentTarget;
     const rect = canvas.getBoundingClientRect();
     return {
@@ -301,7 +382,7 @@ function App() {
     };
   }
 
-  function drawStrokeSegment(from: { x: number; y: number }, to: { x: number; y: number }) {
+  function drawStrokeSegment(from: TracePoint, to: TracePoint) {
     const canvas = detailCanvasRef.current;
     if (!canvas) return;
     const context = canvas.getContext("2d");
@@ -320,9 +401,9 @@ function App() {
   }
 
   function drawSmoothStrokeSegment(
-    from: { x: number; y: number },
-    control: { x: number; y: number },
-    to: { x: number; y: number }
+    from: TracePoint,
+    control: TracePoint,
+    to: TracePoint
   ) {
     const canvas = detailCanvasRef.current;
     if (!canvas) return;
@@ -341,7 +422,7 @@ function App() {
     context.restore();
   }
 
-  function removeDetailLineAt(point: { x: number; y: number }) {
+  function removeDetailLineAt(point: TracePoint) {
     const canvas = detailCanvasRef.current;
     if (!canvas) return;
     const context = canvas.getContext("2d");
@@ -352,6 +433,29 @@ function App() {
     saveHistorySnapshot();
     context.putImageData(imageData, 0, 0);
     setEditedDetailDataUrl(canvas.toDataURL("image/png"));
+  }
+
+  function renderManualTraceLayer(strokes: TraceStroke[], draftStroke?: TraceStroke) {
+    const canvas = detailCanvasRef.current;
+    if (!canvas || !analysis) return;
+    canvas.width = analysis.previewWidthPx;
+    canvas.height = analysis.previewHeightPx;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    drawTraceStrokes(context, strokes, draftStroke);
+  }
+
+  function removeManualStrokeAt(point: TracePoint) {
+    const result = eraseTraceStrokes(manualStrokes, point, brushPixels(brushSize));
+    if (!result.changed) return;
+    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
+    setManualRedoHistory([]);
+    setManualStrokes(result.strokes);
+  }
+
+  function nextStrokeId() {
+    strokeIdRef.current += 1;
+    return `stroke-${strokeIdRef.current}`;
   }
 
   return (
@@ -492,15 +596,15 @@ function App() {
                       label="Click to remove line"
                     />
                     <select value={brushSize} onChange={(event) => setBrushSize(event.target.value as BrushSize)} aria-label="Brush size">
-                      <option value="small">Small brush</option>
-                      <option value="medium">Medium brush</option>
-                      <option value="large">Large brush</option>
+                      <option value="thin">Thin detail</option>
+                      <option value="normal">Normal detail</option>
+                      <option value="bold">Bold outline</option>
                     </select>
-                    <button className="tool-button" onClick={undoDetailEdit} disabled={history.length === 0}>
+                    <button className="tool-button" onClick={undoDetailEdit} disabled={undoDisabled}>
                       <Undo2 size={15} />
                       Undo
                     </button>
-                    <button className="tool-button" onClick={redoDetailEdit} disabled={redoHistory.length === 0}>
+                    <button className="tool-button" onClick={redoDetailEdit} disabled={redoDisabled}>
                       <Redo2 size={15} />
                       Redo
                     </button>
@@ -527,7 +631,7 @@ function App() {
                   </div>
                   <p className="editor-note">
                     {traceMode === "manual"
-                      ? "Start clean: trace only the face, clothing, and feature lines you want on the final template."
+                      ? "Trace only the face, clothing, and feature lines you want on the final template."
                       : "Best results: erase extra marks, draw missing face/clothing lines, then export."}
                   </p>
                   <div className="template-editor" style={{ aspectRatio: `${analysis.previewWidthPx} / ${analysis.previewHeightPx}` }}>
@@ -634,12 +738,12 @@ function App() {
 }
 
 function brushPixels(size: BrushSize) {
-  if (size === "small") return 10;
-  if (size === "large") return 34;
+  if (size === "thin") return 10;
+  if (size === "bold") return 34;
   return 20;
 }
 
-function midpoint(a: { x: number; y: number }, b: { x: number; y: number }) {
+function midpoint(a: TracePoint, b: TracePoint): TracePoint {
   return {
     x: (a.x + b.x) / 2,
     y: (a.y + b.y) / 2

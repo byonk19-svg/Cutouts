@@ -8,7 +8,7 @@
     "dev:backend": "python -m backend.cutout_studio.server",
     "dev:frontend": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
-    "test": "python -m unittest discover -s backend/tests -p \"test_*.py\" && node --experimental-strip-types tests/detailEditor.test.ts && node --experimental-strip-types tests/traceWorkflow.test.ts",
+    "test": "python -m unittest discover -s backend/tests -p \"test_*.py\" && node --experimental-strip-types tests/detailEditor.test.ts && node --experimental-strip-types tests/traceWorkflow.test.ts && node --experimental-strip-types tests/traceStrokes.test.ts",
     "verify": "pnpm test && pnpm build"
   },
   "dependencies": {

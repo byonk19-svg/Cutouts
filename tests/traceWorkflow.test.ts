@@ -30,7 +30,7 @@ const baseSettings: Settings = {
 {
   const settings = traceModeSettings("manual", baseSettings);
 
-  assertEqual(traceModeLabel("manual"), "Trace It Yourself", "manual mode should be labeled as a human tracing workflow");
+  assertEqual(traceModeLabel("manual"), "Trace Studio", "manual mode should be labeled as the Trace Studio workflow");
   assert(startsWithBlankManualLayer("manual"), "manual mode should start with a blank detail layer");
   assert(opensEditorWithReference("manual"), "manual mode should open the editor with the reference visible");
   assertEqual(settings.detailLines, false, "manual mode should not import generated detail suggestions into the editable layer");
@@ -39,9 +39,9 @@ const baseSettings: Settings = {
 }
 
 {
-  assertEqual(traceModeLabel("marker"), "Experimental Auto Detail", "marker mode should no longer promise final marker template art");
+  assertEqual(traceModeLabel("marker"), "Experimental Auto Suggestions", "marker mode should no longer promise final marker template art");
   assert(
-    traceModeHelp("marker").includes("not final art"),
+    traceModeHelp("marker").includes("Usually needs cleanup"),
     "experimental auto detail copy should set expectation that suggestions need editing"
   );
   assert(!startsWithBlankManualLayer("marker"), "experimental auto detail should keep generated suggestions as the editable starting layer");
