@@ -1,6 +1,15 @@
 import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, Eraser, Eye, FileImage, FileText, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, Eraser, Eye, FileImage, FileText, FolderOpen, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, Save, SlidersHorizontal, SwatchBook, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  CUTOUT_AUTOSAVE_KEY,
+  createCutoutProjectSnapshot,
+  projectFileName,
+  restoreCutoutProject,
+  serializeCutoutProject,
+  type CutoutProject,
+  type CutoutProjectAnalysis
+} from "./cutoutProject";
 import { removeClickedDetailSegment } from "./detailEditor";
 import { createTraceStroke, deleteTraceStroke, drawTraceStrokes, eraseTraceStrokes, selectTraceStroke, type TracePoint, type TraceStroke } from "./traceStrokes";
 import { DEFAULT_TRACE_VIEWPORT, fittedTraceSize, panViewport, screenToTracePoint, zoomViewport, type TraceViewport } from "./traceViewport";
@@ -17,35 +26,8 @@ import "./styles.css";
 type EditorTool = "erase" | "draw" | "smoothDraw" | "remove" | "select" | "pan";
 type BrushSize = "thin" | "normal" | "bold";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
-
-type PaintMatch = {
-  brand: string;
-  name: string;
-  hex: string;
-  distance: number;
-  source: string;
-};
-
-type PaletteColor = {
-  hex: string;
-  coverage: number;
-  matches: PaintMatch[];
-};
-
-type Analysis = {
-  finishedWidthIn: number;
-  finishedHeightIn: number;
-  tileCols: number;
-  tileRows: number;
-  tileCount: number;
-  previewPngDataUrl: string;
-  outerLinePngDataUrl: string;
-  detailLinePngDataUrl: string;
-  paintGuidePngDataUrl: string;
-  previewWidthPx: number;
-  previewHeightPx: number;
-  palette: PaletteColor[];
-};
+type Analysis = CutoutProjectAnalysis;
+type ProjectStatus = "No saved project" | "Unsaved changes" | "Auto-saved" | "Saved" | "Restored auto-save" | "Project opened" | "Project export failed" | "Project import failed" | "Auto-save failed";
 
 const defaultSettings: Settings = {
   finishedHeightIn: 36,
@@ -68,6 +50,11 @@ const cleanupStepLabels: Record<CleanupStep, string> = {
 
 function App() {
   const [image, setImage] = useState<File | null>(null);
+  const [sourceImageDataUrl, setSourceImageDataUrl] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState("Cutout Project");
+  const [projectCreatedAt, setProjectCreatedAt] = useState<string | null>(null);
+  const [projectStatus, setProjectStatus] = useState<ProjectStatus>("No saved project");
+  const [autosavePaused, setAutosavePaused] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [traceMode, setTraceMode] = useState<TraceMode>("paint");
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -97,6 +84,7 @@ function App() {
   const [editedDetailDataUrl, setEditedDetailDataUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const projectFileInputRef = useRef<HTMLInputElement | null>(null);
   const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
   const drawingRef = useRef(false);
@@ -109,12 +97,18 @@ function App() {
 
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
+  const canSaveProject = image !== null && sourceImageDataUrl !== null && analysis !== null && !busy;
   const advancedTraceModeSelected = traceMode === "marker" || traceMode === "extra";
   const traceStudioOpen = traceMode === "manual";
   const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
   const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
 
   useEffect(() => {
+    if (analysis) return;
+    resetEditorState();
+  }, [analysis]);
+
+  function resetEditorState() {
     setHistory([]);
     setRedoHistory([]);
     setEditedDetailDataUrl(null);
@@ -124,7 +118,53 @@ function App() {
     setSelectedStrokeId(null);
     setTraceViewport(DEFAULT_TRACE_VIEWPORT);
     setPrintPreview(false);
-  }, [analysis]);
+  }
+
+  useEffect(() => {
+    try {
+      const rawProject = localStorage.getItem(CUTOUT_AUTOSAVE_KEY);
+      if (!rawProject) return;
+      void applyProject(restoreCutoutProject(rawProject), "Restored auto-save").catch(() => {
+        setProjectStatus("Project import failed");
+      });
+    } catch {
+      setProjectStatus("Project import failed");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (autosavePaused) return;
+    const snapshot = buildProjectSnapshot();
+    if (!snapshot) return;
+    setProjectStatus("Unsaved changes");
+    const timeoutId = window.setTimeout(() => {
+      try {
+        localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serializeCutoutProject(snapshot));
+        setProjectStatus("Auto-saved");
+      } catch {
+        setProjectStatus("Auto-save failed");
+      }
+    }, 450);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    image,
+    sourceImageDataUrl,
+    projectName,
+    projectCreatedAt,
+    settings,
+    traceMode,
+    analysis,
+    manualStrokes,
+    referenceOpacity,
+    showReference,
+    showCutline,
+    showManualLines,
+    showSuggestions,
+    printPreview,
+    traceViewport,
+    autosavePaused
+  ]);
 
   useEffect(() => {
     if (!analysis || !editorOpen) return;
@@ -156,12 +196,10 @@ function App() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to analyze image.");
       const openEditor = opensEditorWithReference(nextSettings.templateStyle);
+      resetEditorState();
       setAnalysis(body);
       setEditorOpen(openEditor);
       setShowReference(openEditor);
-      setHistory([]);
-      setRedoHistory([]);
-      setEditedDetailDataUrl(null);
       resetCleanupChecks();
     } catch (err) {
       setAnalysis(null);
@@ -198,6 +236,120 @@ function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleImageUpload(file: File | null) {
+    setImage(file);
+    setAnalysis(null);
+    setError(null);
+    setSourceImageDataUrl(null);
+    setProjectCreatedAt(null);
+    setProjectStatus(file ? "Unsaved changes" : "No saved project");
+    if (!file) return;
+
+    try {
+      setSourceImageDataUrl(await readFileAsDataUrl(file));
+      setProjectName(file.name.replace(/\.[^.]+$/, "") || "Cutout Project");
+      setProjectCreatedAt(new Date().toISOString());
+    } catch {
+      setError("Unable to read the selected image.");
+    }
+  }
+
+  function buildProjectSnapshot() {
+    if (!image || !sourceImageDataUrl || !analysis) return null;
+    const now = new Date().toISOString();
+    return createCutoutProjectSnapshot({
+      projectName,
+      createdAt: projectCreatedAt ?? now,
+      updatedAt: now,
+      sourceImage: {
+        name: image.name,
+        type: image.type || "application/octet-stream",
+        dataUrl: sourceImageDataUrl
+      },
+      settings,
+      traceMode,
+      analysis,
+      manualStrokes,
+      referenceOpacity,
+      layerVisibility: {
+        showReference,
+        showCutline,
+        showManualLines,
+        showSuggestions,
+        printPreview
+      },
+      traceViewport
+    });
+  }
+
+  function downloadProjectFile(status: ProjectStatus) {
+    const project = buildProjectSnapshot();
+    if (!project) return;
+    try {
+      const blob = new Blob([serializeCutoutProject(project)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = projectFileName(project.projectName);
+      link.click();
+      URL.revokeObjectURL(url);
+      localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serializeCutoutProject(project));
+      setProjectStatus(status);
+    } catch {
+      setProjectStatus("Project export failed");
+    }
+  }
+
+  async function openProjectFile(file: File | null) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const project = restoreCutoutProject(text);
+      await applyProject(project, "Project opened");
+      localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serializeCutoutProject(project));
+    } catch {
+      setProjectStatus("Project import failed");
+      setError("Unable to open that project file.");
+    }
+  }
+
+  async function applyProject(project: CutoutProject, status: ProjectStatus) {
+    const restoredFile = await fileFromDataUrl(project.sourceImage.dataUrl, project.sourceImage.name, project.sourceImage.type);
+    setAutosavePaused(true);
+    setImage(restoredFile);
+    setSourceImageDataUrl(project.sourceImage.dataUrl);
+    setProjectName(project.projectName);
+    setProjectCreatedAt(project.createdAt);
+    setSettings(project.settings);
+    setTraceMode(project.traceMode);
+    setManualStrokes(project.manualStrokes);
+    setAnalysis(project.analysis);
+    setEditorOpen(opensEditorWithReference(project.traceMode) || project.manualStrokes.length > 0);
+    setShowReference(project.layerVisibility.showReference);
+    setReferenceOpacity(project.referenceOpacity);
+    setShowCutline(project.layerVisibility.showCutline);
+    setShowManualLines(project.layerVisibility.showManualLines);
+    setShowSuggestions(project.layerVisibility.showSuggestions);
+    setPrintPreview(false);
+    setTraceViewport(project.traceViewport);
+    setSelectedStrokeId(null);
+    setCleanupChecks({
+      cutline: false,
+      remove: false,
+      draw: false,
+      export: false
+    });
+    setManualHistory([]);
+    setManualRedoHistory([]);
+    setHistory([]);
+    setRedoHistory([]);
+    setEditedDetailDataUrl(null);
+    setError(null);
+    setProjectStatus(status);
+    strokeIdRef.current = highestStrokeNumber(project.manualStrokes);
+    window.setTimeout(() => setAutosavePaused(false), 100);
   }
 
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -585,12 +737,42 @@ function App() {
               accept="image/png,image/jpeg"
               onChange={(event) => {
                 const file = event.target.files?.[0] ?? null;
-                setImage(file);
-                setAnalysis(null);
-                setError(null);
+                void handleImageUpload(file);
               }}
             />
           </label>
+
+          <div className="project-card">
+            <div className="project-card-title">
+              <strong>{projectName}</strong>
+              <span>{projectStatus}</span>
+            </div>
+            <div className="project-actions">
+              <button className="tool-button" onClick={() => projectFileInputRef.current?.click()}>
+                <FolderOpen size={15} />
+                Open Project
+              </button>
+              <button className="tool-button" onClick={() => downloadProjectFile("Saved")} disabled={!canSaveProject}>
+                <Save size={15} />
+                Save Project
+              </button>
+              <button className="tool-button" onClick={() => downloadProjectFile("Saved")} disabled={!canSaveProject}>
+                <Download size={15} />
+                Export JSON
+              </button>
+            </div>
+            <input
+              ref={projectFileInputRef}
+              className="hidden-project-input"
+              type="file"
+              accept=".cutout.json,application/json"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                void openProjectFile(file);
+                event.currentTarget.value = "";
+              }}
+            />
+          </div>
 
           <NumberField
             label="Finished height"
@@ -929,6 +1111,36 @@ function safelyReleasePointerCapture(element: HTMLCanvasElement, pointerId: numb
   } catch {
     // Matching guard for pointer capture fallback.
   }
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("File did not load as a data URL."));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function fileFromDataUrl(dataUrl: string, name: string, type: string) {
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  return new File([blob], name, { type: type || blob.type || "application/octet-stream" });
+}
+
+function highestStrokeNumber(strokes: TraceStroke[]) {
+  let highest = 0;
+  for (const stroke of strokes) {
+    const match = /^stroke-(\d+)$/.exec(stroke.id);
+    if (match) highest = Math.max(highest, Number(match[1]));
+  }
+  return highest;
 }
 
 function SegmentedButton({

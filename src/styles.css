@@ -134,6 +134,46 @@ button {
   display: none;
 }
 
+.project-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #f7fbf9;
+}
+
+.project-card-title {
+  display: grid;
+  gap: 3px;
+}
+
+.project-card-title strong {
+  color: #17201d;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.project-card-title span {
+  color: #65736c;
+  font-size: 12px;
+}
+
+.project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.project-actions .tool-button {
+  flex: 1 1 118px;
+}
+
+.hidden-project-input {
+  display: none;
+}
+
 .field,
 .number-field,
 .choice-group {
