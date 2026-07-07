@@ -17,7 +17,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 
-TEMPLATE_STYLES = {"cutOnly", "clean", "marker", "detailed"}
+TEMPLATE_STYLES = {"cutOnly", "clean", "manual", "marker", "detailed"}
 TEMPLATE_STYLE_ALIASES = {"outline": "cutOnly", "paint": "clean", "extra": "detailed"}
 LETTER_WIDTH_IN = 8.5
 LETTER_HEIGHT_IN = 11.0

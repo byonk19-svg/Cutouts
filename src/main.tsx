@@ -2,24 +2,19 @@ import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactN
 import { createRoot } from "react-dom/client";
 import { Download, Eraser, Eye, FileImage, FileText, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Undo2 } from "lucide-react";
 import { removeClickedDetailSegment } from "./detailEditor";
+import {
+  opensEditorWithReference,
+  traceModeHelp,
+  traceModeLabel,
+  traceModeSettings,
+  type Settings,
+  type TraceMode
+} from "./traceWorkflow";
 import "./styles.css";
 
-type TraceMode = "outline" | "paint" | "marker" | "extra";
 type EditorTool = "erase" | "draw" | "smoothDraw" | "remove";
 type BrushSize = "small" | "medium" | "large";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
-
-type Settings = {
-  finishedHeightIn: number;
-  threshold: number;
-  smoothing: number;
-  speckArea: number;
-  holeArea: number;
-  detailLines: boolean;
-  detailCleanup: number;
-  templateStyle: TraceMode;
-  paletteSize: number;
-};
 
 type PaintMatch = {
   brand: string;
@@ -98,9 +93,9 @@ function App() {
 
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
+  const advancedTraceModeSelected = traceMode === "marker" || traceMode === "extra";
 
   useEffect(() => {
-    setEditorOpen(false);
     setHistory([]);
     setRedoHistory([]);
     setEditedDetailDataUrl(null);
@@ -122,8 +117,10 @@ function App() {
       const response = await fetch("/api/analyze", { method: "POST", body: payload });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to analyze image.");
+      const openEditor = opensEditorWithReference(nextSettings.templateStyle);
       setAnalysis(body);
-      setEditorOpen(false);
+      setEditorOpen(openEditor);
+      setShowReference(openEditor);
       setHistory([]);
       setRedoHistory([]);
       setEditedDetailDataUrl(null);
@@ -401,20 +398,16 @@ function App() {
           <div className="choice-group" aria-label="Trace style">
             <span className="choice-label">Trace style</span>
             <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
-              <strong>Cut Only</strong>
-              <small>Outer shape only</small>
+              <strong>{traceModeLabel("outline")}</strong>
+              <small>{traceModeHelp("outline")}</small>
             </button>
             <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
-              <strong>Clean Character Template</strong>
-              <small>Bold cutline with starter feature lines you can edit</small>
+              <strong>{traceModeLabel("paint")}</strong>
+              <small>{traceModeHelp("paint")}</small>
             </button>
-            <button className={traceMode === "marker" ? "choice selected" : "choice"} onClick={() => applyTraceMode("marker")}>
-              <strong>Marker Template</strong>
-              <small>Sparser Max-style lines for wood transfer</small>
-            </button>
-            <button className={traceMode === "extra" ? "choice selected" : "choice"} onClick={() => applyTraceMode("extra")}>
-              <strong>Detailed Paint Map</strong>
-              <small>More color boundaries</small>
+            <button className={traceMode === "manual" ? "choice selected" : "choice"} onClick={() => applyTraceMode("manual")}>
+              <strong>{traceModeLabel("manual")}</strong>
+              <small>{traceModeHelp("manual")}</small>
             </button>
           </div>
 
@@ -433,13 +426,28 @@ function App() {
           <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => updateSetting("paletteSize", value)} />
 
           <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
-            {advancedOpen ? "Hide advanced cleanup" : "Show advanced cleanup"}
+            {advancedOpen
+              ? "Hide advanced cleanup"
+              : advancedTraceModeSelected
+                ? `Show advanced cleanup (${traceModeLabel(traceMode)} selected)`
+                : "Show advanced cleanup"}
           </button>
           {advancedOpen ? (
             <div className="advanced-panel">
               <RangeField label="Background sensitivity" min={0} max={180} value={settings.threshold} onChange={(value) => updateSetting("threshold", value)} />
               <RangeField label="Remove tiny marks" min={0} max={600} value={settings.speckArea} onChange={(value) => updateSetting("speckArea", value)} />
               <RangeField label="Close small gaps" min={0} max={1500} value={settings.holeArea} onChange={(value) => updateSetting("holeArea", value)} />
+              <div className="choice-group" aria-label="Advanced trace styles">
+                <span className="choice-label">Experimental detail sources</span>
+                <button className={traceMode === "marker" ? "choice selected" : "choice"} onClick={() => applyTraceMode("marker")}>
+                  <strong>{traceModeLabel("marker")}</strong>
+                  <small>{traceModeHelp("marker")}</small>
+                </button>
+                <button className={traceMode === "extra" ? "choice selected" : "choice"} onClick={() => applyTraceMode("extra")}>
+                  <strong>{traceModeLabel("extra")}</strong>
+                  <small>{traceModeHelp("extra")}</small>
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -517,7 +525,11 @@ function App() {
                       </label>
                     ) : null}
                   </div>
-                  <p className="editor-note">Best results: erase extra marks, draw missing face/clothing lines, then export.</p>
+                  <p className="editor-note">
+                    {traceMode === "manual"
+                      ? "Start clean: trace only the face, clothing, and feature lines you want on the final template."
+                      : "Best results: erase extra marks, draw missing face/clothing lines, then export."}
+                  </p>
                   <div className="template-editor" style={{ aspectRatio: `${analysis.previewWidthPx} / ${analysis.previewHeightPx}` }}>
                     {showReference ? (
                       <img
@@ -651,54 +663,6 @@ function SegmentedButton({
       {label}
     </button>
   );
-}
-
-function traceModeSettings(mode: TraceMode, current: Settings): Settings {
-  if (mode === "outline") {
-    return {
-      ...current,
-      smoothing: Math.max(current.smoothing, 3),
-      speckArea: Math.max(current.speckArea, 80),
-      holeArea: Math.max(current.holeArea, 260),
-      detailLines: false,
-      detailCleanup: 100,
-      templateStyle: mode
-    };
-  }
-  if (mode === "extra") {
-    return {
-      ...current,
-      smoothing: Math.max(2, current.smoothing),
-      detailLines: true,
-      detailCleanup: 35,
-      templateStyle: mode
-    };
-  }
-  if (mode === "marker") {
-    return {
-      ...current,
-      smoothing: Math.max(current.smoothing, 5),
-      speckArea: Math.max(current.speckArea, 120),
-      holeArea: Math.max(current.holeArea, 320),
-      detailLines: true,
-      detailCleanup: 94,
-      templateStyle: mode
-    };
-  }
-  return {
-    ...current,
-    smoothing: Math.max(current.smoothing, 4),
-    detailLines: true,
-    detailCleanup: 88,
-    templateStyle: mode
-  };
-}
-
-function traceModeLabel(mode: TraceMode) {
-  if (mode === "outline") return "Cut Only";
-  if (mode === "marker") return "Marker Template";
-  if (mode === "extra") return "Detailed Paint Map";
-  return "Clean Character Template";
 }
 
 function PanelTitle({ icon, title }: { icon: ReactNode; title: string }) {

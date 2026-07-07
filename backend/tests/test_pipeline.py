@@ -265,6 +265,17 @@ class PrintPipelineTest(unittest.TestCase):
 
         self.assertEqual(settings.template_style, "marker")
 
+    def test_manual_trace_mode_returns_cutline_with_blank_detail_layer(self) -> None:
+        settings = TemplateSettings.from_mapping({"templateStyle": "manual", "detailLines": False})
+
+        analysis = analyze_template(transparent_fixture(), settings)
+        outer = Image.open(io.BytesIO(analysis.outer_line_png)).convert("RGBA")
+        detail = Image.open(io.BytesIO(analysis.detail_line_png)).convert("RGBA")
+
+        self.assertEqual(settings.template_style, "manual")
+        self.assertGreater(self._count_mask_pixels(outer.getchannel("A")), 0)
+        self.assertEqual(self._count_mask_pixels(detail.getchannel("A")), 0)
+
     def test_detail_cleanup_reduces_noisy_interior_lines(self) -> None:
         image, mask = noisy_detail_fixture()
 
