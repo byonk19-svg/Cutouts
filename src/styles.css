@@ -69,6 +69,14 @@ button {
   margin-top: 4px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(248px, 300px) minmax(420px, 1fr) minmax(278px, 340px);
@@ -308,6 +316,7 @@ button {
 }
 
 .primary-action,
+.secondary-topbar-action,
 .secondary-action {
   display: inline-flex;
   align-items: center;
@@ -324,6 +333,13 @@ button {
   padding: 0 16px;
   color: #ffffff;
   background: #1d7a70;
+}
+
+.secondary-topbar-action {
+  padding: 0 14px;
+  color: #1d5d55;
+  background: #eef8f5;
+  border: 1px solid #9ccac0;
 }
 
 .secondary-action {
@@ -695,6 +711,10 @@ button:disabled {
     height: auto;
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .topbar-actions {
+    justify-content: flex-start;
   }
 
   .workspace {

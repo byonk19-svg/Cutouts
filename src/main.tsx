@@ -12,6 +12,7 @@ import {
 } from "./cutoutProject";
 import { removeClickedDetailSegment } from "./detailEditor";
 import { createTraceStroke, deleteTraceStroke, drawTraceStrokes, eraseTraceStrokes, selectTraceStroke, type TracePoint, type TraceStroke } from "./traceStrokes";
+import { buildTraceLineworkSvg, svgLineworkFileName } from "./traceLineworkSvg";
 import { DEFAULT_TRACE_VIEWPORT, fittedTraceSize, panViewport, screenToTracePoint, zoomViewport, type TraceViewport } from "./traceViewport";
 import {
   opensEditorWithReference,
@@ -98,6 +99,7 @@ function App() {
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
   const canSaveProject = image !== null && sourceImageDataUrl !== null && analysis !== null && !busy;
+  const canExportSvg = analysis !== null && !busy;
   const advancedTraceModeSelected = traceMode === "marker" || traceMode === "extra";
   const traceStudioOpen = traceMode === "manual";
   const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
@@ -235,6 +237,30 @@ function App() {
       setError(err instanceof Error ? err.message : "Unable to export PDF.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function exportSvgLinework() {
+    if (!analysis) return;
+    try {
+      const svg = buildTraceLineworkSvg({
+        projectName,
+        analysis,
+        manualStrokes,
+        includeCutline: true,
+        includeSuggestions: showSuggestions,
+        includeWhiteBackground: true,
+        includeCalibration: true
+      });
+      const blob = new Blob([svg], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = svgLineworkFileName(projectName);
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Unable to export SVG linework.");
     }
   }
 
@@ -720,10 +746,16 @@ function App() {
           <h1>Cutout Studio</h1>
           <p>Personal wood cutout template generator</p>
         </div>
-        <button className="primary-action" onClick={exportPdf} disabled={!canExport}>
-          <Download size={18} />
-          Export PDF
-        </button>
+        <div className="topbar-actions">
+          <button className="secondary-topbar-action" onClick={exportSvgLinework} disabled={!canExportSvg}>
+            <FileText size={18} />
+            Export SVG Linework
+          </button>
+          <button className="primary-action" onClick={exportPdf} disabled={!canExport}>
+            <Download size={18} />
+            Export Printable PDF
+          </button>
+        </div>
       </header>
 
       <section className="workspace">
