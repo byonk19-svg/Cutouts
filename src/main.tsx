@@ -1,8 +1,9 @@
 import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, Eraser, Eye, FileImage, FileText, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Undo2 } from "lucide-react";
+import { Download, Eraser, Eye, FileImage, FileText, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, SlidersHorizontal, SwatchBook, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { removeClickedDetailSegment } from "./detailEditor";
-import { createTraceStroke, drawTraceStrokes, eraseTraceStrokes, type TracePoint, type TraceStroke } from "./traceStrokes";
+import { createTraceStroke, deleteTraceStroke, drawTraceStrokes, eraseTraceStrokes, selectTraceStroke, type TracePoint, type TraceStroke } from "./traceStrokes";
+import { DEFAULT_TRACE_VIEWPORT, fittedTraceSize, panViewport, screenToTracePoint, zoomViewport, type TraceViewport } from "./traceViewport";
 import {
   opensEditorWithReference,
   traceModeHelp,
@@ -13,7 +14,7 @@ import {
 } from "./traceWorkflow";
 import "./styles.css";
 
-type EditorTool = "erase" | "draw" | "smoothDraw" | "remove";
+type EditorTool = "erase" | "draw" | "smoothDraw" | "remove" | "select" | "pan";
 type BrushSize = "thin" | "normal" | "bold";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
 
@@ -76,6 +77,12 @@ function App() {
   const [brushSize, setBrushSize] = useState<BrushSize>("normal");
   const [showReference, setShowReference] = useState(false);
   const [referenceOpacity, setReferenceOpacity] = useState(35);
+  const [showCutline, setShowCutline] = useState(true);
+  const [showManualLines, setShowManualLines] = useState(true);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [printPreview, setPrintPreview] = useState(false);
+  const [traceViewport, setTraceViewport] = useState<TraceViewport>(DEFAULT_TRACE_VIEWPORT);
+  const [selectedStrokeId, setSelectedStrokeId] = useState<string | null>(null);
   const [cleanupChecks, setCleanupChecks] = useState<Record<CleanupStep, boolean>>({
     cutline: false,
     remove: false,
@@ -91,7 +98,10 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const editorViewportRef = useRef<HTMLDivElement | null>(null);
   const drawingRef = useRef(false);
+  const panningRef = useRef(false);
+  const panStartRef = useRef<TracePoint | null>(null);
   const lastPointRef = useRef<TracePoint | null>(null);
   const smoothAnchorRef = useRef<TracePoint | null>(null);
   const draftStrokeRef = useRef<TraceStroke | null>(null);
@@ -111,6 +121,9 @@ function App() {
     setManualStrokes([]);
     setManualHistory([]);
     setManualRedoHistory([]);
+    setSelectedStrokeId(null);
+    setTraceViewport(DEFAULT_TRACE_VIEWPORT);
+    setPrintPreview(false);
   }, [analysis]);
 
   useEffect(() => {
@@ -120,7 +133,16 @@ function App() {
       return;
     }
     loadDetailCanvas(editedDetailDataUrl ?? analysis.detailLinePngDataUrl);
-  }, [analysis, editorOpen, editedDetailDataUrl, manualStrokes, traceStudioOpen]);
+  }, [analysis, editorOpen, editedDetailDataUrl, manualStrokes, printPreview, selectedStrokeId, traceStudioOpen]);
+
+  useEffect(() => {
+    if (printPreview) {
+      setShowReference(false);
+      setShowSuggestions(false);
+      setShowCutline(true);
+      setShowManualLines(true);
+    }
+  }, [printPreview]);
 
   async function analyze(nextSettings = settings) {
     if (!image) return;
@@ -216,7 +238,7 @@ function App() {
     const canvas = detailCanvasRef.current;
     if (!canvas || !analysis) return editedDetailDataUrl;
     if (traceStudioOpen) {
-      renderManualTraceLayer(manualStrokes);
+      renderManualTraceLayer(manualStrokes, undefined, false);
     }
     return canvas.toDataURL("image/png");
   }
@@ -235,6 +257,7 @@ function App() {
       setManualHistory((items) => items.slice(0, -1));
       setManualRedoHistory((items) => [...items.slice(-19), manualStrokes]);
       setManualStrokes(previous);
+      setSelectedStrokeId(null);
       return;
     }
     const current = currentDetailDataUrl();
@@ -253,6 +276,7 @@ function App() {
       setManualHistory((items) => [...items.slice(-19), manualStrokes]);
       setManualRedoHistory((items) => items.slice(0, -1));
       setManualStrokes(next);
+      setSelectedStrokeId(null);
       return;
     }
     const current = currentDetailDataUrl();
@@ -270,6 +294,7 @@ function App() {
       setManualHistory((items) => [...items.slice(-19), manualStrokes]);
       setManualRedoHistory([]);
       setManualStrokes([]);
+      setSelectedStrokeId(null);
       return;
     }
     saveHistorySnapshot();
@@ -294,11 +319,21 @@ function App() {
     if (!analysis) return;
     const point = canvasPoint(event);
     if (traceStudioOpen) {
+      if (editorTool === "pan") {
+        safelySetPointerCapture(event.currentTarget, event.pointerId);
+        panningRef.current = true;
+        panStartRef.current = { x: event.clientX, y: event.clientY };
+        return;
+      }
+      if (editorTool === "select") {
+        setSelectedStrokeId(selectTraceStroke(manualStrokes, point, brushPixels(brushSize))?.id ?? null);
+        return;
+      }
       if (editorTool === "erase" || editorTool === "remove") {
         removeManualStrokeAt(point);
         return;
       }
-      event.currentTarget.setPointerCapture(event.pointerId);
+      safelySetPointerCapture(event.currentTarget, event.pointerId);
       drawingRef.current = true;
       lastPointRef.current = point;
       smoothAnchorRef.current = point;
@@ -310,7 +345,7 @@ function App() {
       removeDetailLineAt(point);
       return;
     }
-    event.currentTarget.setPointerCapture(event.pointerId);
+    safelySetPointerCapture(event.currentTarget, event.pointerId);
     saveHistorySnapshot();
     drawingRef.current = true;
     lastPointRef.current = point;
@@ -319,7 +354,15 @@ function App() {
   }
 
   function continueStroke(event: PointerEvent<HTMLCanvasElement>) {
-    if (!drawingRef.current || editorTool === "remove") return;
+    if (traceStudioOpen && panningRef.current) {
+      const previous = panStartRef.current;
+      if (!previous) return;
+      const current = { x: event.clientX, y: event.clientY };
+      setTraceViewport((viewport) => panViewport(viewport, { x: current.x - previous.x, y: current.y - previous.y }));
+      panStartRef.current = current;
+      return;
+    }
+    if (!drawingRef.current || editorTool === "remove" || editorTool === "select" || editorTool === "pan") return;
     const point = canvasPoint(event);
     if (traceStudioOpen) {
       const draft = draftStrokeRef.current;
@@ -346,13 +389,20 @@ function App() {
 
   function endStroke(event: PointerEvent<HTMLCanvasElement>) {
     if (traceStudioOpen) {
+      if (panningRef.current) {
+        safelyReleasePointerCapture(event.currentTarget, event.pointerId);
+        panningRef.current = false;
+        panStartRef.current = null;
+        return;
+      }
       if (drawingRef.current) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
+        safelyReleasePointerCapture(event.currentTarget, event.pointerId);
         const draft = draftStrokeRef.current;
         if (draft && draft.points.length > 0) {
           setManualHistory((items) => [...items.slice(-19), manualStrokes]);
           setManualRedoHistory([]);
           setManualStrokes((items) => [...items, draft]);
+          setSelectedStrokeId(draft.id);
         }
       }
       drawingRef.current = false;
@@ -365,7 +415,7 @@ function App() {
       if (editorTool === "smoothDraw" && smoothAnchorRef.current && lastPointRef.current) {
         drawStrokeSegment(smoothAnchorRef.current, lastPointRef.current);
       }
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      safelyReleasePointerCapture(event.currentTarget, event.pointerId);
       setEditedDetailDataUrl(event.currentTarget.toDataURL("image/png"));
     }
     drawingRef.current = false;
@@ -374,12 +424,22 @@ function App() {
   }
 
   function canvasPoint(event: PointerEvent<HTMLCanvasElement>): TracePoint {
+    const viewport = editorViewportRef.current;
     const canvas = event.currentTarget;
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
-      y: ((event.clientY - rect.top) / rect.height) * canvas.height
-    };
+    if (!viewport) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+        y: ((event.clientY - rect.top) / rect.height) * canvas.height
+      };
+    }
+    const rect = viewport.getBoundingClientRect();
+    return screenToTracePoint(
+      { x: event.clientX - rect.left, y: event.clientY - rect.top },
+      traceViewport,
+      { width: canvas.width, height: canvas.height },
+      { width: rect.width, height: rect.height }
+    );
   }
 
   function drawStrokeSegment(from: TracePoint, to: TracePoint) {
@@ -435,14 +495,14 @@ function App() {
     setEditedDetailDataUrl(canvas.toDataURL("image/png"));
   }
 
-  function renderManualTraceLayer(strokes: TraceStroke[], draftStroke?: TraceStroke) {
+  function renderManualTraceLayer(strokes: TraceStroke[], draftStroke?: TraceStroke, showSelection = !printPreview) {
     const canvas = detailCanvasRef.current;
     if (!canvas || !analysis) return;
     canvas.width = analysis.previewWidthPx;
     canvas.height = analysis.previewHeightPx;
     const context = canvas.getContext("2d");
     if (!context) return;
-    drawTraceStrokes(context, strokes, draftStroke);
+    drawTraceStrokes(context, strokes, draftStroke, showSelection ? selectedStrokeId : null);
   }
 
   function removeManualStrokeAt(point: TracePoint) {
@@ -451,11 +511,54 @@ function App() {
     setManualHistory((items) => [...items.slice(-19), manualStrokes]);
     setManualRedoHistory([]);
     setManualStrokes(result.strokes);
+    setSelectedStrokeId(null);
   }
 
   function nextStrokeId() {
     strokeIdRef.current += 1;
     return `stroke-${strokeIdRef.current}`;
+  }
+
+  function deleteSelectedStroke() {
+    if (!selectedStrokeId) return;
+    const result = deleteTraceStroke(manualStrokes, selectedStrokeId);
+    if (!result.changed) return;
+    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
+    setManualRedoHistory([]);
+    setManualStrokes(result.strokes);
+    setSelectedStrokeId(null);
+  }
+
+  function changeZoom(nextZoom: number) {
+    const viewport = editorViewportRef.current;
+    const focus = viewport
+      ? { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 }
+      : { x: 0, y: 0 };
+    const viewportSize = viewport
+      ? { width: viewport.clientWidth, height: viewport.clientHeight }
+      : { width: 1, height: 1 };
+    setTraceViewport((current) => zoomViewport(current, nextZoom, focus, viewportSize));
+  }
+
+  function resetZoom() {
+    setTraceViewport(DEFAULT_TRACE_VIEWPORT);
+  }
+
+  function hundredPercentZoom() {
+    const viewport = editorViewportRef.current;
+    if (!viewport || !analysis) {
+      setTraceViewport({ zoom: 1, panX: 0, panY: 0 });
+      return;
+    }
+    const fitted = fittedTraceSize(
+      { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
+      { width: viewport.clientWidth, height: viewport.clientHeight }
+    );
+    setTraceViewport({
+      zoom: analysis.previewWidthPx / fitted.width,
+      panX: 0,
+      panY: 0
+    });
   }
 
   return (
@@ -595,6 +698,22 @@ function App() {
                       icon={<MousePointerClick size={15} />}
                       label="Click to remove line"
                     />
+                    {traceStudioOpen ? (
+                      <>
+                        <SegmentedButton
+                          selected={editorTool === "select"}
+                          onClick={() => setEditorTool("select")}
+                          icon={<MousePointerClick size={15} />}
+                          label="Select stroke"
+                        />
+                        <SegmentedButton
+                          selected={editorTool === "pan"}
+                          onClick={() => setEditorTool("pan")}
+                          icon={<Hand size={15} />}
+                          label="Pan"
+                        />
+                      </>
+                    ) : null}
                     <select value={brushSize} onChange={(event) => setBrushSize(event.target.value as BrushSize)} aria-label="Brush size">
                       <option value="thin">Thin detail</option>
                       <option value="normal">Normal detail</option>
@@ -611,6 +730,25 @@ function App() {
                     <button className="tool-button" onClick={resetDetailLayer}>
                       <RotateCcw size={15} />
                       Reset details
+                    </button>
+                    {traceStudioOpen ? (
+                      <button className="tool-button" onClick={deleteSelectedStroke} disabled={!selectedStrokeId}>
+                        <Trash2 size={15} />
+                        Delete stroke
+                      </button>
+                    ) : null}
+                    <button className="tool-button" onClick={() => changeZoom(traceViewport.zoom * 1.2)}>
+                      <ZoomIn size={15} />
+                      Zoom in
+                    </button>
+                    <button className="tool-button" onClick={() => changeZoom(traceViewport.zoom / 1.2)}>
+                      <ZoomOut size={15} />
+                      Zoom out
+                    </button>
+                    <button className="tool-button" onClick={resetZoom}>Fit</button>
+                    <button className="tool-button" onClick={hundredPercentZoom}>100%</button>
+                    <button className={printPreview ? "tool-button selected" : "tool-button"} onClick={() => setPrintPreview((shown) => !shown)}>
+                      Preview Printable Template
                     </button>
                     <button className={showReference ? "tool-button selected" : "tool-button"} onClick={() => setShowReference((shown) => !shown)}>
                       <Eye size={15} />
@@ -629,32 +767,59 @@ function App() {
                       </label>
                     ) : null}
                   </div>
+                  <div className="layer-controls" aria-label="Trace Studio layer visibility">
+                    <label>
+                      <input type="checkbox" checked={showReference} onChange={() => setShowReference((shown) => !shown)} />
+                      Original underlay
+                    </label>
+                    <label>
+                      <input type="checkbox" checked={showCutline} onChange={() => setShowCutline((shown) => !shown)} />
+                      Cutline
+                    </label>
+                    <label>
+                      <input type="checkbox" checked={showManualLines} onChange={() => setShowManualLines((shown) => !shown)} />
+                      Manual lines
+                    </label>
+                    <label>
+                      <input type="checkbox" checked={showSuggestions} onChange={() => setShowSuggestions((shown) => !shown)} />
+                      Suggestions
+                    </label>
+                  </div>
                   <p className="editor-note">
                     {traceMode === "manual"
                       ? "Trace only the face, clothing, and feature lines you want on the final template."
                       : "Best results: erase extra marks, draw missing face/clothing lines, then export."}
                   </p>
-                  <div className="template-editor" style={{ aspectRatio: `${analysis.previewWidthPx} / ${analysis.previewHeightPx}` }}>
-                    {showReference ? (
-                      <img
-                        src={analysis.paintGuidePngDataUrl}
-                        alt=""
-                        className="reference-layer"
-                        style={{ opacity: referenceOpacity / 100 }}
+                  <div className="template-editor" ref={editorViewportRef}>
+                    <div
+                      className="template-canvas-plane"
+                      style={{
+                        aspectRatio: `${analysis.previewWidthPx} / ${analysis.previewHeightPx}`,
+                        transform: `translate(calc(-50% + ${traceViewport.panX}px), calc(-50% + ${traceViewport.panY}px)) scale(${traceViewport.zoom})`
+                      }}
+                    >
+                      {showReference && !printPreview ? (
+                        <img
+                          src={analysis.paintGuidePngDataUrl}
+                          alt=""
+                          className="reference-layer"
+                          style={{ opacity: referenceOpacity / 100 }}
+                        />
+                      ) : null}
+                      {showSuggestions && !printPreview ? <img src={analysis.detailLinePngDataUrl} alt="" className="suggestion-layer" draggable={false} /> : null}
+                      <canvas
+                        ref={detailCanvasRef}
+                        className={showManualLines ? "detail-line-layer" : "detail-line-layer hidden-layer"}
+                        width={analysis.previewWidthPx}
+                        height={analysis.previewHeightPx}
+                        onPointerDown={beginStroke}
+                        onPointerMove={continueStroke}
+                        onPointerUp={endStroke}
+                        onPointerCancel={endStroke}
+                        aria-label="Editable interior detail lines"
                       />
-                    ) : null}
-                    <canvas
-                      ref={detailCanvasRef}
-                      className="detail-line-layer"
-                      width={analysis.previewWidthPx}
-                      height={analysis.previewHeightPx}
-                      onPointerDown={beginStroke}
-                      onPointerMove={continueStroke}
-                      onPointerUp={endStroke}
-                      onPointerCancel={endStroke}
-                      aria-label="Editable interior detail lines"
-                    />
-                    <img src={analysis.outerLinePngDataUrl} alt="" className="outer-line-layer" draggable={false} />
+                      {showCutline ? <img src={analysis.outerLinePngDataUrl} alt="" className="outer-line-layer" draggable={false} /> : null}
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -748,6 +913,22 @@ function midpoint(a: TracePoint, b: TracePoint): TracePoint {
     x: (a.x + b.x) / 2,
     y: (a.y + b.y) / 2
   };
+}
+
+function safelySetPointerCapture(element: HTMLCanvasElement, pointerId: number) {
+  try {
+    element.setPointerCapture(pointerId);
+  } catch {
+    // Synthetic pointer events and some browser edge cases do not expose an active pointer.
+  }
+}
+
+function safelyReleasePointerCapture(element: HTMLCanvasElement, pointerId: number) {
+  try {
+    element.releasePointerCapture(pointerId);
+  } catch {
+    // Matching guard for pointer capture fallback.
+  }
 }
 
 function SegmentedButton({

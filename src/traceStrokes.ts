@@ -20,7 +20,7 @@ export type StrokeEraseResult = {
 export function createTraceStroke(id: string, points: TracePoint[], width: number): TraceStroke {
   return {
     id,
-    points: compactTracePoints(points),
+    points: smoothTracePoints(compactTracePoints(points)),
     width,
     color: "#000000",
     tool: "draw"
@@ -38,6 +38,19 @@ export function compactTracePoints(points: TracePoint[], minDistancePx = 1.5): T
   return compacted;
 }
 
+export function smoothTracePoints(points: TracePoint[]): TracePoint[] {
+  if (points.length <= 2) return points;
+  return points.map((point, index) => {
+    if (index === 0 || index === points.length - 1) return point;
+    const previous = points[index - 1];
+    const next = points[index + 1];
+    return {
+      x: (previous.x + point.x * 2 + next.x) / 4,
+      y: (previous.y + point.y * 2 + next.y) / 4
+    };
+  });
+}
+
 export function eraseTraceStrokes(strokes: TraceStroke[], point: TracePoint, radiusPx: number): StrokeEraseResult {
   const removedStrokeIds: string[] = [];
   const kept = strokes.filter((stroke) => {
@@ -49,6 +62,24 @@ export function eraseTraceStrokes(strokes: TraceStroke[], point: TracePoint, rad
   return {
     changed: removedStrokeIds.length > 0,
     removedStrokeIds,
+    strokes: kept
+  };
+}
+
+export function selectTraceStroke(strokes: TraceStroke[], point: TracePoint, radiusPx: number): TraceStroke | null {
+  for (let index = strokes.length - 1; index >= 0; index -= 1) {
+    if (strokeHitTest(strokes[index], point, radiusPx)) {
+      return strokes[index];
+    }
+  }
+  return null;
+}
+
+export function deleteTraceStroke(strokes: TraceStroke[], strokeId: string): StrokeEraseResult {
+  const kept = strokes.filter((stroke) => stroke.id !== strokeId);
+  return {
+    changed: kept.length !== strokes.length,
+    removedStrokeIds: kept.length !== strokes.length ? [strokeId] : [],
     strokes: kept
   };
 }
@@ -69,22 +100,23 @@ export function strokeHitTest(stroke: TraceStroke, point: TracePoint, radiusPx: 
 export function drawTraceStrokes(
   context: CanvasRenderingContext2D,
   strokes: TraceStroke[],
-  draftStroke?: TraceStroke
+  draftStroke?: TraceStroke,
+  selectedStrokeId?: string | null
 ) {
   context.save();
   context.clearRect(0, 0, context.canvas.width, context.canvas.height);
   for (const stroke of draftStroke ? [...strokes, draftStroke] : strokes) {
-    drawTraceStroke(context, stroke);
+    drawTraceStroke(context, stroke, stroke.id === selectedStrokeId);
   }
   context.restore();
 }
 
-function drawTraceStroke(context: CanvasRenderingContext2D, stroke: TraceStroke) {
+function drawTraceStroke(context: CanvasRenderingContext2D, stroke: TraceStroke, selected: boolean) {
   if (stroke.points.length === 0) return;
   context.save();
   context.globalCompositeOperation = "source-over";
-  context.strokeStyle = stroke.color;
-  context.lineWidth = stroke.width;
+  context.strokeStyle = selected ? "#1d7a70" : stroke.color;
+  context.lineWidth = selected ? stroke.width + 4 : stroke.width;
   context.lineCap = "round";
   context.lineJoin = "round";
   context.beginPath();

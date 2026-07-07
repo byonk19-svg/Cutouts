@@ -1,7 +1,10 @@
 import {
   compactTracePoints,
   createTraceStroke,
+  deleteTraceStroke,
   eraseTraceStrokes,
+  selectTraceStroke,
+  smoothTracePoints,
   strokeHitTest,
   type TraceStroke
 } from "../src/traceStrokes.ts";
@@ -52,4 +55,31 @@ function assertEqual(actual: unknown, expected: unknown, message: string) {
 
   assert(strokeHitTest(stroke, { x: 35, y: 14 }, 2), "hit test should account for stroke width");
   assert(!strokeHitTest(stroke, { x: 35, y: 30 }, 2), "hit test should ignore distant points");
+}
+
+{
+  const smoothed = smoothTracePoints([
+    { x: 0, y: 0 },
+    { x: 10, y: 20 },
+    { x: 20, y: 0 }
+  ]);
+
+  assertEqual(smoothed[0].y, 0, "smoothing should preserve the first point");
+  assertEqual(smoothed[2].y, 0, "smoothing should preserve the last point");
+  assert(smoothed[1].y < 20, "smoothing should reduce middle-point jitter");
+}
+
+{
+  const strokes: TraceStroke[] = [
+    createTraceStroke("first", [{ x: 0, y: 0 }, { x: 50, y: 0 }], 8),
+    createTraceStroke("topmost", [{ x: 0, y: 0 }, { x: 50, y: 0 }], 8)
+  ];
+
+  const selected = selectTraceStroke(strokes, { x: 25, y: 2 }, 4);
+  assertEqual(selected?.id, "topmost", "selection should prefer the topmost matching manual stroke");
+
+  const deleted = deleteTraceStroke(strokes, "topmost");
+  assert(deleted.changed, "delete should remove a selected manual stroke");
+  assertEqual(deleted.strokes.length, 1, "delete should leave unselected manual strokes");
+  assertEqual(deleted.strokes[0].id, "first", "delete should not affect other manual strokes");
 }
