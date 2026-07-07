@@ -1,6 +1,6 @@
 import { createCutoutProjectSnapshot, restoreCutoutProject, serializeCutoutProject } from "../src/cutoutProject.ts";
 import { buildTraceLineworkSvg, svgLineworkFileName } from "../src/traceLineworkSvg.ts";
-import { createTraceStroke } from "../src/traceStrokes.ts";
+import { changeTraceStrokeWidth, createTraceStroke, moveTraceStroke } from "../src/traceStrokes.ts";
 import { DEFAULT_TRACE_VIEWPORT } from "../src/traceViewport.ts";
 import type { Settings } from "../src/traceWorkflow.ts";
 
@@ -73,6 +73,8 @@ const analysis = {
 
 {
   const strokes = [createTraceStroke("eye", [{ x: 5, y: 8 }, { x: 20, y: 8 }], 10)];
+  const moved = moveTraceStroke(strokes, "eye", { x: 7, y: 3 });
+  const widened = changeTraceStrokeWidth(moved.strokes, "eye", 34);
   const project = createCutoutProjectSnapshot({
     projectName: "Round Trip",
     createdAt: "2026-07-07T10:00:00.000Z",
@@ -81,7 +83,7 @@ const analysis = {
     settings,
     traceMode: "manual",
     analysis,
-    manualStrokes: strokes,
+    manualStrokes: widened.strokes,
     referenceOpacity: 35,
     layerVisibility: {
       showReference: true,
@@ -110,6 +112,8 @@ const analysis = {
   });
 
   assertEqual(after, before, "save/load project then SVG export should preserve stroke data");
+  assert(after.includes("M 12 11"), "edited stroke should appear in SVG export with moved geometry");
+  assert(after.includes('stroke-width="34"'), "edited stroke width should persist through save/load into SVG export");
 }
 
 {

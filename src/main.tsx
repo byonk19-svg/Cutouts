@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, Eraser, Eye, FileImage, FileText, FolderOpen, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, Save, SlidersHorizontal, SwatchBook, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, Download, Eraser, Eye, FileImage, FileText, FolderOpen, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, Save, SlidersHorizontal, SwatchBook, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import {
   CUTOUT_AUTOSAVE_KEY,
   createCutoutProjectSnapshot,
@@ -11,7 +11,23 @@ import {
   type CutoutProjectAnalysis
 } from "./cutoutProject";
 import { removeClickedDetailSegment } from "./detailEditor";
-import { createTraceStroke, deleteTraceStroke, drawTraceStrokes, eraseTraceStrokes, selectTraceStroke, type TracePoint, type TraceStroke } from "./traceStrokes";
+import {
+  changeTraceStrokeWidth,
+  createTraceStroke,
+  deleteTraceStroke,
+  drawTraceStrokes,
+  duplicateTraceStroke,
+  eraseTraceStrokes,
+  moveTraceStroke,
+  selectTracePointIndex,
+  selectTraceStroke,
+  simplifyTraceStrokeById,
+  smoothTraceStrokeById,
+  updateTraceStrokePoint,
+  type StrokeEditResult,
+  type TracePoint,
+  type TraceStroke
+} from "./traceStrokes";
 import { buildTraceLineworkSvg, svgLineworkFileName } from "./traceLineworkSvg";
 import { DEFAULT_TRACE_VIEWPORT, fittedTraceSize, panViewport, screenToTracePoint, zoomViewport, type TraceViewport } from "./traceViewport";
 import {
@@ -29,6 +45,14 @@ type BrushSize = "thin" | "normal" | "bold";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
 type Analysis = CutoutProjectAnalysis;
 type ProjectStatus = "No saved project" | "Unsaved changes" | "Auto-saved" | "Saved" | "Restored auto-save" | "Project opened" | "Project export failed" | "Project import failed" | "Auto-save failed";
+type StrokeDragState = {
+  mode: "move" | "point";
+  strokeId: string;
+  pointIndex?: number;
+  startPoint: TracePoint;
+  originalStrokes: TraceStroke[];
+  moved: boolean;
+};
 
 const defaultSettings: Settings = {
   finishedHeightIn: 36,
@@ -94,6 +118,7 @@ function App() {
   const lastPointRef = useRef<TracePoint | null>(null);
   const smoothAnchorRef = useRef<TracePoint | null>(null);
   const draftStrokeRef = useRef<TraceStroke | null>(null);
+  const strokeDragRef = useRef<StrokeDragState | null>(null);
   const strokeIdRef = useRef(0);
 
   const canAnalyze = image !== null && !busy;
@@ -102,6 +127,7 @@ function App() {
   const canExportSvg = analysis !== null && !busy;
   const advancedTraceModeSelected = traceMode === "marker" || traceMode === "extra";
   const traceStudioOpen = traceMode === "manual";
+  const selectedStroke = selectedStrokeId ? manualStrokes.find((stroke) => stroke.id === selectedStrokeId) ?? null : null;
   const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
   const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
 
@@ -504,7 +530,32 @@ function App() {
         return;
       }
       if (editorTool === "select") {
-        setSelectedStrokeId(selectTraceStroke(manualStrokes, point, brushPixels(brushSize))?.id ?? null);
+        const handleStroke = selectedStrokeId ? manualStrokes.find((stroke) => stroke.id === selectedStrokeId) ?? null : null;
+        const pointIndex = handleStroke ? selectTracePointIndex(handleStroke, point, pointHandleHitRadius(handleStroke.width)) : null;
+        if (handleStroke && pointIndex !== null) {
+          safelySetPointerCapture(event.currentTarget, event.pointerId);
+          strokeDragRef.current = {
+            mode: "point",
+            strokeId: handleStroke.id,
+            pointIndex,
+            startPoint: point,
+            originalStrokes: manualStrokes,
+            moved: false
+          };
+          return;
+        }
+        const stroke = selectTraceStroke(manualStrokes, point, brushPixels(brushSize));
+        setSelectedStrokeId(stroke?.id ?? null);
+        if (stroke) {
+          safelySetPointerCapture(event.currentTarget, event.pointerId);
+          strokeDragRef.current = {
+            mode: "move",
+            strokeId: stroke.id,
+            startPoint: point,
+            originalStrokes: manualStrokes,
+            moved: false
+          };
+        }
         return;
       }
       if (editorTool === "erase" || editorTool === "remove") {
@@ -532,6 +583,18 @@ function App() {
   }
 
   function continueStroke(event: PointerEvent<HTMLCanvasElement>) {
+    const drag = strokeDragRef.current;
+    if (traceStudioOpen && drag) {
+      const point = canvasPoint(event);
+      const result = drag.mode === "move"
+        ? moveTraceStroke(drag.originalStrokes, drag.strokeId, { x: point.x - drag.startPoint.x, y: point.y - drag.startPoint.y })
+        : updateTraceStrokePoint(drag.originalStrokes, drag.strokeId, drag.pointIndex ?? -1, point);
+      if (result.changed) {
+        strokeDragRef.current = { ...drag, moved: true };
+        setManualStrokes(result.strokes);
+      }
+      return;
+    }
     if (traceStudioOpen && panningRef.current) {
       const previous = panStartRef.current;
       if (!previous) return;
@@ -567,6 +630,16 @@ function App() {
 
   function endStroke(event: PointerEvent<HTMLCanvasElement>) {
     if (traceStudioOpen) {
+      const drag = strokeDragRef.current;
+      if (drag) {
+        safelyReleasePointerCapture(event.currentTarget, event.pointerId);
+        if (drag.moved) {
+          setManualHistory((items) => [...items.slice(-19), drag.originalStrokes]);
+          setManualRedoHistory([]);
+        }
+        strokeDragRef.current = null;
+        return;
+      }
       if (panningRef.current) {
         safelyReleasePointerCapture(event.currentTarget, event.pointerId);
         panningRef.current = false;
@@ -697,6 +770,14 @@ function App() {
     return `stroke-${strokeIdRef.current}`;
   }
 
+  function commitManualStrokeEdit(result: StrokeEditResult, nextSelectedStrokeId = selectedStrokeId) {
+    if (!result.changed) return;
+    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
+    setManualRedoHistory([]);
+    setManualStrokes(result.strokes);
+    setSelectedStrokeId(result.selectedStrokeId ?? nextSelectedStrokeId ?? null);
+  }
+
   function deleteSelectedStroke() {
     if (!selectedStrokeId) return;
     const result = deleteTraceStroke(manualStrokes, selectedStrokeId);
@@ -705,6 +786,27 @@ function App() {
     setManualRedoHistory([]);
     setManualStrokes(result.strokes);
     setSelectedStrokeId(null);
+  }
+
+  function duplicateSelectedStroke() {
+    if (!selectedStrokeId) return;
+    const offset = analysis ? Math.max(10, analysis.previewWidthPx * 0.025) : 12;
+    commitManualStrokeEdit(duplicateTraceStroke(manualStrokes, selectedStrokeId, nextStrokeId(), { x: offset, y: offset }));
+  }
+
+  function smoothSelectedStroke() {
+    if (!selectedStrokeId) return;
+    commitManualStrokeEdit(smoothTraceStrokeById(manualStrokes, selectedStrokeId));
+  }
+
+  function simplifySelectedStroke() {
+    if (!selectedStrokeId) return;
+    commitManualStrokeEdit(simplifyTraceStrokeById(manualStrokes, selectedStrokeId, 2.4));
+  }
+
+  function changeSelectedStrokeWidth(size: BrushSize) {
+    if (!selectedStrokeId) return;
+    commitManualStrokeEdit(changeTraceStrokeWidth(manualStrokes, selectedStrokeId, brushPixels(size)));
   }
 
   function changeZoom(nextZoom: number) {
@@ -933,6 +1035,32 @@ function App() {
                       <option value="normal">Normal detail</option>
                       <option value="bold">Bold outline</option>
                     </select>
+                    {traceStudioOpen ? (
+                      <>
+                        <select
+                          value={selectedStroke ? brushSizeName(selectedStroke.width) : "normal"}
+                          onChange={(event) => changeSelectedStrokeWidth(event.target.value as BrushSize)}
+                          disabled={!selectedStroke}
+                          aria-label="Selected stroke width"
+                        >
+                          <option value="thin">Selected thin</option>
+                          <option value="normal">Selected normal</option>
+                          <option value="bold">Selected bold</option>
+                        </select>
+                        <button className="tool-button" onClick={duplicateSelectedStroke} disabled={!selectedStroke}>
+                          <Copy size={15} />
+                          Duplicate
+                        </button>
+                        <button className="tool-button" onClick={smoothSelectedStroke} disabled={!selectedStroke}>
+                          <SlidersHorizontal size={15} />
+                          Smooth selected
+                        </button>
+                        <button className="tool-button" onClick={simplifySelectedStroke} disabled={!selectedStroke}>
+                          <RefreshCw size={15} />
+                          Simplify
+                        </button>
+                      </>
+                    ) : null}
                     <button className="tool-button" onClick={undoDetailEdit} disabled={undoDisabled}>
                       <Undo2 size={15} />
                       Undo
@@ -1120,6 +1248,16 @@ function brushPixels(size: BrushSize) {
   if (size === "thin") return 10;
   if (size === "bold") return 34;
   return 20;
+}
+
+function brushSizeName(width: number): BrushSize {
+  if (width <= 12) return "thin";
+  if (width >= 30) return "bold";
+  return "normal";
+}
+
+function pointHandleHitRadius(width: number) {
+  return Math.max(8, width * 0.65);
 }
 
 function midpoint(a: TracePoint, b: TracePoint): TracePoint {

@@ -1,11 +1,18 @@
 import {
+  changeTraceStrokeWidth,
   compactTracePoints,
   createTraceStroke,
   deleteTraceStroke,
+  duplicateTraceStroke,
   eraseTraceStrokes,
+  moveTraceStroke,
+  selectTracePointIndex,
   selectTraceStroke,
+  simplifyTraceStrokeById,
+  smoothTraceStrokeById,
   smoothTracePoints,
   strokeHitTest,
+  updateTraceStrokePoint,
   type TraceStroke
 } from "../src/traceStrokes.ts";
 
@@ -82,4 +89,70 @@ function assertEqual(actual: unknown, expected: unknown, message: string) {
   assert(deleted.changed, "delete should remove a selected manual stroke");
   assertEqual(deleted.strokes.length, 1, "delete should leave unselected manual strokes");
   assertEqual(deleted.strokes[0].id, "first", "delete should not affect other manual strokes");
+}
+
+{
+  const strokes = [createTraceStroke("mouth", [{ x: 10, y: 10 }, { x: 30, y: 20 }], 8)];
+  const moved = moveTraceStroke(strokes, "mouth", { x: 5, y: -3 });
+
+  assert(moved.changed, "moving a selected stroke should report a changed edit");
+  assertEqual(moved.strokes[0].points[0].x, 15, "moving a stroke should update point x coordinates");
+  assertEqual(moved.strokes[0].points[1].y, 17, "moving a stroke should update point y coordinates");
+  assertEqual(strokes[0].points[0].x, 10, "moving a stroke should not mutate the original stroke array");
+}
+
+{
+  const strokes = [createTraceStroke("eye", [{ x: 10, y: 10 }, { x: 30, y: 10 }], 8)];
+  const wider = changeTraceStrokeWidth(strokes, "eye", 34);
+
+  assert(wider.changed, "changing selected stroke width should report a changed edit");
+  assertEqual(wider.strokes[0].width, 34, "changing selected stroke width should persist export width");
+}
+
+{
+  const strokes = [createTraceStroke("eye", [{ x: 10, y: 10 }, { x: 30, y: 10 }], 8)];
+  const duplicated = duplicateTraceStroke(strokes, "eye", "eye-copy", { x: 12, y: 6 });
+
+  assert(duplicated.changed, "duplicate should report a changed edit");
+  assertEqual(duplicated.strokes.length, 2, "duplicate should append an independent stroke");
+  assertEqual(duplicated.selectedStrokeId, "eye-copy", "duplicate should select the copied stroke");
+  assertEqual(duplicated.strokes[1].points[0].x, 22, "duplicate should offset copied point x coordinates");
+  assertEqual(duplicated.strokes[0].points[0].x, 10, "duplicate should not mutate the source stroke");
+}
+
+{
+  const stroke = createTraceStroke("curve", [{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 20, y: 0 }], 8);
+  const selectedPoint = selectTracePointIndex(stroke, stroke.points[1], 3);
+  assertEqual(selectedPoint, 1, "point hit testing should find an editable stroke point");
+
+  const edited = updateTraceStrokePoint([stroke], "curve", 1, { x: 12, y: 4 });
+  assert(edited.changed, "point edit should report a changed edit");
+  assertEqual(edited.strokes[0].points[1].x, 12, "point edit should update selected point x coordinate");
+  assertEqual(edited.strokes[0].points[1].y, 4, "point edit should update selected point y coordinate");
+}
+
+{
+  const jittery = {
+    id: "line",
+    color: "#000000",
+    tool: "draw",
+    width: 10,
+    points: [
+      { x: 0, y: 0 },
+      { x: 3, y: 1 },
+      { x: 6, y: -1 },
+      { x: 9, y: 1 },
+      { x: 12, y: 0 }
+    ]
+  } satisfies TraceStroke;
+
+  const smoothed = smoothTraceStrokeById([jittery], "line");
+  assert(smoothed.changed, "smooth selected stroke should report a changed edit");
+  assertEqual(smoothed.strokes[0].id, "line", "smooth should preserve the selected stroke id");
+  assertEqual(smoothed.strokes[0].points.length, 5, "smooth should not delete the selected stroke points");
+
+  const simplified = simplifyTraceStrokeById([jittery], "line", 2);
+  assert(simplified.changed, "simplify selected stroke should report a changed edit");
+  assertEqual(simplified.strokes[0].id, "line", "simplify should preserve the selected stroke id");
+  assert(simplified.strokes[0].points.length < jittery.points.length, "simplify should remove excess jitter points");
 }
