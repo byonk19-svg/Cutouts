@@ -298,6 +298,7 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("Page 1 of", reader.pages[1].extract_text())
 
     def test_paint_guide_page_includes_labels_notes_and_shopping_list(self) -> None:
+        coat_note = "main coat and bright yellow areas for the hood and sleeves"
         settings = TemplateSettings(
             finished_height_in=18,
             threshold=40,
@@ -305,7 +306,7 @@ class PrintPipelineTest(unittest.TestCase):
             project_name="Coraline Paint",
             paint_guide_entries=(
                 PaintGuideEntry("#cc2424", "Hair", "blue-black hair", True, "apple-barrel-matte-bright-red"),
-                PaintGuideEntry("#fce454", "Coat", "yellow raincoat", True, "apple-barrel-matte-bright-yellow"),
+                PaintGuideEntry("#fce454", "Coat", coat_note, True, "apple-barrel-matte-bright-yellow"),
             ),
         )
 
@@ -317,7 +318,8 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("Hair", text)
         self.assertIn("blue-black hair", text)
         self.assertIn("Coat", text)
-        self.assertIn("yellow raincoat", text)
+        self.assertIn("main coat and bright yellow areas", text)
+        self.assertIn("hood and sleeves", text)
         self.assertIn("Apple Barrel", text)
         self.assertIn("Bright Red", text)
         self.assertIn("Bright Yellow", text)

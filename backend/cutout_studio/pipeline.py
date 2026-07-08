@@ -975,13 +975,15 @@ def _draw_paint_guide_page(
         pdf.drawString(x + 44, y + 2, f"{row['index']}. {row['label']}"[:36])
         pdf.setFont("Helvetica", 8)
         pdf.drawString(x + 44, y - 12, f"{row['hex'].upper()} - {row['coverage']:.0%} of detected colors")
+        detail_y = y - 26
+        text_width = 222 if row_index < 5 else 218
         if row["note"]:
-            pdf.drawString(x + 44, y - 26, f"Use: {row['note']}"[:34])
+            detail_y = _draw_wrapped_pdf_text(pdf, f"Use: {row['note']}", x + 44, detail_y, text_width, max_lines=2)
         match_text = _paint_match_pdf_text(row)
         if match_text:
-            pdf.drawString(x + 44, y - 40, match_text[:50])
+            detail_y = _draw_wrapped_pdf_text(pdf, match_text, x + 44, detail_y, text_width, max_lines=2)
         if not row["included"]:
-            pdf.drawString(x + 44, y - 54, "Hidden from shopping list")
+            pdf.drawString(x + 44, detail_y, "Hidden from shopping list")
 
     pdf.setFont("Helvetica-Bold", 12)
     pdf.drawString(40, 250, "Shopping list")
@@ -1127,6 +1129,50 @@ def _paint_match_pdf_text(row: dict[str, Any]) -> str:
     if selected_match is None:
         return ""
     return f"Paint: {selected_match.brand} {selected_match.line} {selected_match.color_name}"
+
+
+def _draw_wrapped_pdf_text(
+    pdf: canvas.Canvas,
+    text: str,
+    x: float,
+    y: float,
+    max_width: float,
+    line_height: float = 10,
+    max_lines: int = 2,
+) -> float:
+    lines = _wrap_pdf_text(pdf, text, max_width, max_lines)
+    for index, line in enumerate(lines):
+        pdf.drawString(x, y - index * line_height, line)
+    return y - len(lines) * line_height
+
+
+def _wrap_pdf_text(pdf: canvas.Canvas, text: str, max_width: float, max_lines: int) -> list[str]:
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    while words and len(lines) < max_lines:
+        word = words.pop(0)
+        candidate = f"{current} {word}".strip()
+        if not current or pdf.stringWidth(candidate) <= max_width:
+            current = candidate
+            continue
+        lines.append(_ellipsize_pdf_text(pdf, current, max_width))
+        current = word
+
+    if current and len(lines) < max_lines:
+        lines.append(_ellipsize_pdf_text(pdf, current, max_width))
+    if words and lines:
+        lines[-1] = _ellipsize_pdf_text(pdf, f"{lines[-1]}...", max_width)
+    return lines
+
+
+def _ellipsize_pdf_text(pdf: canvas.Canvas, text: str, max_width: float) -> str:
+    if pdf.stringWidth(text) <= max_width:
+        return text
+    trimmed = text
+    while len(trimmed) > 4 and pdf.stringWidth(trimmed) > max_width:
+        trimmed = f"{trimmed[:-4].rstrip()}..."
+    return trimmed
 
 
 def _shopping_list_pdf_text(row: dict[str, Any]) -> str:
