@@ -105,6 +105,8 @@ const analysis = {
   assertEqual(project.schemaVersion, CUTOUT_PROJECT_SCHEMA_VERSION, "project should be versioned");
   assertEqual(project.manualStrokes.length, 2, "project serialization should include manual strokes");
   assertEqual(project.manualStrokes[1].width, 20, "project serialization should include stroke widths");
+  assertEqual(project.projectPalette.length, 3, "project serialization should seed project paint palette from edits");
+  assertEqual(project.projectPalette[1].label, "Hair", "project paint palette should preserve manually tracked paint colors");
   assertEqual(project.paintGuideEdits.length, 3, "project serialization should include paint guide edits");
   assertEqual(project.analysis.outerLinePngDataUrl, analysis.outerLinePngDataUrl, "project should keep the cutline image");
   assertEqual(project.analysis.detailLinePngDataUrl, analysis.detailLinePngDataUrl, "project should keep the suggestion layer image");
@@ -119,6 +121,8 @@ const analysis = {
   assertEqual(restored.manualStrokes[0].points[1].y, 20, "round trip should preserve stroke y coordinate");
   assertEqual(restored.manualStrokes[1].width, 20, "round trip should preserve stroke width");
   assertEqual(restored.paintGuideEdits[0].label, "Coat", "round trip should preserve paint labels");
+  assertEqual(restored.projectPalette[1].label, "Hair", "round trip should preserve project palette labels");
+  assertEqual(restored.projectPalette[1].locked, true, "round trip should preserve seeded manual palette locks");
   assertEqual(restored.paintGuideEdits[0].note, "main raincoat body", "round trip should preserve paint notes");
   assertEqual(restored.paintGuideEdits[0].selectedMatchId, "apple-barrel-bright-yellow", "round trip should preserve selected paint match");
   assertEqual(restored.paintGuideEdits[1].included, false, "round trip should preserve hidden shopping-list state");
@@ -161,6 +165,7 @@ const analysis = {
   assertEqual(restored.settings.includeInstructionCoverPage, true, "legacy project import should default instruction cover on");
   assertEqual(restored.settings.includePaintGuidePage, true, "legacy project import should default paint guide on");
   assertEqual(restored.paintGuideEdits.length, 0, "legacy project import should default paint guide edits to empty");
+  assertEqual(restored.projectPalette.length, 1, "legacy project import should seed project palette from detected colors");
 }
 
 {
@@ -188,6 +193,7 @@ const analysis = {
 
   assertEqual(restored.paintGuideEdits[0].selectedMatchId, null, "paint v1 project import should default selected match to none");
   assertEqual(restored.paintGuideEdits[0].manualOverride, "", "paint v1 project import should default manual override to empty");
+  assertEqual(restored.projectPalette[0].label, "Coat", "paint v1 project import should seed project palette from paint edits");
 }
 
 {

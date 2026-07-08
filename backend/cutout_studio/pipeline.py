@@ -39,6 +39,7 @@ class PaintGuideEntry:
     included: bool = True
     selected_match_id: str | None = None
     manual_override: str = ""
+    coverage: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,7 @@ class TemplateSettings:
     palette_size: int = 6
     include_instruction_cover_page: bool = True
     include_paint_guide_page: bool = True
+    paint_guide_entries_only: bool = False
     project_name: str = "Cutout Studio Template Pack"
     paint_guide_entries: tuple[PaintGuideEntry, ...] = field(default_factory=tuple)
     manual_strokes: tuple[ManualTraceStroke, ...] = field(default_factory=tuple)
@@ -90,6 +92,7 @@ class TemplateSettings:
             palette_size=_bounded_int(data.get("paletteSize"), 2, 12, cls.palette_size),
             include_instruction_cover_page=_bounded_bool(data.get("includeInstructionCoverPage"), cls.include_instruction_cover_page),
             include_paint_guide_page=_bounded_bool(data.get("includePaintGuidePage"), cls.include_paint_guide_page),
+            paint_guide_entries_only=_bounded_bool(data.get("paintGuideEntriesOnly"), cls.paint_guide_entries_only),
             project_name=_safe_project_name(data.get("projectName", cls.project_name)),
             paint_guide_entries=_paint_guide_entries_from_mapping(data.get("paintGuideEntries")),
             manual_strokes=_manual_strokes_from_mapping(data.get("manualStrokes")),
@@ -248,7 +251,7 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_de
         _draw_overview_page(pdf, settings.project_name, cropped_source, finished_width, settings.finished_height_in, tile_cols, tile_rows)
         pdf.showPage()
     if settings.include_paint_guide_page and palette:
-        _draw_paint_guide_page(pdf, settings.project_name, palette, settings.paint_guide_entries)
+        _draw_paint_guide_page(pdf, settings.project_name, palette, settings.paint_guide_entries, settings.paint_guide_entries_only)
         pdf.showPage()
     _draw_tile_pages(
         pdf,
@@ -322,6 +325,28 @@ def match_paints(rgb: tuple[int, int, int], paints: list[Paint], limit: int = 3)
         ))
     scored.sort(key=lambda match: (_tie_distance(match.distance), not match.outdoor_recommended, match.distance, match.brand, match.color_name))
     return scored[:limit]
+
+
+def match_paint_hex(hex_value: str, limit: int = 3) -> list[dict[str, Any]]:
+    rgb = _hex_to_rgb(hex_value)
+    return [
+        {
+            "id": match.id,
+            "brand": match.brand,
+            "line": match.line,
+            "colorName": match.color_name,
+            "rgb": match.rgb,
+            "hex": _hex(match.rgb),
+            "finish": match.finish,
+            "outdoorRecommended": match.outdoor_recommended,
+            "retailer": match.retailer,
+            "productUrl": match.product_url,
+            "notes": match.notes,
+            "distance": round(match.distance, 1),
+            "confidence": match.confidence,
+        }
+        for match in match_paints(rgb, load_paint_catalog(), limit=limit)
+    ]
 
 
 def load_paint_catalog() -> list[Paint]:
@@ -979,9 +1004,10 @@ def _draw_paint_guide_page(
     project_name: str,
     palette: tuple[PaletteColor, ...],
     paint_guide_entries: tuple[PaintGuideEntry, ...],
+    entries_only: bool = False,
 ) -> None:
     width_pt, height_pt = letter
-    rows = _paint_guide_rows(palette, paint_guide_entries)
+    rows = _paint_guide_rows(palette, paint_guide_entries, entries_only)
 
     pdf.setFont("Helvetica-Bold", 20)
     pdf.drawString(40, height_pt - 54, "Paint Guide")
@@ -1005,7 +1031,8 @@ def _draw_paint_guide_page(
         pdf.setFont("Helvetica-Bold", 10)
         pdf.drawString(x + 44, y + 2, f"{row['index']}. {row['label']}"[:36])
         pdf.setFont("Helvetica", 8)
-        pdf.drawString(x + 44, y - 12, f"{row['hex'].upper()} - {row['coverage']:.0%} of detected colors")
+        coverage_text = f"{row['coverage']:.0%} of detected colors" if row["coverage"] > 0 else "manual/project color"
+        pdf.drawString(x + 44, y - 12, f"{row['hex'].upper()} - {coverage_text}")
         detail_y = y - 26
         text_width = 222 if row_index < 5 else 218
         if row["note"]:
@@ -1235,6 +1262,7 @@ def _paint_guide_entries_from_mapping(value: Any) -> tuple[PaintGuideEntry, ...]
             included=_bounded_bool(item.get("included"), True),
             selected_match_id=_safe_optional_text(item.get("selectedMatchId"), 96),
             manual_override=_safe_pdf_text(item.get("manualOverride"), "", 96),
+            coverage=_bounded_float(item.get("coverage"), 0.0, 1.0, 0.0),
         ))
     return tuple(entries)
 
@@ -1274,7 +1302,22 @@ def _manual_strokes_from_mapping(value: Any) -> tuple[ManualTraceStroke, ...]:
 def _paint_guide_rows(
     palette: tuple[PaletteColor, ...],
     paint_guide_entries: tuple[PaintGuideEntry, ...],
+    entries_only: bool = False,
 ) -> list[dict[str, Any]]:
+    if entries_only:
+        return [
+            {
+                "index": index,
+                "hex": entry.hex,
+                "label": _safe_pdf_text(entry.label, f"Color {index}", 64) or f"Color {index}",
+                "note": _safe_pdf_text(entry.note, "", 96),
+                "included": entry.included,
+                "coverage": entry.coverage,
+                "selected_match": _resolve_selected_paint(entry.selected_match_id, ()),
+                "manual_override": entry.manual_override,
+            }
+            for index, entry in enumerate(paint_guide_entries, start=1)
+        ]
     edits_by_hex = {entry.hex.lower(): entry for entry in paint_guide_entries}
     used_edit_hexes: set[str] = set()
     rows: list[dict[str, Any]] = []

@@ -12,14 +12,20 @@ import {
 } from "./cutoutProject";
 import { removeClickedDetailSegment } from "./detailEditor";
 import {
+  addProjectPaintColor,
   filterPaintGuideEntries,
+  isValidHexColor,
   matchConfidenceLabel,
   matchDisplayName,
-  paintGuideEntriesForPalette,
+  mergeProjectPaintColors,
+  paintGuideEditsFromProjectPalette,
+  paintGuideEntriesForProjectPalette,
+  removeProjectPaintColor,
+  seedProjectPaletteFromDetected,
   shoppingListText,
-  updatePaintGuideEdit,
-  type PaintGuideEdit,
-  type PaintReviewFilter
+  updateProjectPaintColor,
+  type PaintReviewFilter,
+  type ProjectPaintColor
 } from "./paintGuide";
 import {
   changeTraceStrokeWidth,
@@ -118,7 +124,10 @@ function App() {
     export: false
   });
   const [manualStrokes, setManualStrokes] = useState<TraceStroke[]>([]);
-  const [paintGuideEdits, setPaintGuideEdits] = useState<PaintGuideEdit[]>([]);
+  const [projectPalette, setProjectPalette] = useState<ProjectPaintColor[]>([]);
+  const [newPaintHex, setNewPaintHex] = useState("#f1c7a5");
+  const [newPaintLabel, setNewPaintLabel] = useState("Skin tone");
+  const [selectedPaintColorIds, setSelectedPaintColorIds] = useState<string[]>([]);
   const [paintReviewFilter, setPaintReviewFilter] = useState<PaintReviewFilter>("all");
   const [shoppingListStatus, setShoppingListStatus] = useState("");
   const [manualHistory, setManualHistory] = useState<TraceStroke[][]>([]);
@@ -150,7 +159,7 @@ function App() {
   const selectedStrokeSummary = selectedTraceStrokeSummary(manualStrokes, selectedStrokeId);
   const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
   const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
-  const paintGuideEntries = analysis ? paintGuideEntriesForPalette(analysis.palette, paintGuideEdits) : [];
+  const paintGuideEntries = paintGuideEntriesForProjectPalette(projectPalette);
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
   const paintShoppingList = shoppingListText(paintGuideEntries);
   const canIncludePaintGuide = paintGuideEntries.length > 0;
@@ -210,7 +219,7 @@ function App() {
     traceMode,
     analysis,
     manualStrokes,
-    paintGuideEdits,
+    projectPalette,
     referenceOpacity,
     showReference,
     showCutline,
@@ -259,6 +268,8 @@ function App() {
       const openEditor = opensEditorWithReference(nextSettings.templateStyle);
       resetEditorState();
       setAnalysis(body);
+      setProjectPalette(seedProjectPaletteFromDetected(body.palette, []));
+      setSelectedPaintColorIds([]);
       setEditorOpen(openEditor);
       setShowReference(openEditor);
       resetCleanupChecks();
@@ -280,6 +291,7 @@ function App() {
         ...settings,
         projectName,
         paintGuideEntries,
+        paintGuideEntriesOnly: true,
         manualStrokes: traceStudioOpen ? manualStrokes : [],
         manualStrokeSourceWidthPx: traceStudioOpen && analysis ? analysis.previewWidthPx : 0,
         manualStrokeSourceHeightPx: traceStudioOpen && analysis ? analysis.previewHeightPx : 0
@@ -339,7 +351,8 @@ function App() {
     setAnalysis(null);
     setError(null);
     setSourceImageDataUrl(null);
-    setPaintGuideEdits([]);
+    setProjectPalette([]);
+    setSelectedPaintColorIds([]);
     setPaintReviewFilter("all");
     setShoppingListStatus("");
     setProjectCreatedAt(null);
@@ -371,7 +384,8 @@ function App() {
       traceMode,
       analysis,
       manualStrokes,
-      paintGuideEdits,
+      projectPalette,
+      paintGuideEdits: paintGuideEditsFromProjectPalette(projectPalette),
       referenceOpacity,
       layerVisibility: {
         showReference,
@@ -425,7 +439,8 @@ function App() {
     setSettings(project.settings);
     setTraceMode(project.traceMode);
     setManualStrokes(project.manualStrokes);
-    setPaintGuideEdits(project.paintGuideEdits);
+    setProjectPalette(project.projectPalette);
+    setSelectedPaintColorIds([]);
     setPaintReviewFilter("all");
     setShoppingListStatus("");
     setAnalysis(project.analysis);
@@ -476,18 +491,69 @@ function App() {
     setAnalysis(null);
   }
 
-  function updatePaintGuideEntry(hex: string, patch: Partial<Omit<PaintGuideEdit, "hex">>) {
-    const current = paintGuideEntries.find((entry) => entry.hex.toLowerCase() === hex.toLowerCase());
+  function updatePaintGuideEntry(id: string, patch: Partial<Omit<ProjectPaintColor, "id" | "source">>) {
+    const current = projectPalette.find((entry) => entry.id === id);
     if (!current) return;
-    setPaintGuideEdits((edits) => updatePaintGuideEdit(edits, {
-      hex,
-      label: patch.label ?? current.label,
-      note: patch.note ?? current.note,
-      included: patch.included ?? current.included,
-      selectedMatchId: "selectedMatchId" in patch ? patch.selectedMatchId ?? null : current.selectedMatchId,
-      manualOverride: "manualOverride" in patch ? patch.manualOverride ?? "" : current.manualOverride
-    }));
+    setProjectPalette((palette) => updateProjectPaintColor(palette, id, patch));
     setShoppingListStatus("");
+    if (typeof patch.hex === "string" && isValidHexColor(patch.hex)) {
+      void refreshPaintMatchesForColor(id, patch.hex);
+    }
+  }
+
+  async function addManualPaintColor() {
+    if (!isValidHexColor(newPaintHex)) {
+      setShoppingListStatus("Enter a valid hex color");
+      return;
+    }
+    const matches = await fetchPaintMatches(newPaintHex);
+    setProjectPalette((palette) => addProjectPaintColor(palette, {
+      hex: newPaintHex,
+      label: newPaintLabel,
+      matches
+    }));
+    setNewPaintLabel("");
+    setShoppingListStatus("Color added");
+  }
+
+  function removePaintColor(id: string) {
+    setProjectPalette((palette) => removeProjectPaintColor(palette, id));
+    setSelectedPaintColorIds((ids) => ids.filter((item) => item !== id));
+    setShoppingListStatus("");
+  }
+
+  function mergeSelectedPaintColors() {
+    setProjectPalette((palette) => mergeProjectPaintColors(palette, selectedPaintColorIds));
+    setSelectedPaintColorIds([]);
+    setShoppingListStatus("Colors merged");
+  }
+
+  function resetProjectPaletteFromDetected() {
+    if (!analysis) return;
+    setProjectPalette(seedProjectPaletteFromDetected(analysis.palette, []));
+    setSelectedPaintColorIds([]);
+    setShoppingListStatus("Palette reset to detected colors");
+  }
+
+  function togglePaintMergeSelection(id: string) {
+    setSelectedPaintColorIds((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
+  }
+
+  async function refreshPaintMatchesForColor(id: string, hex: string) {
+    const matches = await fetchPaintMatches(hex);
+    setProjectPalette((palette) => updateProjectPaintColor(palette, id, { matches }));
+  }
+
+  async function fetchPaintMatches(hex: string) {
+    if (!isValidHexColor(hex)) return [];
+    const response = await fetch("/api/match-color", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hex })
+    });
+    if (!response.ok) return [];
+    const body = await response.json();
+    return Array.isArray(body.matches) ? body.matches : [];
   }
 
   async function copyPaintShoppingList() {
@@ -1417,7 +1483,48 @@ function App() {
               <section className="paint-review-header" aria-label="Paint Match Review">
                 <div>
                   <h3>Paint Match Review</h3>
-                  <p>Screen colors and printed colors may vary. Use matches as planning suggestions.</p>
+                  <p>Detected colors are only a starting point. Add skin, hair, trim, or other paint colors manually when the extractor misses them.</p>
+                </div>
+                <div className="palette-editor-actions" aria-label="Paint Palette Editor">
+                  <label>
+                    <span>New color</span>
+                    <input
+                      type="color"
+                      value={isValidHexColor(newPaintHex) ? newPaintHex : "#f1c7a5"}
+                      onChange={(event) => setNewPaintHex(event.target.value)}
+                      aria-label="New paint color"
+                    />
+                  </label>
+                  <label>
+                    <span>Hex</span>
+                    <input
+                      type="text"
+                      value={newPaintHex}
+                      onChange={(event) => setNewPaintHex(event.target.value)}
+                      aria-label="New paint hex"
+                    />
+                  </label>
+                  <label>
+                    <span>Label</span>
+                    <input
+                      type="text"
+                      value={newPaintLabel}
+                      onChange={(event) => setNewPaintLabel(event.target.value)}
+                      aria-label="New paint label"
+                    />
+                  </label>
+                  <button className="tool-button" onClick={addManualPaintColor}>
+                    <SwatchBook size={15} />
+                    Add color
+                  </button>
+                  <button className="tool-button" onClick={mergeSelectedPaintColors} disabled={selectedPaintColorIds.length < 2}>
+                    <RefreshCw size={15} />
+                    Merge selected
+                  </button>
+                  <button className="tool-button" onClick={resetProjectPaletteFromDetected}>
+                    <RotateCcw size={15} />
+                    Reset palette
+                  </button>
                 </div>
                 <div className="paint-review-filters" aria-label="Paint review filter">
                   {([
@@ -1437,12 +1544,34 @@ function App() {
               </section>
               <div className="palette-list">
                 {visiblePaintGuideEntries.map((entry) => (
-                  <article className={entry.included ? "palette-row" : "palette-row muted-paint"} key={`${entry.hex}-${entry.index}`}>
+                  <article className={entry.included ? "palette-row" : "palette-row muted-paint"} key={entry.id}>
                     <div className="swatch" style={{ backgroundColor: entry.hex }} />
                     <div className="paint-guide-fields">
                       <div className="palette-row-header">
                         <strong>{entry.index}. {entry.label}</strong>
-                        <span>{entry.hex.toUpperCase()} / {Math.round(entry.coverage * 100)}%</span>
+                        <span>{entry.hex.toUpperCase()} / {entry.source === "manual" ? "manual" : `${Math.round(entry.coverage * 100)}%`}{entry.locked ? " / locked" : ""}</span>
+                      </div>
+                      <div className="palette-row-tools">
+                        <label className="toggle-row compact-toggle">
+                          <input
+                            type="checkbox"
+                            checked={selectedPaintColorIds.includes(entry.id)}
+                            onChange={() => togglePaintMergeSelection(entry.id)}
+                          />
+                          Merge
+                        </label>
+                        <label className="toggle-row compact-toggle">
+                          <input
+                            type="checkbox"
+                            checked={entry.locked}
+                            onChange={() => updatePaintGuideEntry(entry.id, { locked: !entry.locked })}
+                          />
+                          Lock
+                        </label>
+                        <button className="tool-button" onClick={() => removePaintColor(entry.id)} disabled={entry.locked}>
+                          <Trash2 size={15} />
+                          Delete
+                        </button>
                       </div>
                       <div className="selected-paint-summary">
                         <span className="source-swatch" style={{ backgroundColor: entry.hex }} />
@@ -1462,16 +1591,38 @@ function App() {
                         <input
                           type="text"
                           value={entry.label}
-                          onChange={(event) => updatePaintGuideEntry(entry.hex, { label: event.target.value })}
+                          onChange={(event) => updatePaintGuideEntry(entry.id, { label: event.target.value })}
                         />
                       </label>
+                      <div className="paint-color-editors">
+                        <label>
+                          <span>Color</span>
+                          <input
+                            type="color"
+                            value={isValidHexColor(entry.hex) ? entry.hex : "#000000"}
+                            onChange={(event) => updatePaintGuideEntry(entry.id, { hex: event.target.value })}
+                            aria-label={`Color picker for ${entry.label}`}
+                          />
+                        </label>
+                        <label>
+                          <span>Hex</span>
+                          <input
+                            type="text"
+                            value={entry.hex}
+                            onChange={(event) => updatePaintGuideEntry(entry.id, { hex: event.target.value })}
+                            onBlur={(event) => {
+                              if (isValidHexColor(event.target.value)) void refreshPaintMatchesForColor(entry.id, event.target.value);
+                            }}
+                          />
+                        </label>
+                      </div>
                       <label>
                         <span>Notes/use</span>
                         <input
                           type="text"
                           placeholder="hair, coat, boots, trim"
                           value={entry.note}
-                          onChange={(event) => updatePaintGuideEntry(entry.hex, { note: event.target.value })}
+                          onChange={(event) => updatePaintGuideEntry(entry.id, { note: event.target.value })}
                         />
                       </label>
                       <label>
@@ -1481,14 +1632,14 @@ function App() {
                           onChange={(event) => {
                             const value = event.target.value;
                             if (value === "__manual__") {
-                              updatePaintGuideEntry(entry.hex, { selectedMatchId: null, manualOverride: entry.manualOverride || "Choose in store" });
+                              updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: entry.manualOverride || "Choose in store" });
                               return;
                             }
                             if (value === "") {
-                              updatePaintGuideEntry(entry.hex, { selectedMatchId: null, manualOverride: "" });
+                              updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: "" });
                               return;
                             }
-                            updatePaintGuideEntry(entry.hex, { selectedMatchId: value, manualOverride: "" });
+                            updatePaintGuideEntry(entry.id, { selectedMatchId: value, manualOverride: "" });
                           }}
                         >
                           <option value="">No match / choose in store</option>
@@ -1506,7 +1657,7 @@ function App() {
                             <button
                               key={match.id}
                               className={entry.selectedMatchId === match.id ? "paint-match-chip selected" : "paint-match-chip"}
-                              onClick={() => updatePaintGuideEntry(entry.hex, { selectedMatchId: match.id, manualOverride: "" })}
+                              onClick={() => updatePaintGuideEntry(entry.id, { selectedMatchId: match.id, manualOverride: "" })}
                             >
                               <span className="swatch-pair" aria-hidden="true">
                                 <span className="mini-swatch" style={{ backgroundColor: entry.hex }} />
@@ -1525,7 +1676,7 @@ function App() {
                             type="text"
                             placeholder="brand, line, color name, or choose in store"
                             value={entry.manualOverride}
-                            onChange={(event) => updatePaintGuideEntry(entry.hex, { selectedMatchId: null, manualOverride: event.target.value })}
+                            onChange={(event) => updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: event.target.value })}
                           />
                         </label>
                       ) : null}
@@ -1533,7 +1684,7 @@ function App() {
                         <input
                           type="checkbox"
                           checked={entry.included}
-                          onChange={() => updatePaintGuideEntry(entry.hex, { included: !entry.included })}
+                          onChange={() => updatePaintGuideEntry(entry.id, { included: !entry.included })}
                         />
                         Include in shopping list
                       </label>

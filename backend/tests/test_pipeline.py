@@ -14,6 +14,7 @@ from backend.cutout_studio.pipeline import (
     CALIBRATION_SQUARE_PT,
     extract_palette,
     load_paint_catalog,
+    match_paint_hex,
     match_paints,
     tile_grid,
     _clean_feature_line_tuning,
@@ -384,6 +385,26 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("Raincoat yellow, swatches 1 and 2", shopping_list_text)
         self.assertNotIn("swatch 3", shopping_list_text)
 
+    def test_pdf_paint_guide_can_use_project_palette_entries_only(self) -> None:
+        settings = TemplateSettings.from_mapping({
+            "finishedHeightIn": 18,
+            "threshold": 40,
+            "paletteSize": 3,
+            "paintGuideEntriesOnly": True,
+            "paintGuideEntries": [
+                {"hex": "#f1c7a5", "label": "Skin tone", "note": "face and hands", "included": True, "manualOverride": "Peach craft paint"},
+                {"hex": "#0c143a", "label": "Blue hair", "note": "hair", "included": True, "manualOverride": "Navy craft paint"},
+            ],
+        })
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        text = PdfReader(io.BytesIO(pdf_bytes)).pages[1].extract_text()
+
+        self.assertIn("Skin tone", text)
+        self.assertIn("Blue hair", text)
+        self.assertIn("manual/project color", text)
+        self.assertNotIn("Color 3", text)
+
     def test_manual_override_and_no_match_group_in_pdf_shopping_list(self) -> None:
         settings = TemplateSettings(
             finished_height_in=18,
@@ -454,6 +475,13 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertTrue(matches[0].brand)
         self.assertTrue(matches[0].color_name)
         self.assertIn(matches[0].confidence, {"close match", "approximate match", "poor match / manual check recommended"})
+
+    def test_match_paint_hex_returns_catalog_suggestions(self) -> None:
+        matches = match_paint_hex("#f1c7a5")
+
+        self.assertEqual(len(matches), 3)
+        self.assertTrue(matches[0]["id"])
+        self.assertTrue(matches[0]["hex"].startswith("#"))
 
     def test_lab_paint_matching_ranks_closer_color_above_farther_color(self) -> None:
         paints = [

@@ -1,10 +1,15 @@
 import {
+  addProjectPaintColor,
   filterPaintGuideEntries,
   groupShoppingListItems,
   matchConfidenceLabel,
   matchDisplayName,
+  mergeProjectPaintColors,
   paintGuideEntriesForPalette,
+  paintGuideEntriesForProjectPalette,
+  seedProjectPaletteFromDetected,
   shoppingListText,
+  updateProjectPaintColor,
   updatePaintGuideEdit,
   type CraftPaintMatch
 } from "../src/paintGuide.ts";
@@ -38,6 +43,68 @@ const palette: ProjectPaletteColor[] = [
   assertEqual(entries[0].label, "Color 1", "default paint labels should be numbered");
   assertEqual(entries[1].hex, "#f1ce2d", "palette hex should be normalized");
   assertEqual(entries[2].included, true, "palette colors should default into the shopping list");
+}
+
+{
+  const projectPalette = addProjectPaintColor(seedProjectPaletteFromDetected(palette), {
+    id: "manual-skin",
+    hex: "#f1c7a5",
+    label: "Skin tone",
+    note: "face and hands",
+    matches: [paintMatch("folkart-skin-tone", "FolkArt", "Multi-Surface", "Portrait Light", "#f0c3a2")]
+  });
+  const entries = paintGuideEntriesForProjectPalette(projectPalette);
+
+  assertEqual(entries.length, 4, "manual paint color should appear in project palette entries");
+  assertEqual(entries[3].label, "Skin tone", "manual paint color should preserve label");
+  assertEqual(entries[3].source, "manual", "manual paint color should be marked as manual");
+  assertEqual(entries[3].matches[0].colorName, "Portrait Light", "manual paint color should use regenerated paint suggestions");
+}
+
+{
+  const projectPalette = seedProjectPaletteFromDetected(palette, [
+    { hex: "#f1ce2d", label: "Coat", note: "raincoat", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" },
+    { hex: "#f1c7a5", label: "Skin tone", note: "face and hands", included: true, selectedMatchId: null, manualOverride: "Choose a peach skin tone" }
+  ]);
+
+  assertEqual(projectPalette.length, 4, "legacy unmatched paint edits should seed manual project palette colors");
+  assertEqual(projectPalette[3].label, "Skin tone", "legacy manual paint label should be preserved");
+  assertEqual(projectPalette[3].locked, true, "legacy unmatched paint edits should be locked by default");
+}
+
+{
+  const duplicatePalette = seedProjectPaletteFromDetected([
+    {
+      hex: "#f1ce2d",
+      coverage: 0.24,
+      matches: [paintMatch("apple-barrel-bright-yellow", "Apple Barrel", "Matte Acrylic", "Bright Yellow", "#f6cc27")]
+    },
+    {
+      hex: "#e4cc24",
+      coverage: 0.18,
+      matches: [paintMatch("apple-barrel-bright-yellow", "Apple Barrel", "Matte Acrylic", "Bright Yellow", "#f6cc27")]
+    }
+  ], [
+    { hex: "#f1ce2d", label: "Raincoat yellow", note: "main coat", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" },
+    { hex: "#e4cc24", label: "Raincoat yellow", note: "hood", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" }
+  ]);
+  const merged = mergeProjectPaintColors(duplicatePalette, duplicatePalette.map((color) => color.id));
+  const shoppingList = shoppingListText(paintGuideEntriesForProjectPalette(merged));
+
+  assertEqual(merged.length, 1, "merge should collapse duplicate project palette colors");
+  assertEqual(merged[0].coverage, 0.42, "merge should preserve combined coverage");
+  assert(shoppingList.includes("Apple Barrel Matte Acrylic Bright Yellow - Raincoat yellow, swatch 1"), "merged color should appear once in grouped shopping list");
+}
+
+{
+  const updated = updateProjectPaintColor(seedProjectPaletteFromDetected(palette), "detected-1-0c143a", {
+    hex: "#123456",
+    matches: [paintMatch("new-navy", "FolkArt", "Outdoor", "Deep Navy", "#123456")]
+  });
+  const entry = paintGuideEntriesForProjectPalette(updated)[0];
+
+  assertEqual(entry.hex, "#123456", "edited project color hex should update");
+  assertEqual(entry.matches[0].id, "new-navy", "edited project color should accept regenerated paint suggestions");
 }
 
 {

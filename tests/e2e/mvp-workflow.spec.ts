@@ -48,6 +48,11 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(paintRows.nth(3)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByLabel("Paint Match Review")).toBeVisible();
 
+  await addProjectPaintColor(page, "#f1c7a5", "Skin tone");
+  await expect(page.locator(".palette-row").filter({ hasText: "Skin tone" })).toBeVisible();
+  await addProjectPaintColor(page, "#0c143a", "Blue hair");
+  await expect(page.locator(".palette-row").filter({ hasText: "Blue hair" })).toBeVisible();
+
   await updatePaintRow(paintRows.nth(0), "Hair", "blue hair and outline");
   await paintRows.nth(0).locator(".paint-match-chip").first().click();
 
@@ -72,6 +77,8 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   if (projectDownloadFailure) throw new Error(projectDownloadFailure);
   const projectJson = JSON.parse(await readDownloadText(projectDownload));
   expect(projectJson.manualStrokes.length).toBeGreaterThanOrEqual(1);
+  expect(projectJson.projectPalette.some((color: { label: string; hex: string; source: string }) => color.label === "Skin tone" && color.hex === "#f1c7a5" && color.source === "manual")).toBe(true);
+  expect(projectJson.projectPalette.some((color: { label: string; hex: string; source: string }) => color.label === "Blue hair" && color.hex === "#0c143a" && color.source === "manual")).toBe(true);
   expect(projectJson.paintGuideEdits.some((edit: { label: string; selectedMatchId: string | null }) => edit.label === "Hair" && edit.selectedMatchId)).toBe(true);
   expect(projectJson.paintGuideEdits.some((edit: { label: string; manualOverride: string }) => edit.label === "Coat" && edit.manualOverride.includes("yellow craft paint"))).toBe(true);
   expect(projectJson.paintGuideEdits.some((edit: { label: string; included: boolean }) => edit.label === "Background test" && edit.included === false)).toBe(true);
@@ -158,6 +165,12 @@ async function canvasLocalPoint(canvas: Locator, xFraction: number, yFraction: n
 async function updatePaintRow(row: Locator, label: string, note: string) {
   await row.getByLabel("Label").fill(label);
   await row.getByLabel("Notes/use").fill(note);
+}
+
+async function addProjectPaintColor(page: Page, hex: string, label: string) {
+  await page.getByLabel("New paint hex").fill(hex);
+  await page.getByLabel("New paint label").fill(label);
+  await page.getByRole("button", { name: /Add color/ }).click();
 }
 
 function createSmokeCharacterPng() {

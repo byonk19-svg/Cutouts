@@ -1,7 +1,7 @@
 import type { TraceStroke } from "./traceStrokes";
 import type { TraceViewport } from "./traceViewport";
 import type { Settings, TraceMode } from "./traceWorkflow";
-import type { CraftPaintMatch, PaintGuideEdit } from "./paintGuide";
+import { paintGuideEditsFromProjectPalette, seedProjectPaletteFromDetected, type CraftPaintMatch, type PaintGuideEdit, type ProjectPaintColor } from "./paintGuide.ts";
 
 export const CUTOUT_PROJECT_SCHEMA_VERSION = 1;
 export const CUTOUT_AUTOSAVE_KEY = "cutout-studio:auto-save:v1";
@@ -53,15 +53,20 @@ export type CutoutProject = {
   traceMode: TraceMode;
   analysis: CutoutProjectAnalysis;
   manualStrokes: TraceStroke[];
+  projectPalette: ProjectPaintColor[];
   paintGuideEdits: PaintGuideEdit[];
   referenceOpacity: number;
   layerVisibility: ProjectLayerVisibility;
   traceViewport: TraceViewport;
 };
 
-export type CutoutProjectSnapshotInput = Omit<CutoutProject, "schemaVersion">;
+export type CutoutProjectSnapshotInput = Omit<CutoutProject, "schemaVersion" | "projectPalette" | "paintGuideEdits"> & {
+  projectPalette?: ProjectPaintColor[];
+  paintGuideEdits?: PaintGuideEdit[];
+};
 
 export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): CutoutProject {
+  const projectPalette = cloneProjectPalette(input.projectPalette ?? seedProjectPaletteFromDetected(input.analysis.palette, input.paintGuideEdits ?? []));
   return {
     schemaVersion: CUTOUT_PROJECT_SCHEMA_VERSION,
     projectName: input.projectName.trim() || "Cutout Project",
@@ -81,7 +86,10 @@ export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): 
       ...stroke,
       points: stroke.points.map((point) => ({ ...point }))
     })),
-    paintGuideEdits: input.paintGuideEdits.map((edit) => ({ ...edit })),
+    projectPalette,
+    paintGuideEdits: input.paintGuideEdits
+      ? input.paintGuideEdits.map((edit) => ({ ...edit }))
+      : paintGuideEditsFromProjectPalette(projectPalette),
     referenceOpacity: input.referenceOpacity,
     layerVisibility: {
       ...input.layerVisibility,
@@ -102,7 +110,7 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
     throw new Error("This project file uses an unsupported Cutout Studio version.");
   }
 
-  const project = parsed as CutoutProject & { paintGuideEdits?: unknown };
+  const project = parsed as CutoutProject & { paintGuideEdits?: unknown; projectPalette?: unknown };
   assertString(project.projectName, "projectName");
   assertString(project.createdAt, "createdAt");
   assertString(project.updatedAt, "updatedAt");
@@ -113,6 +121,10 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
   assertManualStrokes(project.manualStrokes);
   if (!Array.isArray(project.paintGuideEdits)) project.paintGuideEdits = [];
   assertPaintGuideEdits(project.paintGuideEdits);
+  if (!Array.isArray(project.projectPalette)) {
+    project.projectPalette = seedProjectPaletteFromDetected(project.analysis.palette, project.paintGuideEdits);
+  }
+  assertProjectPalette(project.projectPalette);
   assertLayerVisibility(project.layerVisibility);
   assertTraceViewport(project.traceViewport);
   assertNumber(project.referenceOpacity, "referenceOpacity");
@@ -205,6 +217,26 @@ function assertPaintGuideEdits(value: unknown): asserts value is PaintGuideEdit[
   }
 }
 
+function assertProjectPalette(value: unknown): asserts value is ProjectPaintColor[] {
+  if (!Array.isArray(value)) throw new Error("Project paint palette is invalid.");
+  for (const color of value) {
+    if (!isRecord(color)) throw new Error("Project paint palette color is invalid.");
+    assertString(color.id, "projectPalette.id");
+    assertString(color.hex, "projectPalette.hex");
+    if (typeof color.label !== "string") throw new Error("Project projectPalette.label is invalid.");
+    if (typeof color.note !== "string") throw new Error("Project projectPalette.note is invalid.");
+    if (typeof color.included !== "boolean") throw new Error("Project projectPalette.included is invalid.");
+    if (!("selectedMatchId" in color)) color.selectedMatchId = null;
+    if (color.selectedMatchId !== null && typeof color.selectedMatchId !== "string") throw new Error("Project projectPalette.selectedMatchId is invalid.");
+    if (!("manualOverride" in color)) color.manualOverride = "";
+    if (typeof color.manualOverride !== "string") throw new Error("Project projectPalette.manualOverride is invalid.");
+    assertNumber(color.coverage, "projectPalette.coverage");
+    if (!Array.isArray(color.matches)) throw new Error("Project projectPalette.matches is invalid.");
+    if (typeof color.locked !== "boolean") color.locked = false;
+    if (color.source !== "detected" && color.source !== "manual") color.source = "manual";
+  }
+}
+
 function assertLayerVisibility(value: unknown): asserts value is ProjectLayerVisibility {
   if (!isRecord(value)) throw new Error("Project layer visibility is missing.");
   for (const key of ["showReference", "showCutline", "showManualLines", "showSuggestions", "printPreview"] as const) {
@@ -229,4 +261,11 @@ function assertNumber(value: unknown, label: string): asserts value is number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function cloneProjectPalette(palette: ProjectPaintColor[]): ProjectPaintColor[] {
+  return palette.map((color) => ({
+    ...color,
+    matches: color.matches.map((match) => ({ ...match }))
+  }));
 }

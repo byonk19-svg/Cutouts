@@ -4,7 +4,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from .pipeline import TemplateSettings, analyze_template, build_template_pdf
+from .pipeline import TemplateSettings, analyze_template, build_template_pdf, match_paint_hex
 
 
 HOST = "127.0.0.1"
@@ -25,6 +25,9 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
+            if self.path == "/api/match-color":
+                self._handle_match_color()
+                return
             image_bytes, settings, edited_detail = self._read_template_request()
             if self.path == "/api/analyze":
                 analysis = analyze_template(image_bytes, settings)
@@ -65,6 +68,18 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
             raise ValueError("Settings must be valid JSON.") from exc
         edited_detail = form.get("editedDetail")
         return image_bytes, TemplateSettings.from_mapping(settings_data), edited_detail
+
+    def _handle_match_color(self) -> None:
+        content_type = self.headers.get("Content-Type", "")
+        if "application/json" not in content_type:
+            raise ValueError("Color match request must be application/json.")
+        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Color match request must be valid JSON.") from exc
+        hex_value = str(payload.get("hex", ""))
+        self._send_json({"matches": match_paint_hex(hex_value)})
 
     def _send_empty(self, status: int) -> None:
         self.send_response(status)

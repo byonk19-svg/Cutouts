@@ -24,10 +24,16 @@ export type PaintGuideEdit = {
   manualOverride: string;
 };
 
-export type PaintGuideEntry = PaintGuideEdit & {
-  index: number;
+export type ProjectPaintColor = PaintGuideEdit & {
+  id: string;
   coverage: number;
   matches: CraftPaintMatch[];
+  locked: boolean;
+  source: "detected" | "manual";
+};
+
+export type PaintGuideEntry = ProjectPaintColor & {
+  index: number;
   selectedMatch: CraftPaintMatch | null;
 };
 
@@ -41,21 +47,141 @@ export type ShoppingListItem = {
 
 export type PaintReviewFilter = "all" | "missing" | "included";
 
-export function paintGuideEntriesForPalette(palette: ProjectPaletteColor[], edits: PaintGuideEdit[]): PaintGuideEntry[] {
-  return palette.map((color, index) => {
+export function seedProjectPaletteFromDetected(palette: ProjectPaletteColor[], edits: PaintGuideEdit[] = []): ProjectPaintColor[] {
+  const colors = palette.map((color, index) => {
     const edit = edits.find((item) => sameHex(item.hex, color.hex));
+    const label = edit?.label.trim() || `Color ${index + 1}`;
+    const selectedMatchId = edit?.selectedMatchId ?? null;
     return {
-      index: index + 1,
+      id: `detected-${index + 1}-${normalizeHex(color.hex).slice(1)}`,
       hex: normalizeHex(color.hex),
-      label: edit?.label.trim() || `Color ${index + 1}`,
+      label,
       note: edit?.note.trim() || "",
       included: edit?.included ?? true,
-      selectedMatchId: edit?.selectedMatchId ?? null,
+      selectedMatchId,
       manualOverride: edit?.manualOverride.trim() || "",
       coverage: color.coverage,
       matches: color.matches,
-      selectedMatch: color.matches.find((match) => match.id === edit?.selectedMatchId) ?? null
+      locked: false,
+      source: "detected" as const
     };
+  });
+  const unmatchedEdits = edits.filter((edit) => !palette.some((color) => sameHex(color.hex, edit.hex)));
+  return [
+    ...colors,
+    ...unmatchedEdits.map((edit, index) => ({
+      id: `manual-${colors.length + index + 1}-${normalizeHex(edit.hex).slice(1)}`,
+      hex: normalizeHex(edit.hex),
+      label: edit.label.trim() || `Color ${colors.length + index + 1}`,
+      note: edit.note.trim(),
+      included: edit.included,
+      selectedMatchId: edit.selectedMatchId,
+      manualOverride: edit.manualOverride.trim(),
+      coverage: 0,
+      matches: [],
+      locked: true,
+      source: "manual" as const
+    }))
+  ];
+}
+
+export function paintGuideEntriesForPalette(palette: ProjectPaletteColor[], edits: PaintGuideEdit[]): PaintGuideEntry[] {
+  return paintGuideEntriesForProjectPalette(seedProjectPaletteFromDetected(palette, edits));
+}
+
+export function paintGuideEntriesForProjectPalette(projectPalette: ProjectPaintColor[]): PaintGuideEntry[] {
+  return projectPalette.map((color, index) => ({
+    ...color,
+    index: index + 1,
+    hex: normalizeHex(color.hex),
+    label: color.label.trim() || `Color ${index + 1}`,
+    note: color.note.trim(),
+    manualOverride: color.manualOverride.trim(),
+    selectedMatch: color.matches.find((match) => match.id === color.selectedMatchId) ?? null
+  }));
+}
+
+export function addProjectPaintColor(
+  palette: ProjectPaintColor[],
+  input: {
+    id?: string;
+    hex: string;
+    label: string;
+    note?: string;
+    matches?: CraftPaintMatch[];
+  }
+): ProjectPaintColor[] {
+  const hex = normalizeHex(input.hex);
+  return [
+    ...palette,
+    {
+      id: input.id ?? nextPaintColorId(palette, "manual"),
+      hex,
+      label: input.label.trim() || "New color",
+      note: input.note?.trim() ?? "",
+      included: true,
+      selectedMatchId: null,
+      manualOverride: "",
+      coverage: 0,
+      matches: input.matches ?? [],
+      locked: true,
+      source: "manual"
+    }
+  ];
+}
+
+export function updateProjectPaintColor(
+  palette: ProjectPaintColor[],
+  id: string,
+  patch: Partial<Omit<ProjectPaintColor, "id" | "source">>
+): ProjectPaintColor[] {
+  return palette.map((color) => {
+    if (color.id !== id) return color;
+    const nextMatches = patch.matches ?? color.matches;
+    const nextSelectedMatchId = "selectedMatchId" in patch
+      ? patch.selectedMatchId ?? null
+      : color.selectedMatchId && nextMatches.some((match) => match.id === color.selectedMatchId)
+        ? color.selectedMatchId
+        : null;
+    return {
+      ...color,
+      ...patch,
+      hex: patch.hex ? normalizeHex(patch.hex) : color.hex,
+      label: patch.label ?? color.label,
+      note: patch.note ?? color.note,
+      included: patch.included ?? color.included,
+      selectedMatchId: nextSelectedMatchId,
+      manualOverride: patch.manualOverride ?? color.manualOverride,
+      coverage: patch.coverage ?? color.coverage,
+      matches: nextMatches,
+      locked: patch.locked ?? color.locked
+    };
+  });
+}
+
+export function removeProjectPaintColor(palette: ProjectPaintColor[], id: string): ProjectPaintColor[] {
+  return palette.filter((color) => color.id !== id);
+}
+
+export function mergeProjectPaintColors(palette: ProjectPaintColor[], ids: string[]): ProjectPaintColor[] {
+  const selected = palette.filter((color) => ids.includes(color.id));
+  if (selected.length < 2) return palette;
+  const primary = selected[0];
+  const merged: ProjectPaintColor = {
+    ...primary,
+    label: formatHumanList(uniqueValues(selected.map((color) => color.label))),
+    note: uniqueValues(selected.map((color) => color.note)).join("; "),
+    included: selected.some((color) => color.included),
+    coverage: selected.reduce((total, color) => total + color.coverage, 0),
+    locked: selected.some((color) => color.locked),
+    manualOverride: primary.manualOverride,
+    selectedMatchId: primary.selectedMatchId,
+    matches: primary.matches
+  };
+  return palette.flatMap((color) => {
+    if (color.id === primary.id) return [merged];
+    if (ids.includes(color.id)) return [];
+    return [color];
   });
 }
 
@@ -77,6 +203,17 @@ export function updatePaintGuideEdit(edits: PaintGuideEdit[], nextEdit: PaintGui
   const existingIndex = edits.findIndex((item) => sameHex(item.hex, normalized.hex));
   if (existingIndex === -1) return [...edits, normalized];
   return edits.map((item, index) => index === existingIndex ? normalized : item);
+}
+
+export function paintGuideEditsFromProjectPalette(projectPalette: ProjectPaintColor[]): PaintGuideEdit[] {
+  return projectPalette.map((color) => ({
+    hex: normalizeHex(color.hex),
+    label: color.label,
+    note: color.note,
+    included: color.included,
+    selectedMatchId: color.selectedMatchId,
+    manualOverride: color.manualOverride
+  }));
 }
 
 export function shoppingListText(entries: PaintGuideEntry[]) {
@@ -131,6 +268,10 @@ function normalizeHex(hex: string) {
   return value.startsWith("#") ? value : `#${value}`;
 }
 
+export function isValidHexColor(hex: string) {
+  return /^#[0-9a-f]{6}$/i.test(normalizeHex(hex));
+}
+
 function shoppingListGroupKey(entry: PaintGuideEntry) {
   if (entry.manualOverride) return `manual:${entry.manualOverride.trim().toLowerCase()}`;
   if (entry.selectedMatch) return `paint:${entry.selectedMatch.id}`;
@@ -146,6 +287,18 @@ function shoppingListPurchaseLabel(entry: PaintGuideEntry) {
 function addUnique(items: string[], value: string) {
   const trimmed = value.trim();
   if (trimmed && !items.includes(trimmed)) items.push(trimmed);
+}
+
+function uniqueValues(values: string[]) {
+  const output: string[] = [];
+  for (const value of values) addUnique(output, value);
+  return output;
+}
+
+function nextPaintColorId(palette: ProjectPaintColor[], prefix: string) {
+  let index = palette.length + 1;
+  while (palette.some((color) => color.id === `${prefix}-${index}`)) index += 1;
+  return `${prefix}-${index}`;
 }
 
 function formatSwatches(numbers: number[]) {

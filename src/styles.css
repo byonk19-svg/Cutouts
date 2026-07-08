@@ -804,6 +804,52 @@ button:disabled {
   gap: 6px;
 }
 
+.palette-editor-actions {
+  display: grid;
+  grid-template-columns: 46px 1fr 1fr;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #f7fbf9;
+}
+
+.palette-editor-actions label {
+  display: grid;
+  gap: 4px;
+}
+
+.palette-editor-actions label span {
+  color: #65736c;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.palette-editor-actions input[type="text"] {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cbd8d2;
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: #17201d;
+  font-size: 12px;
+  background: #ffffff;
+}
+
+.palette-editor-actions input[type="color"] {
+  width: 42px;
+  height: 34px;
+  padding: 2px;
+  border: 1px solid #cbd8d2;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.palette-editor-actions .tool-button {
+  min-height: 32px;
+}
+
 .filter-button {
   min-height: 30px;
   padding: 0 8px;
@@ -855,6 +901,27 @@ button:disabled {
   color: #17201d;
   font-size: 12px;
   background: #ffffff;
+}
+
+.paint-guide-fields input[type="color"] {
+  width: 42px;
+  height: 34px;
+  padding: 2px;
+  border: 1px solid #cbd8d2;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.palette-row-tools,
+.paint-color-editors {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  align-items: end;
+}
+
+.palette-row-tools .tool-button {
+  min-height: 30px;
 }
 
 .selected-paint-summary {
