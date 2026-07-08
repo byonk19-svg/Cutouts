@@ -12,11 +12,14 @@ import {
 } from "./cutoutProject";
 import { removeClickedDetailSegment } from "./detailEditor";
 import {
+  filterPaintGuideEntries,
+  matchConfidenceLabel,
   matchDisplayName,
   paintGuideEntriesForPalette,
   shoppingListText,
   updatePaintGuideEdit,
-  type PaintGuideEdit
+  type PaintGuideEdit,
+  type PaintReviewFilter
 } from "./paintGuide";
 import {
   changeTraceStrokeWidth,
@@ -116,6 +119,7 @@ function App() {
   });
   const [manualStrokes, setManualStrokes] = useState<TraceStroke[]>([]);
   const [paintGuideEdits, setPaintGuideEdits] = useState<PaintGuideEdit[]>([]);
+  const [paintReviewFilter, setPaintReviewFilter] = useState<PaintReviewFilter>("all");
   const [shoppingListStatus, setShoppingListStatus] = useState("");
   const [manualHistory, setManualHistory] = useState<TraceStroke[][]>([]);
   const [manualRedoHistory, setManualRedoHistory] = useState<TraceStroke[][]>([]);
@@ -147,6 +151,7 @@ function App() {
   const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
   const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
   const paintGuideEntries = analysis ? paintGuideEntriesForPalette(analysis.palette, paintGuideEdits) : [];
+  const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
   const paintShoppingList = shoppingListText(paintGuideEntries);
   const canIncludePaintGuide = paintGuideEntries.length > 0;
 
@@ -327,6 +332,7 @@ function App() {
     setError(null);
     setSourceImageDataUrl(null);
     setPaintGuideEdits([]);
+    setPaintReviewFilter("all");
     setShoppingListStatus("");
     setProjectCreatedAt(null);
     setProjectStatus(file ? "Unsaved changes" : "No saved project");
@@ -412,6 +418,7 @@ function App() {
     setTraceMode(project.traceMode);
     setManualStrokes(project.manualStrokes);
     setPaintGuideEdits(project.paintGuideEdits);
+    setPaintReviewFilter("all");
     setShoppingListStatus("");
     setAnalysis(project.analysis);
     setEditorOpen(opensEditorWithReference(project.traceMode) || project.manualStrokes.length > 0);
@@ -1399,17 +1406,48 @@ function App() {
                   ))}
                 </div>
               </div>
-              <p className="paint-guide-note">
-                Screen colors and printed colors may vary. Use swatches as a shopping/planning guide.
-              </p>
+              <section className="paint-review-header" aria-label="Paint Match Review">
+                <div>
+                  <h3>Paint Match Review</h3>
+                  <p>Screen colors and printed colors may vary. Use matches as planning suggestions.</p>
+                </div>
+                <div className="paint-review-filters" aria-label="Paint review filter">
+                  {([
+                    ["all", "All"],
+                    ["missing", "Missing"],
+                    ["included", "Shopping list"]
+                  ] as const).map(([filter, label]) => (
+                    <button
+                      key={filter}
+                      className={paintReviewFilter === filter ? "filter-button selected" : "filter-button"}
+                      onClick={() => setPaintReviewFilter(filter)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </section>
               <div className="palette-list">
-                {paintGuideEntries.map((entry) => (
+                {visiblePaintGuideEntries.map((entry) => (
                   <article className={entry.included ? "palette-row" : "palette-row muted-paint"} key={`${entry.hex}-${entry.index}`}>
                     <div className="swatch" style={{ backgroundColor: entry.hex }} />
                     <div className="paint-guide-fields">
                       <div className="palette-row-header">
-                        <strong>{entry.index}. {entry.hex.toUpperCase()}</strong>
-                        <span>{Math.round(entry.coverage * 100)}% coverage</span>
+                        <strong>{entry.index}. {entry.label}</strong>
+                        <span>{entry.hex.toUpperCase()} / {Math.round(entry.coverage * 100)}%</span>
+                      </div>
+                      <div className="selected-paint-summary">
+                        <span className="source-swatch" style={{ backgroundColor: entry.hex }} />
+                        <strong>
+                          {entry.manualOverride
+                            ? entry.manualOverride
+                            : entry.selectedMatch
+                              ? matchDisplayName(entry.selectedMatch)
+                              : "No match selected"}
+                        </strong>
+                        {entry.selectedMatch ? (
+                          <em>{matchConfidenceLabel(entry.selectedMatch)}</em>
+                        ) : null}
                       </div>
                       <label>
                         <span>Label</span>
@@ -1462,9 +1500,12 @@ function App() {
                               className={entry.selectedMatchId === match.id ? "paint-match-chip selected" : "paint-match-chip"}
                               onClick={() => updatePaintGuideEntry(entry.hex, { selectedMatchId: match.id, manualOverride: "" })}
                             >
-                              <span className="mini-swatch" style={{ backgroundColor: match.hex }} />
+                              <span className="swatch-pair" aria-hidden="true">
+                                <span className="mini-swatch" style={{ backgroundColor: entry.hex }} />
+                                <span className="mini-swatch" style={{ backgroundColor: match.hex }} />
+                              </span>
                               <span>{matchDisplayName(match)}</span>
-                              <em>{match.confidence}</em>
+                              <em>{matchConfidenceLabel(match)}{match.outdoorRecommended ? " / Outdoor" : ""}</em>
                             </button>
                           ))}
                         </div>
@@ -1492,6 +1533,9 @@ function App() {
                   </article>
                 ))}
               </div>
+              {visiblePaintGuideEntries.length === 0 ? (
+                <p className="muted">No paint colors match this filter.</p>
+              ) : null}
               <div className="shopping-list-card">
                 <div className="shopping-list-header">
                   <strong>Shopping list</strong>

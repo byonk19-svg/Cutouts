@@ -88,7 +88,8 @@ const analysis = {
     manualStrokes: strokes,
     paintGuideEdits: [
       { hex: "#f1ce2d", label: "Coat", note: "main raincoat body", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" },
-      { hex: "#0c143a", label: "Hair", note: "blue-black hair", included: false, selectedMatchId: null, manualOverride: "custom navy mix" }
+      { hex: "#0c143a", label: "Hair", note: "blue-black hair", included: false, selectedMatchId: null, manualOverride: "custom navy mix" },
+      { hex: "#6a5424", label: "Boots", note: "choose in store", included: true, selectedMatchId: null, manualOverride: "" }
     ],
     referenceOpacity: 42,
     layerVisibility: {
@@ -104,7 +105,7 @@ const analysis = {
   assertEqual(project.schemaVersion, CUTOUT_PROJECT_SCHEMA_VERSION, "project should be versioned");
   assertEqual(project.manualStrokes.length, 2, "project serialization should include manual strokes");
   assertEqual(project.manualStrokes[1].width, 20, "project serialization should include stroke widths");
-  assertEqual(project.paintGuideEdits.length, 2, "project serialization should include paint guide edits");
+  assertEqual(project.paintGuideEdits.length, 3, "project serialization should include paint guide edits");
   assertEqual(project.analysis.outerLinePngDataUrl, analysis.outerLinePngDataUrl, "project should keep the cutline image");
   assertEqual(project.analysis.detailLinePngDataUrl, analysis.detailLinePngDataUrl, "project should keep the suggestion layer image");
 
@@ -122,6 +123,8 @@ const analysis = {
   assertEqual(restored.paintGuideEdits[0].selectedMatchId, "apple-barrel-bright-yellow", "round trip should preserve selected paint match");
   assertEqual(restored.paintGuideEdits[1].included, false, "round trip should preserve hidden shopping-list state");
   assertEqual(restored.paintGuideEdits[1].manualOverride, "custom navy mix", "round trip should preserve manual override");
+  assertEqual(restored.paintGuideEdits[2].selectedMatchId, null, "round trip should preserve no-match state");
+  assertEqual(restored.paintGuideEdits[2].manualOverride, "", "round trip should preserve no-match without override");
   assertEqual(restored.referenceOpacity, 42, "round trip should preserve underlay opacity");
   assertEqual(restored.layerVisibility.showReference, true, "round trip should preserve underlay visibility");
   assertEqual(restored.traceViewport.panY, -8, "round trip should preserve viewport");

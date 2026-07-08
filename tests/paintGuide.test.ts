@@ -1,4 +1,12 @@
-import { matchDisplayName, paintGuideEntriesForPalette, shoppingListText, updatePaintGuideEdit, type CraftPaintMatch } from "../src/paintGuide.ts";
+import {
+  filterPaintGuideEntries,
+  matchConfidenceLabel,
+  matchDisplayName,
+  paintGuideEntriesForPalette,
+  shoppingListText,
+  updatePaintGuideEdit,
+  type CraftPaintMatch
+} from "../src/paintGuide.ts";
 import type { ProjectPaletteColor } from "../src/cutoutProject.ts";
 
 function assert(condition: unknown, message: string) {
@@ -71,10 +79,56 @@ const palette: ProjectPaletteColor[] = [
 }
 
 {
+  const selected = updatePaintGuideEdit([], {
+    hex: "#f1ce2d",
+    label: "Coat",
+    note: "",
+    included: true,
+    selectedMatchId: "apple-barrel-bright-yellow",
+    manualOverride: ""
+  });
+  const manualOverride = updatePaintGuideEdit(selected, {
+    hex: "#f1ce2d",
+    label: "Coat",
+    note: "",
+    included: true,
+    selectedMatchId: null,
+    manualOverride: "Custom yellow mix"
+  });
+  const entries = paintGuideEntriesForPalette(palette, manualOverride);
+
+  assertEqual(entries[1].selectedMatch, null, "manual override should supersede selected paint match");
+  assert(shoppingListText(entries).includes("Coat: Custom yellow mix"), "shopping list should prefer manual override text");
+}
+
+{
+  const entries = paintGuideEntriesForPalette(palette, [
+    { hex: "#0c143a", label: "Hair", note: "", included: true, selectedMatchId: null, manualOverride: "" },
+    { hex: "#f1ce2d", label: "Coat", note: "", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" },
+    { hex: "#6a5424", label: "Boots", note: "", included: false, selectedMatchId: null, manualOverride: "Any warm brown craft paint" }
+  ]);
+
+  assertEqual(filterPaintGuideEntries(entries, "all").length, 3, "all filter should show every paint row");
+  assertEqual(filterPaintGuideEntries(entries, "included").length, 2, "included filter should show shopping-list colors only");
+  assertEqual(filterPaintGuideEntries(entries, "missing").length, 1, "missing filter should show colors with no selected match or manual override");
+  assertEqual(filterPaintGuideEntries(entries, "missing")[0].label, "Hair", "missing filter should identify no-match rows");
+}
+
+{
   assertEqual(
     matchDisplayName(paintMatch("apple-barrel-bright-yellow", "Apple Barrel", "Matte Acrylic", "Bright Yellow", "#f6cc27")),
     "Apple Barrel Matte Acrylic Bright Yellow",
     "paint match display should include brand, line, and color name"
+  );
+  assertEqual(
+    matchConfidenceLabel(paintMatch("apple-barrel-bright-yellow", "Apple Barrel", "Matte Acrylic", "Bright Yellow", "#f6cc27")),
+    "Close match",
+    "confidence labels should be reader-facing"
+  );
+  assertEqual(
+    matchConfidenceLabel({ ...paintMatch("poor", "Brand", "Line", "Color", "#000000"), confidence: "poor match / manual check recommended" }),
+    "Check in store",
+    "poor match labels should tell the user to check in store"
   );
 }
 

@@ -31,6 +31,8 @@ export type PaintGuideEntry = PaintGuideEdit & {
   selectedMatch: CraftPaintMatch | null;
 };
 
+export type PaintReviewFilter = "all" | "missing" | "included";
+
 export function paintGuideEntriesForPalette(palette: ProjectPaletteColor[], edits: PaintGuideEdit[]): PaintGuideEntry[] {
   return palette.map((color, index) => {
     const edit = edits.find((item) => sameHex(item.hex, color.hex));
@@ -47,6 +49,12 @@ export function paintGuideEntriesForPalette(palette: ProjectPaletteColor[], edit
       selectedMatch: color.matches.find((match) => match.id === edit?.selectedMatchId) ?? null
     };
   });
+}
+
+export function filterPaintGuideEntries(entries: PaintGuideEntry[], filter: PaintReviewFilter) {
+  if (filter === "included") return entries.filter((entry) => entry.included);
+  if (filter === "missing") return entries.filter((entry) => !entry.selectedMatch && !entry.manualOverride);
+  return entries;
 }
 
 export function updatePaintGuideEdit(edits: PaintGuideEdit[], nextEdit: PaintGuideEdit): PaintGuideEdit[] {
@@ -80,6 +88,12 @@ export function shoppingListText(entries: PaintGuideEntry[]) {
 
 export function matchDisplayName(match: CraftPaintMatch) {
   return `${match.brand} ${match.line} ${match.colorName}`;
+}
+
+export function matchConfidenceLabel(match: CraftPaintMatch) {
+  if (match.confidence === "close match") return "Close match";
+  if (match.confidence === "approximate match") return "Approximate match";
+  return "Check in store";
 }
 
 function sameHex(a: string, b: string) {
