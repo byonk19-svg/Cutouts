@@ -11,6 +11,7 @@ export type Settings = {
   templateStyle: TraceMode;
   paletteSize: number;
   includeInstructionCoverPage: boolean;
+  includePaintGuidePage: boolean;
 };
 
 export function traceModeSettings(mode: TraceMode, current: Settings): Settings {

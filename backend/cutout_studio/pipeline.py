@@ -4,7 +4,7 @@ import base64
 import io
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +32,14 @@ BLACK_LINE_COLOR = (0, 0, 0, 255)
 
 
 @dataclass(frozen=True)
+class PaintGuideEntry:
+    hex: str
+    label: str
+    note: str
+    included: bool = True
+
+
+@dataclass(frozen=True)
 class TemplateSettings:
     finished_height_in: float = 36.0
     threshold: int = 42
@@ -43,7 +51,9 @@ class TemplateSettings:
     template_style: str = "clean"
     palette_size: int = 6
     include_instruction_cover_page: bool = True
+    include_paint_guide_page: bool = True
     project_name: str = "Cutout Studio Template Pack"
+    paint_guide_entries: tuple[PaintGuideEntry, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "TemplateSettings":
@@ -56,12 +66,14 @@ class TemplateSettings:
             smoothing=_bounded_int(data.get("smoothing"), 0, 8, cls.smoothing),
             speck_area=_bounded_int(data.get("speckArea"), 0, 2000, cls.speck_area),
             hole_area=_bounded_int(data.get("holeArea"), 0, 5000, cls.hole_area),
-            detail_lines=bool(data.get("detailLines", cls.detail_lines)),
+            detail_lines=_bounded_bool(data.get("detailLines"), cls.detail_lines),
             detail_cleanup=_bounded_int(data.get("detailCleanup"), 0, 100, cls.detail_cleanup),
             template_style=template_style,
             palette_size=_bounded_int(data.get("paletteSize"), 2, 12, cls.palette_size),
-            include_instruction_cover_page=bool(data.get("includeInstructionCoverPage", cls.include_instruction_cover_page)),
+            include_instruction_cover_page=_bounded_bool(data.get("includeInstructionCoverPage"), cls.include_instruction_cover_page),
+            include_paint_guide_page=_bounded_bool(data.get("includePaintGuidePage"), cls.include_paint_guide_page),
             project_name=_safe_project_name(data.get("projectName", cls.project_name)),
+            paint_guide_entries=_paint_guide_entries_from_mapping(data.get("paintGuideEntries")),
         )
 
 
@@ -192,8 +204,9 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_de
     if settings.include_instruction_cover_page:
         _draw_overview_page(pdf, settings.project_name, cropped_source, finished_width, settings.finished_height_in, tile_cols, tile_rows)
         pdf.showPage()
-    _draw_color_guide_page(pdf, cropped_source, palette)
-    pdf.showPage()
+    if settings.include_paint_guide_page and palette:
+        _draw_paint_guide_page(pdf, settings.project_name, palette, settings.paint_guide_entries)
+        pdf.showPage()
     _draw_tile_pages(pdf, settings.project_name, trace, finished_width, settings.finished_height_in, tile_cols, tile_rows)
     pdf.save()
     return out.getvalue()
@@ -889,29 +902,53 @@ def _draw_page_map(pdf: canvas.Canvas, x: float, y: float, tile_cols: int, tile_
     pdf.drawString(x, y - 18, "Assemble left to right by row. Row 1 / Column 1 starts at the top left.")
 
 
-def _draw_color_guide_page(pdf: canvas.Canvas, source: Image.Image, palette: tuple[PaletteColor, ...]) -> None:
+def _draw_paint_guide_page(
+    pdf: canvas.Canvas,
+    project_name: str,
+    palette: tuple[PaletteColor, ...],
+    paint_guide_entries: tuple[PaintGuideEntry, ...],
+) -> None:
     width_pt, height_pt = letter
+    rows = _paint_guide_rows(palette, paint_guide_entries)
+
     pdf.setFont("Helvetica-Bold", 20)
-    pdf.drawString(40, height_pt - 54, "Color Guide")
+    pdf.drawString(40, height_pt - 54, "Paint Guide")
     pdf.setFont("Helvetica", 10)
-    pdf.drawString(40, height_pt - 76, "Paint matches are approximate. Check bottles in store when color accuracy matters.")
+    pdf.drawString(40, height_pt - 76, project_name)
+    pdf.setFont("Helvetica", 8.5)
+    pdf.drawString(40, height_pt - 96, "Screen colors and printed colors may vary. Use swatches as a shopping/planning guide.")
+    pdf.drawString(40, height_pt - 110, "These are planning swatches, not exact retail paint matches.")
 
-    preview = _on_white(source)
-    preview.thumbnail((210, 210))
-    pdf.drawImage(ImageReader(preview), 40, height_pt - 315, width=preview.width, height=preview.height, preserveAspectRatio=True)
-
-    y = height_pt - 130
-    for idx, color in enumerate(palette, start=1):
-        x = 300
-        pdf.setFillColor(colors.HexColor(_hex(color.rgb)))
-        pdf.rect(x, y - 22, 34, 34, stroke=1, fill=1)
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(40, height_pt - 142, "Color planning")
+    row_top = height_pt - 174
+    row_gap = 52
+    for row_index, row in enumerate(rows[:10]):
+        x = 40 if row_index < 5 else 320
+        y = row_top - (row_index % 5) * row_gap
+        pdf.setFillColor(colors.HexColor(row["hex"]))
+        pdf.rect(x, y - 18, 32, 32, stroke=1, fill=1)
         pdf.setFillColor(colors.black)
         pdf.setFont("Helvetica-Bold", 10)
-        pdf.drawString(x + 46, y - 2, f"Color {idx}: {_hex(color.rgb)} ({color.coverage:.0%})")
+        pdf.drawString(x + 44, y + 2, f"{row['index']}. {row['label']}"[:36])
         pdf.setFont("Helvetica", 8)
-        match_text = "; ".join(f"{m.brand} {m.name}" for m in color.matches)
-        pdf.drawString(x + 46, y - 16, match_text[:84])
-        y -= 58
+        pdf.drawString(x + 44, y - 12, f"{row['hex'].upper()} - {row['coverage']:.0%} of detected colors")
+        if row["note"]:
+            pdf.drawString(x + 44, y - 26, f"Use: {row['note']}"[:34])
+        if not row["included"]:
+            pdf.drawString(x + 44, y - 40, "Hidden from shopping list")
+
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(40, 300, "Shopping list")
+    pdf.setFont("Helvetica", 9)
+    included_rows = [row for row in rows if row["included"]]
+    if not included_rows:
+        pdf.drawString(40, 280, "No paint colors selected.")
+        return
+    for index, row in enumerate(included_rows[:10]):
+        y = 280 - index * 18
+        note = f" - {row['note']}" if row["note"] else ""
+        pdf.drawString(40, y, f"- {row['label']} ({row['hex'].upper()}){note}"[:112])
 
 
 def _draw_tile_pages(
@@ -989,6 +1026,83 @@ def _draw_crop_marks(pdf: canvas.Canvas, x: float, top: float, width: float, hei
     for corner_y, vertical_direction in ((top, -1), (bottom, 1)):
         pdf.line(x, corner_y, x, corner_y + vertical_direction * mark)
         pdf.line(right, corner_y, right, corner_y + vertical_direction * mark)
+
+
+def _paint_guide_entries_from_mapping(value: Any) -> tuple[PaintGuideEntry, ...]:
+    if not isinstance(value, list):
+        return ()
+    entries: list[PaintGuideEntry] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        hex_value = _safe_hex(item.get("hex"))
+        if not hex_value:
+            continue
+        entries.append(PaintGuideEntry(
+            hex=hex_value,
+            label=_safe_pdf_text(item.get("label"), "", 64),
+            note=_safe_pdf_text(item.get("note"), "", 96),
+            included=_bounded_bool(item.get("included"), True),
+        ))
+    return tuple(entries)
+
+
+def _paint_guide_rows(
+    palette: tuple[PaletteColor, ...],
+    paint_guide_entries: tuple[PaintGuideEntry, ...],
+) -> list[dict[str, Any]]:
+    edits_by_hex = {entry.hex.lower(): entry for entry in paint_guide_entries}
+    rows: list[dict[str, Any]] = []
+    for index, color in enumerate(palette, start=1):
+        hex_value = _hex(color.rgb)
+        edit = edits_by_hex.get(hex_value.lower())
+        label = _safe_pdf_text(edit.label, f"Color {index}", 64) if edit else f"Color {index}"
+        note = _safe_pdf_text(edit.note, "", 96) if edit else ""
+        rows.append({
+            "index": index,
+            "hex": hex_value,
+            "label": label or f"Color {index}",
+            "note": note,
+            "included": True if edit is None else edit.included,
+            "coverage": color.coverage,
+        })
+    return rows
+
+
+def _safe_hex(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip().lower()
+    if not raw.startswith("#"):
+        raw = f"#{raw}"
+    if len(raw) != 7:
+        return None
+    try:
+        int(raw[1:], 16)
+    except ValueError:
+        return None
+    return raw
+
+
+def _safe_pdf_text(value: Any, fallback: str, max_length: int) -> str:
+    if not isinstance(value, str):
+        return fallback
+    text = " ".join(value.strip().split())
+    return (text or fallback)[:max_length]
+
+
+def _bounded_bool(value: Any, fallback: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+    if value is None:
+        return fallback
+    return bool(value)
 
 
 def _bounded_int(value: Any, minimum: int, maximum: int, fallback: int) -> int:

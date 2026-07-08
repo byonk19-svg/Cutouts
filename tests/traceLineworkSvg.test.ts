@@ -22,7 +22,8 @@ const settings: Settings = {
   detailCleanup: 100,
   templateStyle: "manual",
   paletteSize: 6,
-  includeInstructionCoverPage: true
+  includeInstructionCoverPage: true,
+  includePaintGuidePage: true
 };
 
 const analysis = {
@@ -88,6 +89,7 @@ const analysis = {
     traceMode: "manual",
     analysis,
     manualStrokes: widened.strokes,
+    paintGuideEdits: [],
     referenceOpacity: 35,
     layerVisibility: {
       showReference: true,

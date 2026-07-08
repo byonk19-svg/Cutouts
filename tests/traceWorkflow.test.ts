@@ -25,7 +25,8 @@ const baseSettings: Settings = {
   detailCleanup: 88,
   templateStyle: "paint",
   paletteSize: 6,
-  includeInstructionCoverPage: true
+  includeInstructionCoverPage: true,
+  includePaintGuidePage: true
 };
 
 {

@@ -27,7 +27,8 @@ const settings: Settings = {
   detailCleanup: 100,
   templateStyle: "manual",
   paletteSize: 6,
-  includeInstructionCoverPage: true
+  includeInstructionCoverPage: true,
+  includePaintGuidePage: true
 };
 
 const analysis = {
@@ -70,6 +71,10 @@ const analysis = {
     traceMode: "manual",
     analysis,
     manualStrokes: strokes,
+    paintGuideEdits: [
+      { hex: "#f1ce2d", label: "Coat", note: "main raincoat body", included: true },
+      { hex: "#0c143a", label: "Hair", note: "blue-black hair", included: false }
+    ],
     referenceOpacity: 42,
     layerVisibility: {
       showReference: true,
@@ -84,6 +89,7 @@ const analysis = {
   assertEqual(project.schemaVersion, CUTOUT_PROJECT_SCHEMA_VERSION, "project should be versioned");
   assertEqual(project.manualStrokes.length, 2, "project serialization should include manual strokes");
   assertEqual(project.manualStrokes[1].width, 20, "project serialization should include stroke widths");
+  assertEqual(project.paintGuideEdits.length, 2, "project serialization should include paint guide edits");
   assertEqual(project.analysis.outerLinePngDataUrl, analysis.outerLinePngDataUrl, "project should keep the cutline image");
   assertEqual(project.analysis.detailLinePngDataUrl, analysis.detailLinePngDataUrl, "project should keep the suggestion layer image");
 
@@ -96,15 +102,20 @@ const analysis = {
   assertEqual(restored.manualStrokes[0].points[0].x, 10, "round trip should preserve stroke x coordinate");
   assertEqual(restored.manualStrokes[0].points[1].y, 20, "round trip should preserve stroke y coordinate");
   assertEqual(restored.manualStrokes[1].width, 20, "round trip should preserve stroke width");
+  assertEqual(restored.paintGuideEdits[0].label, "Coat", "round trip should preserve paint labels");
+  assertEqual(restored.paintGuideEdits[0].note, "main raincoat body", "round trip should preserve paint notes");
+  assertEqual(restored.paintGuideEdits[1].included, false, "round trip should preserve hidden shopping-list state");
   assertEqual(restored.referenceOpacity, 42, "round trip should preserve underlay opacity");
   assertEqual(restored.layerVisibility.showReference, true, "round trip should preserve underlay visibility");
   assertEqual(restored.traceViewport.panY, -8, "round trip should preserve viewport");
   assertEqual(restored.settings.includeInstructionCoverPage, true, "round trip should preserve instruction cover setting");
+  assertEqual(restored.settings.includePaintGuidePage, true, "round trip should preserve paint guide setting");
 }
 
 {
   const legacySettings = { ...settings };
   delete (legacySettings as Partial<Settings>).includeInstructionCoverPage;
+  delete (legacySettings as Partial<Settings>).includePaintGuidePage;
   const restored = restoreCutoutProject({
     schemaVersion: CUTOUT_PROJECT_SCHEMA_VERSION,
     projectName: "Minimal",
@@ -128,6 +139,8 @@ const analysis = {
 
   assertEqual(restored.layerVisibility.printPreview, false, "project import should leave printable preview off for editing");
   assertEqual(restored.settings.includeInstructionCoverPage, true, "legacy project import should default instruction cover on");
+  assertEqual(restored.settings.includePaintGuidePage, true, "legacy project import should default paint guide on");
+  assertEqual(restored.paintGuideEdits.length, 0, "legacy project import should default paint guide edits to empty");
 }
 
 {

@@ -12,6 +12,12 @@ import {
 } from "./cutoutProject";
 import { removeClickedDetailSegment } from "./detailEditor";
 import {
+  paintGuideEntriesForPalette,
+  shoppingListText,
+  updatePaintGuideEdit,
+  type PaintGuideEdit
+} from "./paintGuide";
+import {
   changeTraceStrokeWidth,
   createTraceStroke,
   deleteTraceStroke,
@@ -66,7 +72,8 @@ const defaultSettings: Settings = {
   detailCleanup: 88,
   templateStyle: "paint",
   paletteSize: 6,
-  includeInstructionCoverPage: true
+  includeInstructionCoverPage: true,
+  includePaintGuidePage: true
 };
 
 const cleanupStepLabels: Record<CleanupStep, string> = {
@@ -107,6 +114,8 @@ function App() {
     export: false
   });
   const [manualStrokes, setManualStrokes] = useState<TraceStroke[]>([]);
+  const [paintGuideEdits, setPaintGuideEdits] = useState<PaintGuideEdit[]>([]);
+  const [shoppingListStatus, setShoppingListStatus] = useState("");
   const [manualHistory, setManualHistory] = useState<TraceStroke[][]>([]);
   const [manualRedoHistory, setManualRedoHistory] = useState<TraceStroke[][]>([]);
   const [history, setHistory] = useState<string[]>([]);
@@ -136,6 +145,9 @@ function App() {
   const selectedStrokeSummary = selectedTraceStrokeSummary(manualStrokes, selectedStrokeId);
   const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
   const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
+  const paintGuideEntries = analysis ? paintGuideEntriesForPalette(analysis.palette, paintGuideEdits) : [];
+  const paintShoppingList = shoppingListText(paintGuideEntries);
+  const canIncludePaintGuide = paintGuideEntries.length > 0;
 
   useEffect(() => {
     if (analysis) return;
@@ -192,6 +204,7 @@ function App() {
     traceMode,
     analysis,
     manualStrokes,
+    paintGuideEdits,
     referenceOpacity,
     showReference,
     showCutline,
@@ -258,7 +271,7 @@ function App() {
     try {
       const payload = new FormData();
       payload.append("image", image);
-      payload.append("settings", JSON.stringify({ ...settings, projectName }));
+      payload.append("settings", JSON.stringify({ ...settings, projectName, paintGuideEntries }));
       const editedDetail = currentDetailDataUrl();
       if (editedDetail) payload.append("editedDetail", editedDetail);
       const response = await fetch("/api/export", { method: "POST", body: payload });
@@ -312,6 +325,8 @@ function App() {
     setAnalysis(null);
     setError(null);
     setSourceImageDataUrl(null);
+    setPaintGuideEdits([]);
+    setShoppingListStatus("");
     setProjectCreatedAt(null);
     setProjectStatus(file ? "Unsaved changes" : "No saved project");
     if (!file) return;
@@ -341,6 +356,7 @@ function App() {
       traceMode,
       analysis,
       manualStrokes,
+      paintGuideEdits,
       referenceOpacity,
       layerVisibility: {
         showReference,
@@ -394,6 +410,8 @@ function App() {
     setSettings(project.settings);
     setTraceMode(project.traceMode);
     setManualStrokes(project.manualStrokes);
+    setPaintGuideEdits(project.paintGuideEdits);
+    setShoppingListStatus("");
     setAnalysis(project.analysis);
     setEditorOpen(opensEditorWithReference(project.traceMode) || project.manualStrokes.length > 0);
     setShowReference(project.layerVisibility.showReference);
@@ -440,6 +458,27 @@ function App() {
     const detailCleanup = traceMode === "paint" || traceMode === "marker" ? value : 100 - value;
     setSettings((current) => ({ ...current, detailCleanup, detailLines: true, templateStyle: traceMode }));
     setAnalysis(null);
+  }
+
+  function updatePaintGuideEntry(hex: string, patch: Partial<Omit<PaintGuideEdit, "hex">>) {
+    const current = paintGuideEntries.find((entry) => entry.hex.toLowerCase() === hex.toLowerCase());
+    if (!current) return;
+    setPaintGuideEdits((edits) => updatePaintGuideEdit(edits, {
+      hex,
+      label: patch.label ?? current.label,
+      note: patch.note ?? current.note,
+      included: patch.included ?? current.included
+    }));
+    setShoppingListStatus("");
+  }
+
+  async function copyPaintShoppingList() {
+    try {
+      await navigator.clipboard.writeText(paintShoppingList);
+      setShoppingListStatus("Shopping list copied");
+    } catch {
+      setShoppingListStatus("Unable to copy shopping list");
+    }
   }
 
   function loadDetailCanvas(src: string) {
@@ -1003,6 +1042,18 @@ function App() {
             />
             Include instruction cover page
           </label>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={settings.includePaintGuidePage && canIncludePaintGuide}
+              disabled={!canIncludePaintGuide}
+              onChange={() => setSettings((current) => ({
+                ...current,
+                includePaintGuidePage: !current.includePaintGuidePage
+              }))}
+            />
+            Include paint guide page
+          </label>
 
           <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
             {advancedOpen
@@ -1310,7 +1361,7 @@ function App() {
         </section>
 
         <aside className="right-panel" aria-label="Paint guide and export summary">
-          <PanelTitle icon={<SwatchBook size={18} />} title="Color Guide" />
+          <PanelTitle icon={<SwatchBook size={18} />} title="Paint Guide" />
           {analysis ? (
             <>
               <dl className="summary-grid">
@@ -1345,21 +1396,61 @@ function App() {
                   ))}
                 </div>
               </div>
+              <p className="paint-guide-note">
+                Screen colors and printed colors may vary. Use swatches as a shopping/planning guide.
+              </p>
               <div className="palette-list">
-                {analysis.palette.map((color, index) => (
-                  <article className="palette-row" key={`${color.hex}-${index}`}>
-                    <div className="swatch" style={{ backgroundColor: color.hex }} />
-                    <div>
-                      <strong>{color.hex.toUpperCase()}</strong>
-                      <span>{Math.round(color.coverage * 100)}% coverage</span>
-                      <p>{color.matches.map((match) => `${match.brand} ${match.name}`).join(" / ")}</p>
+                {paintGuideEntries.map((entry) => (
+                  <article className={entry.included ? "palette-row" : "palette-row muted-paint"} key={`${entry.hex}-${entry.index}`}>
+                    <div className="swatch" style={{ backgroundColor: entry.hex }} />
+                    <div className="paint-guide-fields">
+                      <div className="palette-row-header">
+                        <strong>{entry.index}. {entry.hex.toUpperCase()}</strong>
+                        <span>{Math.round(entry.coverage * 100)}% coverage</span>
+                      </div>
+                      <label>
+                        <span>Label</span>
+                        <input
+                          type="text"
+                          value={entry.label}
+                          onChange={(event) => updatePaintGuideEntry(entry.hex, { label: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        <span>Notes/use</span>
+                        <input
+                          type="text"
+                          placeholder="hair, coat, boots, trim"
+                          value={entry.note}
+                          onChange={(event) => updatePaintGuideEntry(entry.hex, { note: event.target.value })}
+                        />
+                      </label>
+                      <label className="toggle-row compact-toggle">
+                        <input
+                          type="checkbox"
+                          checked={entry.included}
+                          onChange={() => updatePaintGuideEntry(entry.hex, { included: !entry.included })}
+                        />
+                        Include in shopping list
+                      </label>
                     </div>
                   </article>
                 ))}
               </div>
+              <div className="shopping-list-card">
+                <div className="shopping-list-header">
+                  <strong>Shopping list</strong>
+                  <button className="tool-button" onClick={copyPaintShoppingList}>
+                    <Copy size={15} />
+                    Copy list
+                  </button>
+                </div>
+                <pre className="shopping-list-preview">{paintShoppingList}</pre>
+                {shoppingListStatus ? <span className="copy-status">{shoppingListStatus}</span> : null}
+              </div>
             </>
           ) : (
-            <p className="muted">Paint matches appear after preview generation.</p>
+            <p className="muted">Paint planning appears after preview generation.</p>
           )}
           {error ? <div className="error-box">{error}</div> : null}
         </aside>

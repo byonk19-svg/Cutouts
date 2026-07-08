@@ -7,6 +7,7 @@ from pypdf import PdfReader
 
 from backend.cutout_studio.pipeline import (
     TemplateSettings,
+    PaintGuideEntry,
     analyze_template,
     build_template_pdf,
     CALIBRATION_SQUARE_PT,
@@ -41,6 +42,28 @@ def white_background_fixture() -> bytes:
     draw.rectangle((46, 40, 214, 180), fill=(45, 116, 70))
     out = io.BytesIO()
     image.save(out, format="JPEG", quality=95)
+    return out.getvalue()
+
+
+def ten_color_fixture() -> bytes:
+    image = Image.new("RGBA", (300, 300), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(image)
+    colors = [
+        (230, 34, 34, 255),
+        (230, 138, 34, 255),
+        (230, 220, 34, 255),
+        (88, 190, 52, 255),
+        (34, 170, 160, 255),
+        (34, 96, 220, 255),
+        (110, 70, 210, 255),
+        (190, 60, 170, 255),
+        (110, 76, 42, 255),
+        (24, 24, 28, 255),
+    ]
+    for index, color in enumerate(colors):
+        draw.rectangle((index * 30, 20, index * 30 + 29, 280), fill=color)
+    out = io.BytesIO()
+    image.save(out, format="PNG")
     return out.getvalue()
 
 
@@ -213,7 +236,7 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(right, 200)
         self.assertGreater(bottom, 165)
 
-    def test_pdf_contains_polished_cover_color_guide_and_all_tile_pages(self) -> None:
+    def test_pdf_contains_polished_cover_paint_guide_and_all_tile_pages(self) -> None:
         settings = TemplateSettings(finished_height_in=30, threshold=40, palette_size=3, project_name="Coraline Packet")
         analysis = analyze_template(transparent_fixture(), settings)
 
@@ -237,6 +260,10 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("Outer cutline", first_text)
         self.assertIn("Detail/paint transfer line", first_text)
         self.assertIn("Original image/underlay is not printed on tiled template pages", first_text)
+        paint_text = reader.pages[1].extract_text()
+        self.assertIn("Paint Guide", paint_text)
+        self.assertIn("Screen colors and printed colors may vary", paint_text)
+        self.assertIn("Shopping list", paint_text)
         tile_text = reader.pages[2].extract_text()
         self.assertIn("Page 1 of", tile_text)
         self.assertIn("Coraline Packet", tile_text)
@@ -253,8 +280,75 @@ class PrintPipelineTest(unittest.TestCase):
 
         self.assertEqual(len(reader.pages), analysis.tile_count + 1)
         first_text = reader.pages[0].extract_text()
-        self.assertIn("Color Guide", first_text)
+        self.assertIn("Paint Guide", first_text)
         self.assertNotIn("Supplies checklist", first_text)
+
+    def test_paint_guide_page_can_be_disabled(self) -> None:
+        settings = TemplateSettings(finished_height_in=30, threshold=40, palette_size=3, include_paint_guide_page=False)
+        analysis = analyze_template(transparent_fixture(), settings)
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        text = "\n".join(page.extract_text() for page in reader.pages)
+
+        self.assertEqual(len(reader.pages), analysis.tile_count + 1)
+        self.assertNotIn("Paint Guide", text)
+        self.assertIn("Supplies checklist", reader.pages[0].extract_text())
+        self.assertIn("Page 1 of", reader.pages[1].extract_text())
+
+    def test_paint_guide_page_includes_labels_notes_and_shopping_list(self) -> None:
+        settings = TemplateSettings(
+            finished_height_in=18,
+            threshold=40,
+            palette_size=3,
+            project_name="Coraline Paint",
+            paint_guide_entries=(
+                PaintGuideEntry("#cc2424", "Hair", "blue-black hair", True),
+                PaintGuideEntry("#fce454", "Coat", "yellow raincoat", True),
+            ),
+        )
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        text = PdfReader(io.BytesIO(pdf_bytes)).pages[1].extract_text()
+
+        self.assertIn("Paint Guide", text)
+        self.assertIn("Coraline Paint", text)
+        self.assertIn("Hair", text)
+        self.assertIn("blue-black hair", text)
+        self.assertIn("Coat", text)
+        self.assertIn("yellow raincoat", text)
+        self.assertIn("These are planning swatches, not exact retail paint matches.", text)
+        self.assertIn("Shopping list", text)
+
+    def test_hidden_paint_color_is_omitted_from_shopping_list(self) -> None:
+        settings = TemplateSettings(
+            finished_height_in=18,
+            threshold=40,
+            palette_size=2,
+            paint_guide_entries=(
+                PaintGuideEntry("#cc2424", "Hidden Hair", "skip this", False),
+                PaintGuideEntry("#fce454", "Visible Coat", "buy this", True),
+            ),
+        )
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        text = PdfReader(io.BytesIO(pdf_bytes)).pages[1].extract_text()
+        shopping_list_text = text.split("Shopping list", 1)[1]
+
+        self.assertIn("Hidden Hair", text)
+        self.assertIn("Hidden from shopping list", text)
+        self.assertNotIn("Hidden Hair", shopping_list_text)
+        self.assertIn("Visible Coat", shopping_list_text)
+
+    def test_paint_guide_page_can_show_ten_palette_colors(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=40, palette_size=10)
+        analysis = analyze_template(ten_color_fixture(), settings)
+
+        pdf_bytes = build_template_pdf(ten_color_fixture(), settings)
+        text = PdfReader(io.BytesIO(pdf_bytes)).pages[1].extract_text()
+
+        self.assertEqual(len(analysis.palette), 10)
+        self.assertIn("10. Color 10", text)
 
     def test_pdf_export_excludes_editor_transient_state_text(self) -> None:
         settings = TemplateSettings(finished_height_in=18, threshold=40, palette_size=3, project_name="Clean Packet")
@@ -314,10 +408,18 @@ class PrintPipelineTest(unittest.TestCase):
             "templateStyle": "manual",
             "projectName": "  Coraline Packet  ",
             "includeInstructionCoverPage": False,
+            "includePaintGuidePage": False,
+            "paintGuideEntries": [
+                {"hex": "fce454", "label": "Coat", "note": "yellow raincoat", "included": False}
+            ],
         })
 
         self.assertEqual(settings.project_name, "Coraline Packet")
         self.assertFalse(settings.include_instruction_cover_page)
+        self.assertFalse(settings.include_paint_guide_page)
+        self.assertEqual(settings.paint_guide_entries[0].hex, "#fce454")
+        self.assertEqual(settings.paint_guide_entries[0].label, "Coat")
+        self.assertFalse(settings.paint_guide_entries[0].included)
 
     def test_manual_trace_mode_returns_cutline_with_blank_detail_layer(self) -> None:
         settings = TemplateSettings.from_mapping({"templateStyle": "manual", "detailLines": False})

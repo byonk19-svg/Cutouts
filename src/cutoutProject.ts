@@ -1,6 +1,7 @@
 import type { TraceStroke } from "./traceStrokes";
 import type { TraceViewport } from "./traceViewport";
 import type { Settings, TraceMode } from "./traceWorkflow";
+import type { PaintGuideEdit } from "./paintGuide";
 
 export const CUTOUT_PROJECT_SCHEMA_VERSION = 1;
 export const CUTOUT_AUTOSAVE_KEY = "cutout-studio:auto-save:v1";
@@ -58,6 +59,7 @@ export type CutoutProject = {
   traceMode: TraceMode;
   analysis: CutoutProjectAnalysis;
   manualStrokes: TraceStroke[];
+  paintGuideEdits: PaintGuideEdit[];
   referenceOpacity: number;
   layerVisibility: ProjectLayerVisibility;
   traceViewport: TraceViewport;
@@ -85,6 +87,7 @@ export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): 
       ...stroke,
       points: stroke.points.map((point) => ({ ...point }))
     })),
+    paintGuideEdits: input.paintGuideEdits.map((edit) => ({ ...edit })),
     referenceOpacity: input.referenceOpacity,
     layerVisibility: {
       ...input.layerVisibility,
@@ -105,7 +108,7 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
     throw new Error("This project file uses an unsupported Cutout Studio version.");
   }
 
-  const project = parsed as CutoutProject;
+  const project = parsed as CutoutProject & { paintGuideEdits?: unknown };
   assertString(project.projectName, "projectName");
   assertString(project.createdAt, "createdAt");
   assertString(project.updatedAt, "updatedAt");
@@ -114,6 +117,8 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
   assertTraceMode(project.traceMode);
   assertAnalysis(project.analysis);
   assertManualStrokes(project.manualStrokes);
+  if (!Array.isArray(project.paintGuideEdits)) project.paintGuideEdits = [];
+  assertPaintGuideEdits(project.paintGuideEdits);
   assertLayerVisibility(project.layerVisibility);
   assertTraceViewport(project.traceViewport);
   assertNumber(project.referenceOpacity, "referenceOpacity");
@@ -152,6 +157,9 @@ function assertSettings(value: unknown): asserts value is Settings {
   if (typeof value.includeInstructionCoverPage !== "boolean") {
     value.includeInstructionCoverPage = true;
   }
+  if (typeof value.includePaintGuidePage !== "boolean") {
+    value.includePaintGuidePage = true;
+  }
   assertTraceMode(value.templateStyle);
 }
 
@@ -185,6 +193,17 @@ function assertManualStrokes(value: unknown): asserts value is TraceStroke[] {
       assertNumber(point.x, "manualStrokes.points.x");
       assertNumber(point.y, "manualStrokes.points.y");
     }
+  }
+}
+
+function assertPaintGuideEdits(value: unknown): asserts value is PaintGuideEdit[] {
+  if (!Array.isArray(value)) throw new Error("Project paint guide edits are invalid.");
+  for (const edit of value) {
+    if (!isRecord(edit)) throw new Error("Project paint guide edit is invalid.");
+    assertString(edit.hex, "paintGuideEdits.hex");
+    if (typeof edit.label !== "string") throw new Error("Project paintGuideEdits.label is invalid.");
+    if (typeof edit.note !== "string") throw new Error("Project paintGuideEdits.note is invalid.");
+    if (typeof edit.included !== "boolean") throw new Error("Project paintGuideEdits.included is invalid.");
   }
 }
 
