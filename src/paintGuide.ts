@@ -1,15 +1,34 @@
 import type { ProjectPaletteColor } from "./cutoutProject";
 
+export type CraftPaintMatch = {
+  id: string;
+  brand: string;
+  line: string;
+  colorName: string;
+  hex: string;
+  finish: string;
+  outdoorRecommended: boolean;
+  retailer?: string;
+  productUrl?: string;
+  notes?: string;
+  distance: number;
+  confidence: "close match" | "approximate match" | "poor match / manual check recommended";
+};
+
 export type PaintGuideEdit = {
   hex: string;
   label: string;
   note: string;
   included: boolean;
+  selectedMatchId: string | null;
+  manualOverride: string;
 };
 
 export type PaintGuideEntry = PaintGuideEdit & {
   index: number;
   coverage: number;
+  matches: CraftPaintMatch[];
+  selectedMatch: CraftPaintMatch | null;
 };
 
 export function paintGuideEntriesForPalette(palette: ProjectPaletteColor[], edits: PaintGuideEdit[]): PaintGuideEntry[] {
@@ -21,7 +40,11 @@ export function paintGuideEntriesForPalette(palette: ProjectPaletteColor[], edit
       label: edit?.label.trim() || `Color ${index + 1}`,
       note: edit?.note.trim() || "",
       included: edit?.included ?? true,
-      coverage: color.coverage
+      selectedMatchId: edit?.selectedMatchId ?? null,
+      manualOverride: edit?.manualOverride.trim() || "",
+      coverage: color.coverage,
+      matches: color.matches,
+      selectedMatch: color.matches.find((match) => match.id === edit?.selectedMatchId) ?? null
     };
   });
 }
@@ -31,7 +54,9 @@ export function updatePaintGuideEdit(edits: PaintGuideEdit[], nextEdit: PaintGui
     ...nextEdit,
     hex: normalizeHex(nextEdit.hex),
     label: nextEdit.label,
-    note: nextEdit.note
+    note: nextEdit.note,
+    selectedMatchId: nextEdit.selectedMatchId,
+    manualOverride: nextEdit.manualOverride
   };
   const existingIndex = edits.findIndex((item) => sameHex(item.hex, normalized.hex));
   if (existingIndex === -1) return [...edits, normalized];
@@ -44,9 +69,17 @@ export function shoppingListText(entries: PaintGuideEntry[]) {
   return included
     .map((entry) => {
       const note = entry.note ? ` - ${entry.note}` : "";
+      if (entry.manualOverride) return `${entry.label}: ${entry.manualOverride}${note}`;
+      if (entry.selectedMatch) {
+        return `${entry.label}: ${entry.selectedMatch.brand} ${entry.selectedMatch.line} ${entry.selectedMatch.colorName}${note}`;
+      }
       return `${entry.label} (${entry.hex.toUpperCase()})${note}`;
     })
     .join("\n");
+}
+
+export function matchDisplayName(match: CraftPaintMatch) {
+  return `${match.brand} ${match.line} ${match.colorName}`;
 }
 
 function sameHex(a: string, b: string) {

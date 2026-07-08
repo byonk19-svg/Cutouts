@@ -7,6 +7,7 @@ from pypdf import PdfReader
 
 from backend.cutout_studio.pipeline import (
     TemplateSettings,
+    Paint,
     PaintGuideEntry,
     analyze_template,
     build_template_pdf,
@@ -303,8 +304,8 @@ class PrintPipelineTest(unittest.TestCase):
             palette_size=3,
             project_name="Coraline Paint",
             paint_guide_entries=(
-                PaintGuideEntry("#cc2424", "Hair", "blue-black hair", True),
-                PaintGuideEntry("#fce454", "Coat", "yellow raincoat", True),
+                PaintGuideEntry("#cc2424", "Hair", "blue-black hair", True, "apple-barrel-matte-bright-red"),
+                PaintGuideEntry("#fce454", "Coat", "yellow raincoat", True, "apple-barrel-matte-bright-yellow"),
             ),
         )
 
@@ -317,8 +318,27 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("blue-black hair", text)
         self.assertIn("Coat", text)
         self.assertIn("yellow raincoat", text)
-        self.assertIn("These are planning swatches, not exact retail paint matches.", text)
+        self.assertIn("Apple Barrel", text)
+        self.assertIn("Bright Red", text)
+        self.assertIn("Bright Yellow", text)
+        self.assertIn("Paint matches are approximate.", text)
         self.assertIn("Shopping list", text)
+
+    def test_paint_guide_page_includes_manual_override(self) -> None:
+        settings = TemplateSettings(
+            finished_height_in=18,
+            threshold=40,
+            palette_size=3,
+            paint_guide_entries=(
+                PaintGuideEntry("#fce454", "Coat", "yellow raincoat", True, None, "Custom yellow mix"),
+            ),
+        )
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        text = PdfReader(io.BytesIO(pdf_bytes)).pages[1].extract_text()
+
+        self.assertIn("Custom yellow mix", text)
+        self.assertIn("Coat: Custom yellow mix", text)
 
     def test_hidden_paint_color_is_omitted_from_shopping_list(self) -> None:
         settings = TemplateSettings(
@@ -386,8 +406,34 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertEqual(len(matches), 3)
         self.assertLessEqual(matches[0].distance, matches[1].distance)
         self.assertLessEqual(matches[1].distance, matches[2].distance)
+        self.assertTrue(matches[0].id)
         self.assertTrue(matches[0].brand)
-        self.assertTrue(matches[0].name)
+        self.assertTrue(matches[0].color_name)
+        self.assertIn(matches[0].confidence, {"close match", "approximate match", "poor match / manual check recommended"})
+
+    def test_lab_paint_matching_ranks_closer_color_above_farther_color(self) -> None:
+        paints = [
+            self._paint("near-red", (238, 2, 4), outdoor=False),
+            self._paint("far-blue", (20, 40, 210), outdoor=True),
+            self._paint("far-green", (30, 160, 70), outdoor=False),
+        ]
+
+        matches = match_paints((240, 0, 0), paints, limit=3)
+
+        self.assertEqual(matches[0].id, "near-red")
+        self.assertEqual([match.id for match in matches], ["near-red", "far-green", "far-blue"])
+
+    def test_outdoor_recommended_breaks_near_ties(self) -> None:
+        paints = [
+            self._paint("indoor-neutral", (100, 100, 100), outdoor=False),
+            self._paint("outdoor-neutral", (100, 100, 100), outdoor=True),
+            self._paint("far-neutral", (160, 160, 160), outdoor=True),
+        ]
+
+        matches = match_paints((100, 100, 100), paints, limit=3)
+
+        self.assertEqual(matches[0].id, "outdoor-neutral")
+        self.assertEqual(matches[1].id, "indoor-neutral")
 
     def test_palette_extraction_respects_requested_color_limit(self) -> None:
         image = Image.open(io.BytesIO(transparent_fixture())).convert("RGBA")
@@ -410,7 +456,14 @@ class PrintPipelineTest(unittest.TestCase):
             "includeInstructionCoverPage": False,
             "includePaintGuidePage": False,
             "paintGuideEntries": [
-                {"hex": "fce454", "label": "Coat", "note": "yellow raincoat", "included": False}
+                {
+                    "hex": "fce454",
+                    "label": "Coat",
+                    "note": "yellow raincoat",
+                    "included": False,
+                    "selectedMatchId": "apple-barrel-matte-bright-yellow",
+                    "manualOverride": "custom mix"
+                }
             ],
         })
 
@@ -420,6 +473,8 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertEqual(settings.paint_guide_entries[0].hex, "#fce454")
         self.assertEqual(settings.paint_guide_entries[0].label, "Coat")
         self.assertFalse(settings.paint_guide_entries[0].included)
+        self.assertEqual(settings.paint_guide_entries[0].selected_match_id, "apple-barrel-matte-bright-yellow")
+        self.assertEqual(settings.paint_guide_entries[0].manual_override, "custom mix")
 
     def test_manual_trace_mode_returns_cutline_with_blank_detail_layer(self) -> None:
         settings = TemplateSettings.from_mapping({"templateStyle": "manual", "detailLines": False})
@@ -622,6 +677,20 @@ class PrintPipelineTest(unittest.TestCase):
 
     def _is_black_and_white_image(self, image: Image.Image) -> bool:
         return set(image.convert("RGB").get_flattened_data()) <= {(0, 0, 0), (255, 255, 255)}
+
+    def _paint(self, paint_id: str, rgb: tuple[int, int, int], outdoor: bool) -> Paint:
+        return Paint(
+            id=paint_id,
+            brand="Test",
+            line="Acrylic",
+            color_name=paint_id,
+            rgb=rgb,
+            finish="matte",
+            outdoor_recommended=outdoor,
+            retailer="",
+            product_url="",
+            notes="",
+        )
 
 
 if __name__ == "__main__":

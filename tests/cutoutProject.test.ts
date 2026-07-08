@@ -47,7 +47,22 @@ const analysis = {
     {
       hex: "#f1ce2d",
       coverage: 0.22,
-      matches: [{ brand: "Apple Barrel", name: "Bright Yellow", hex: "#f1ce2d", distance: 2, source: "catalog" }]
+      matches: [
+        {
+          id: "apple-barrel-bright-yellow",
+          brand: "Apple Barrel",
+          line: "Matte Acrylic",
+          colorName: "Bright Yellow",
+          hex: "#f1ce2d",
+          finish: "matte",
+          outdoorRecommended: false,
+          retailer: "",
+          productUrl: "",
+          notes: "",
+          distance: 2,
+          confidence: "close match"
+        }
+      ]
     }
   ]
 };
@@ -72,8 +87,8 @@ const analysis = {
     analysis,
     manualStrokes: strokes,
     paintGuideEdits: [
-      { hex: "#f1ce2d", label: "Coat", note: "main raincoat body", included: true },
-      { hex: "#0c143a", label: "Hair", note: "blue-black hair", included: false }
+      { hex: "#f1ce2d", label: "Coat", note: "main raincoat body", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" },
+      { hex: "#0c143a", label: "Hair", note: "blue-black hair", included: false, selectedMatchId: null, manualOverride: "custom navy mix" }
     ],
     referenceOpacity: 42,
     layerVisibility: {
@@ -104,7 +119,9 @@ const analysis = {
   assertEqual(restored.manualStrokes[1].width, 20, "round trip should preserve stroke width");
   assertEqual(restored.paintGuideEdits[0].label, "Coat", "round trip should preserve paint labels");
   assertEqual(restored.paintGuideEdits[0].note, "main raincoat body", "round trip should preserve paint notes");
+  assertEqual(restored.paintGuideEdits[0].selectedMatchId, "apple-barrel-bright-yellow", "round trip should preserve selected paint match");
   assertEqual(restored.paintGuideEdits[1].included, false, "round trip should preserve hidden shopping-list state");
+  assertEqual(restored.paintGuideEdits[1].manualOverride, "custom navy mix", "round trip should preserve manual override");
   assertEqual(restored.referenceOpacity, 42, "round trip should preserve underlay opacity");
   assertEqual(restored.layerVisibility.showReference, true, "round trip should preserve underlay visibility");
   assertEqual(restored.traceViewport.panY, -8, "round trip should preserve viewport");
@@ -141,6 +158,33 @@ const analysis = {
   assertEqual(restored.settings.includeInstructionCoverPage, true, "legacy project import should default instruction cover on");
   assertEqual(restored.settings.includePaintGuidePage, true, "legacy project import should default paint guide on");
   assertEqual(restored.paintGuideEdits.length, 0, "legacy project import should default paint guide edits to empty");
+}
+
+{
+  const restored = restoreCutoutProject({
+    schemaVersion: CUTOUT_PROJECT_SCHEMA_VERSION,
+    projectName: "Paint v1",
+    createdAt: "2026-07-07T10:00:00.000Z",
+    updatedAt: "2026-07-07T10:00:00.000Z",
+    sourceImage: { name: "source.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,source" },
+    settings,
+    traceMode: "manual",
+    analysis,
+    manualStrokes: [],
+    paintGuideEdits: [{ hex: "#f1ce2d", label: "Coat", note: "raincoat", included: true }],
+    referenceOpacity: 35,
+    layerVisibility: {
+      showReference: false,
+      showCutline: true,
+      showManualLines: true,
+      showSuggestions: false,
+      printPreview: false
+    },
+    traceViewport: DEFAULT_TRACE_VIEWPORT
+  });
+
+  assertEqual(restored.paintGuideEdits[0].selectedMatchId, null, "paint v1 project import should default selected match to none");
+  assertEqual(restored.paintGuideEdits[0].manualOverride, "", "paint v1 project import should default manual override to empty");
 }
 
 {

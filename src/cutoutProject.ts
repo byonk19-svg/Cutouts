@@ -1,7 +1,7 @@
 import type { TraceStroke } from "./traceStrokes";
 import type { TraceViewport } from "./traceViewport";
 import type { Settings, TraceMode } from "./traceWorkflow";
-import type { PaintGuideEdit } from "./paintGuide";
+import type { CraftPaintMatch, PaintGuideEdit } from "./paintGuide";
 
 export const CUTOUT_PROJECT_SCHEMA_VERSION = 1;
 export const CUTOUT_AUTOSAVE_KEY = "cutout-studio:auto-save:v1";
@@ -12,13 +12,7 @@ export type ProjectSourceImage = {
   dataUrl: string;
 };
 
-export type ProjectPaintMatch = {
-  brand: string;
-  name: string;
-  hex: string;
-  distance: number;
-  source: string;
-};
+export type ProjectPaintMatch = CraftPaintMatch;
 
 export type ProjectPaletteColor = {
   hex: string;
@@ -204,6 +198,10 @@ function assertPaintGuideEdits(value: unknown): asserts value is PaintGuideEdit[
     if (typeof edit.label !== "string") throw new Error("Project paintGuideEdits.label is invalid.");
     if (typeof edit.note !== "string") throw new Error("Project paintGuideEdits.note is invalid.");
     if (typeof edit.included !== "boolean") throw new Error("Project paintGuideEdits.included is invalid.");
+    if (!("selectedMatchId" in edit)) edit.selectedMatchId = null;
+    if (edit.selectedMatchId !== null && typeof edit.selectedMatchId !== "string") throw new Error("Project paintGuideEdits.selectedMatchId is invalid.");
+    if (!("manualOverride" in edit)) edit.manualOverride = "";
+    if (typeof edit.manualOverride !== "string") throw new Error("Project paintGuideEdits.manualOverride is invalid.");
   }
 }
 

@@ -42,4 +42,4 @@ pnpm verify
 
 ## Notes
 
-Paint matches are approximate and use an editable budget craft paint catalog at `backend/cutout_studio/paint_catalog.json`. Store availability and exact color appearance can vary.
+Paint matches are approximate and use an editable local craft paint catalog at `backend/cutout_studio/craft_paint_catalog.json`. Store availability and exact color appearance can vary.

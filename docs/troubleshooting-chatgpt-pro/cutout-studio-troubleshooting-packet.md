@@ -46,7 +46,7 @@ This packet captures the working context, conversation decisions, app state, and
 - `src/styles.css`: app styling.
 - `backend/cutout_studio/pipeline.py`: image processing, tracing, paint palette extraction, PDF layout data.
 - `backend/cutout_studio/server.py`: FastAPI endpoints.
-- `backend/cutout_studio/paint_catalog.json`: craft paint suggestions.
+- `backend/cutout_studio/craft_paint_catalog.json`: craft paint suggestions.
 - `README.md`: run instructions.
 - `CONTEXT.md`: project context and decisions.
 

@@ -12,6 +12,7 @@ import {
 } from "./cutoutProject";
 import { removeClickedDetailSegment } from "./detailEditor";
 import {
+  matchDisplayName,
   paintGuideEntriesForPalette,
   shoppingListText,
   updatePaintGuideEdit,
@@ -467,7 +468,9 @@ function App() {
       hex,
       label: patch.label ?? current.label,
       note: patch.note ?? current.note,
-      included: patch.included ?? current.included
+      included: patch.included ?? current.included,
+      selectedMatchId: "selectedMatchId" in patch ? patch.selectedMatchId ?? null : current.selectedMatchId,
+      manualOverride: "manualOverride" in patch ? patch.manualOverride ?? "" : current.manualOverride
     }));
     setShoppingListStatus("");
   }
@@ -1425,6 +1428,58 @@ function App() {
                           onChange={(event) => updatePaintGuideEntry(entry.hex, { note: event.target.value })}
                         />
                       </label>
+                      <label>
+                        <span>Craft paint match</span>
+                        <select
+                          value={entry.manualOverride ? "__manual__" : entry.selectedMatchId ?? ""}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (value === "__manual__") {
+                              updatePaintGuideEntry(entry.hex, { selectedMatchId: null, manualOverride: entry.manualOverride || "Choose in store" });
+                              return;
+                            }
+                            if (value === "") {
+                              updatePaintGuideEntry(entry.hex, { selectedMatchId: null, manualOverride: "" });
+                              return;
+                            }
+                            updatePaintGuideEntry(entry.hex, { selectedMatchId: value, manualOverride: "" });
+                          }}
+                        >
+                          <option value="">No match / choose in store</option>
+                          {entry.matches.map((match) => (
+                            <option key={match.id} value={match.id}>
+                              {matchDisplayName(match)}
+                            </option>
+                          ))}
+                          <option value="__manual__">Manual override</option>
+                        </select>
+                      </label>
+                      {entry.matches.length > 0 ? (
+                        <div className="paint-match-suggestions" aria-label={`Suggested paints for ${entry.label}`}>
+                          {entry.matches.map((match) => (
+                            <button
+                              key={match.id}
+                              className={entry.selectedMatchId === match.id ? "paint-match-chip selected" : "paint-match-chip"}
+                              onClick={() => updatePaintGuideEntry(entry.hex, { selectedMatchId: match.id, manualOverride: "" })}
+                            >
+                              <span className="mini-swatch" style={{ backgroundColor: match.hex }} />
+                              <span>{matchDisplayName(match)}</span>
+                              <em>{match.confidence}</em>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      {entry.manualOverride ? (
+                        <label>
+                          <span>Manual override</span>
+                          <input
+                            type="text"
+                            placeholder="brand, line, color name, or choose in store"
+                            value={entry.manualOverride}
+                            onChange={(event) => updatePaintGuideEntry(entry.hex, { selectedMatchId: null, manualOverride: event.target.value })}
+                          />
+                        </label>
+                      ) : null}
                       <label className="toggle-row compact-toggle">
                         <input
                           type="checkbox"

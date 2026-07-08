@@ -37,6 +37,8 @@ class PaintGuideEntry:
     label: str
     note: str
     included: bool = True
+    selected_match_id: str | None = None
+    manual_override: str = ""
 
 
 @dataclass(frozen=True)
@@ -79,19 +81,32 @@ class TemplateSettings:
 
 @dataclass(frozen=True)
 class Paint:
+    id: str
     brand: str
-    name: str
+    line: str
+    color_name: str
     rgb: tuple[int, int, int]
-    source: str
+    finish: str
+    outdoor_recommended: bool
+    retailer: str
+    product_url: str
+    notes: str
 
 
 @dataclass(frozen=True)
 class PaintMatch:
+    id: str
     brand: str
-    name: str
+    line: str
+    color_name: str
     rgb: tuple[int, int, int]
+    finish: str
+    outdoor_recommended: bool
+    retailer: str
+    product_url: str
+    notes: str
     distance: float
-    source: str
+    confidence: str
 
 
 @dataclass(frozen=True)
@@ -142,12 +157,19 @@ class TemplateAnalysis:
                     "coverage": round(color.coverage, 3),
                     "matches": [
                         {
+                            "id": match.id,
                             "brand": match.brand,
-                            "name": match.name,
+                            "line": match.line,
+                            "colorName": match.color_name,
                             "rgb": match.rgb,
                             "hex": _hex(match.rgb),
+                            "finish": match.finish,
+                            "outdoorRecommended": match.outdoor_recommended,
+                            "retailer": match.retailer,
+                            "productUrl": match.product_url,
+                            "notes": match.notes,
                             "distance": round(match.distance, 1),
-                            "source": match.source,
+                            "confidence": match.confidence,
                         }
                         for match in color.matches
                     ],
@@ -249,24 +271,43 @@ def extract_palette(image: Image.Image, mask: Image.Image, palette_size: int) ->
 
 def match_paints(rgb: tuple[int, int, int], paints: list[Paint], limit: int = 3) -> list[PaintMatch]:
     scored = []
-    source = np.array(rgb, dtype=float)
+    source = _rgb_to_lab(rgb)
     for paint in paints:
-        target = np.array(paint.rgb, dtype=float)
+        target = _rgb_to_lab(paint.rgb)
         distance = float(np.linalg.norm(source - target))
-        scored.append(PaintMatch(paint.brand, paint.name, paint.rgb, distance, paint.source))
-    scored.sort(key=lambda match: match.distance)
+        scored.append(PaintMatch(
+            paint.id,
+            paint.brand,
+            paint.line,
+            paint.color_name,
+            paint.rgb,
+            paint.finish,
+            paint.outdoor_recommended,
+            paint.retailer,
+            paint.product_url,
+            paint.notes,
+            distance,
+            _match_confidence(distance),
+        ))
+    scored.sort(key=lambda match: (_tie_distance(match.distance), not match.outdoor_recommended, match.distance, match.brand, match.color_name))
     return scored[:limit]
 
 
 def load_paint_catalog() -> list[Paint]:
-    path = Path(__file__).with_name("paint_catalog.json")
+    path = Path(__file__).with_name("craft_paint_catalog.json")
     payload = json.loads(path.read_text(encoding="utf-8"))
     return [
         Paint(
+            id=item["id"],
             brand=item["brand"],
-            name=item["name"],
-            rgb=tuple(int(v) for v in item["rgb"]),
-            source=item["source"],
+            line=item["line"],
+            color_name=item["colorName"],
+            rgb=_hex_to_rgb(item["hex"]),
+            finish=item["finish"],
+            outdoor_recommended=bool(item["outdoorRecommended"]),
+            retailer=str(item.get("retailer", "")),
+            product_url=str(item.get("productUrl", "")),
+            notes=str(item.get("notes", "")),
         )
         for item in payload
     ]
@@ -917,12 +958,13 @@ def _draw_paint_guide_page(
     pdf.drawString(40, height_pt - 76, project_name)
     pdf.setFont("Helvetica", 8.5)
     pdf.drawString(40, height_pt - 96, "Screen colors and printed colors may vary. Use swatches as a shopping/planning guide.")
-    pdf.drawString(40, height_pt - 110, "These are planning swatches, not exact retail paint matches.")
+    pdf.drawString(40, height_pt - 110, "Paint matches are approximate. Screen, printer, lighting, wood primer, and sealer can change color appearance.")
+    pdf.drawString(40, height_pt - 124, "Check the bottle or swatch in store.")
 
     pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(40, height_pt - 142, "Color planning")
-    row_top = height_pt - 174
-    row_gap = 52
+    pdf.drawString(40, height_pt - 156, "Color planning")
+    row_top = height_pt - 188
+    row_gap = 64
     for row_index, row in enumerate(rows[:10]):
         x = 40 if row_index < 5 else 320
         y = row_top - (row_index % 5) * row_gap
@@ -935,20 +977,23 @@ def _draw_paint_guide_page(
         pdf.drawString(x + 44, y - 12, f"{row['hex'].upper()} - {row['coverage']:.0%} of detected colors")
         if row["note"]:
             pdf.drawString(x + 44, y - 26, f"Use: {row['note']}"[:34])
+        match_text = _paint_match_pdf_text(row)
+        if match_text:
+            pdf.drawString(x + 44, y - 40, match_text[:50])
         if not row["included"]:
-            pdf.drawString(x + 44, y - 40, "Hidden from shopping list")
+            pdf.drawString(x + 44, y - 54, "Hidden from shopping list")
 
     pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(40, 300, "Shopping list")
+    pdf.drawString(40, 250, "Shopping list")
     pdf.setFont("Helvetica", 9)
     included_rows = [row for row in rows if row["included"]]
     if not included_rows:
-        pdf.drawString(40, 280, "No paint colors selected.")
+        pdf.drawString(40, 230, "No paint colors selected.")
         return
     for index, row in enumerate(included_rows[:10]):
-        y = 280 - index * 18
+        y = 230 - index * 18
         note = f" - {row['note']}" if row["note"] else ""
-        pdf.drawString(40, y, f"- {row['label']} ({row['hex'].upper()}){note}"[:112])
+        pdf.drawString(40, y, f"- {_shopping_list_pdf_text(row)}{note}"[:112])
 
 
 def _draw_tile_pages(
@@ -1043,6 +1088,8 @@ def _paint_guide_entries_from_mapping(value: Any) -> tuple[PaintGuideEntry, ...]
             label=_safe_pdf_text(item.get("label"), "", 64),
             note=_safe_pdf_text(item.get("note"), "", 96),
             included=_bounded_bool(item.get("included"), True),
+            selected_match_id=_safe_optional_text(item.get("selectedMatchId"), 96),
+            manual_override=_safe_pdf_text(item.get("manualOverride"), "", 96),
         ))
     return tuple(entries)
 
@@ -1056,6 +1103,8 @@ def _paint_guide_rows(
     for index, color in enumerate(palette, start=1):
         hex_value = _hex(color.rgb)
         edit = edits_by_hex.get(hex_value.lower())
+        selected_match_id = edit.selected_match_id if edit else None
+        selected_match = next((match for match in color.matches if match.id == selected_match_id), None)
         label = _safe_pdf_text(edit.label, f"Color {index}", 64) if edit else f"Color {index}"
         note = _safe_pdf_text(edit.note, "", 96) if edit else ""
         rows.append({
@@ -1065,8 +1114,28 @@ def _paint_guide_rows(
             "note": note,
             "included": True if edit is None else edit.included,
             "coverage": color.coverage,
+            "selected_match": selected_match,
+            "manual_override": edit.manual_override if edit else "",
         })
     return rows
+
+
+def _paint_match_pdf_text(row: dict[str, Any]) -> str:
+    if row["manual_override"]:
+        return f"Paint: {row['manual_override']}"
+    selected_match = row["selected_match"]
+    if selected_match is None:
+        return ""
+    return f"Paint: {selected_match.brand} {selected_match.line} {selected_match.color_name}"
+
+
+def _shopping_list_pdf_text(row: dict[str, Any]) -> str:
+    if row["manual_override"]:
+        return f"{row['label']}: {row['manual_override']}"
+    selected_match = row["selected_match"]
+    if selected_match is None:
+        return f"{row['label']} ({row['hex'].upper()})"
+    return f"{row['label']}: {selected_match.brand} {selected_match.line} {selected_match.color_name}"
 
 
 def _safe_hex(value: Any) -> str | None:
@@ -1084,11 +1153,45 @@ def _safe_hex(value: Any) -> str | None:
     return raw
 
 
+def _hex_to_rgb(value: str) -> tuple[int, int, int]:
+    parsed = _safe_hex(value)
+    if parsed is None:
+        raise ValueError(f"Invalid catalog paint hex value: {value}")
+    return (int(parsed[1:3], 16), int(parsed[3:5], 16), int(parsed[5:7], 16))
+
+
+def _rgb_to_lab(rgb: tuple[int, int, int]) -> np.ndarray:
+    sample = np.array([[rgb]], dtype=np.uint8)
+    lab = cv2.cvtColor(sample, cv2.COLOR_RGB2LAB).astype(float)
+    return lab[0, 0]
+
+
+def _tie_distance(distance: float) -> int:
+    return round(distance / 3)
+
+
+def _match_confidence(distance: float) -> str:
+    if distance <= 10:
+        return "close match"
+    if distance <= 28:
+        return "approximate match"
+    return "poor match / manual check recommended"
+
+
 def _safe_pdf_text(value: Any, fallback: str, max_length: int) -> str:
     if not isinstance(value, str):
         return fallback
     text = " ".join(value.strip().split())
     return (text or fallback)[:max_length]
+
+
+def _safe_optional_text(value: Any, max_length: int) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.strip().split())
+    return text[:max_length] if text else None
 
 
 def _bounded_bool(value: Any, fallback: bool) -> bool:
