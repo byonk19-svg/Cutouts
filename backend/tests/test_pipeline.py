@@ -212,8 +212,8 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(right, 200)
         self.assertGreater(bottom, 165)
 
-    def test_pdf_contains_overview_color_guide_and_all_tile_pages(self) -> None:
-        settings = TemplateSettings(finished_height_in=30, threshold=40, palette_size=3)
+    def test_pdf_contains_polished_cover_color_guide_and_all_tile_pages(self) -> None:
+        settings = TemplateSettings(finished_height_in=30, threshold=40, palette_size=3, project_name="Coraline Packet")
         analysis = analyze_template(transparent_fixture(), settings)
 
         pdf_bytes = build_template_pdf(transparent_fixture(), settings)
@@ -222,9 +222,47 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(len(pdf_bytes), 10_000)
         self.assertEqual(len(reader.pages), analysis.tile_count + 2)
         first_text = reader.pages[0].extract_text()
-        self.assertIn("Cutout Studio Template Pack", first_text)
+        self.assertIn("Coraline Packet", first_text)
+        self.assertIn("Finished size:", first_text)
+        self.assertIn("Print at 100% / actual size", first_text)
+        self.assertIn("1-inch calibration square", first_text)
+        self.assertIn("Supplies checklist", first_text)
+        self.assertIn("plywood or foam board", first_text)
+        self.assertIn("Print all pages at 100%.", first_text)
+        self.assertIn("Page map", first_text)
+        self.assertIn("Row 1 / Column 1", first_text)
+        self.assertIn("Linework legend", first_text)
+        self.assertIn("Outer cutline", first_text)
+        self.assertIn("Detail/paint transfer line", first_text)
+        self.assertIn("Original image/underlay is not printed", first_text)
         tile_text = reader.pages[2].extract_text()
         self.assertIn("Page 1 of", tile_text)
+        self.assertIn("Coraline Packet", tile_text)
+        self.assertIn("Row 1 / Column 1", tile_text)
+        self.assertIn("Overlap guide: 0.25 in", tile_text)
+
+    def test_pdf_cover_page_can_be_disabled(self) -> None:
+        settings = TemplateSettings(finished_height_in=30, threshold=40, palette_size=3, include_instruction_cover_page=False)
+        analysis = analyze_template(transparent_fixture(), settings)
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+
+        self.assertEqual(len(reader.pages), analysis.tile_count + 1)
+        first_text = reader.pages[0].extract_text()
+        self.assertIn("Color Guide", first_text)
+        self.assertNotIn("Supplies checklist", first_text)
+
+    def test_pdf_export_excludes_editor_transient_state_text(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=40, palette_size=3, project_name="Clean Packet")
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf_bytes)).pages)
+
+        self.assertNotIn("Selection Inspector", text)
+        self.assertNotIn("selectedStrokeId", text)
+        self.assertNotIn("dimUnselected", text)
+        self.assertNotIn("Original underlay", text)
 
     def test_empty_white_image_fails_deterministically(self) -> None:
         image = Image.new("RGB", (120, 120), "white")
@@ -264,6 +302,16 @@ class PrintPipelineTest(unittest.TestCase):
         settings = TemplateSettings.from_mapping({"templateStyle": "marker"})
 
         self.assertEqual(settings.template_style, "marker")
+
+    def test_packet_export_settings_accept_project_name_and_cover_toggle(self) -> None:
+        settings = TemplateSettings.from_mapping({
+            "templateStyle": "manual",
+            "projectName": "  Coraline Packet  ",
+            "includeInstructionCoverPage": False,
+        })
+
+        self.assertEqual(settings.project_name, "Coraline Packet")
+        self.assertFalse(settings.include_instruction_cover_page)
 
     def test_manual_trace_mode_returns_cutline_with_blank_detail_layer(self) -> None:
         settings = TemplateSettings.from_mapping({"templateStyle": "manual", "detailLines": False})

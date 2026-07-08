@@ -10,6 +10,7 @@ export type Settings = {
   detailCleanup: number;
   templateStyle: TraceMode;
   paletteSize: number;
+  includeInstructionCoverPage: boolean;
 };
 
 export function traceModeSettings(mode: TraceMode, current: Settings): Settings {

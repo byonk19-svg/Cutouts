@@ -21,7 +21,8 @@ const settings: Settings = {
   detailLines: false,
   detailCleanup: 100,
   templateStyle: "manual",
-  paletteSize: 6
+  paletteSize: 6,
+  includeInstructionCoverPage: true
 };
 
 const analysis = {

@@ -65,7 +65,8 @@ const defaultSettings: Settings = {
   detailLines: true,
   detailCleanup: 88,
   templateStyle: "paint",
-  paletteSize: 6
+  paletteSize: 6,
+  includeInstructionCoverPage: true
 };
 
 const cleanupStepLabels: Record<CleanupStep, string> = {
@@ -257,7 +258,7 @@ function App() {
     try {
       const payload = new FormData();
       payload.append("image", image);
-      payload.append("settings", JSON.stringify(settings));
+      payload.append("settings", JSON.stringify({ ...settings, projectName }));
       const editedDetail = currentDetailDataUrl();
       if (editedDetail) payload.append("editedDetail", editedDetail);
       const response = await fetch("/api/export", { method: "POST", body: payload });
@@ -899,7 +900,7 @@ function App() {
           </button>
           <button className="primary-action" onClick={exportPdf} disabled={!canExport}>
             <Download size={18} />
-            Export Printable PDF
+            Export Template Packet PDF
           </button>
         </div>
       </header>
@@ -991,6 +992,17 @@ function App() {
             />
           ) : null}
           <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => updateSetting("paletteSize", value)} />
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={settings.includeInstructionCoverPage}
+              onChange={() => setSettings((current) => ({
+                ...current,
+                includeInstructionCoverPage: !current.includeInstructionCoverPage
+              }))}
+            />
+            Include instruction cover page
+          </label>
 
           <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
             {advancedOpen

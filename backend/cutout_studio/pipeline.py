@@ -41,6 +41,8 @@ class TemplateSettings:
     detail_cleanup: int = 88
     template_style: str = "clean"
     palette_size: int = 6
+    include_instruction_cover_page: bool = True
+    project_name: str = "Cutout Studio Template Pack"
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "TemplateSettings":
@@ -57,6 +59,8 @@ class TemplateSettings:
             detail_cleanup=_bounded_int(data.get("detailCleanup"), 0, 100, cls.detail_cleanup),
             template_style=template_style,
             palette_size=_bounded_int(data.get("paletteSize"), 2, 12, cls.palette_size),
+            include_instruction_cover_page=bool(data.get("includeInstructionCoverPage", cls.include_instruction_cover_page)),
+            project_name=_safe_project_name(data.get("projectName", cls.project_name)),
         )
 
 
@@ -183,12 +187,13 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_de
 
     out = io.BytesIO()
     pdf = canvas.Canvas(out, pagesize=letter)
-    pdf.setTitle("Cutout Studio Template Pack")
-    _draw_overview_page(pdf, cropped_source, finished_width, settings.finished_height_in, tile_cols, tile_rows)
-    pdf.showPage()
+    pdf.setTitle(f"{settings.project_name} Template Packet")
+    if settings.include_instruction_cover_page:
+        _draw_overview_page(pdf, settings.project_name, cropped_source, finished_width, settings.finished_height_in, tile_cols, tile_rows)
+        pdf.showPage()
     _draw_color_guide_page(pdf, cropped_source, palette)
     pdf.showPage()
-    _draw_tile_pages(pdf, trace, finished_width, settings.finished_height_in, tile_cols, tile_rows)
+    _draw_tile_pages(pdf, settings.project_name, trace, finished_width, settings.finished_height_in, tile_cols, tile_rows)
     pdf.save()
     return out.getvalue()
 
@@ -787,6 +792,7 @@ def _initial_color_centers(sample: np.ndarray, cluster_count: int) -> np.ndarray
 
 def _draw_overview_page(
     pdf: canvas.Canvas,
+    project_name: str,
     source: Image.Image,
     width_in: float,
     height_in: float,
@@ -794,22 +800,91 @@ def _draw_overview_page(
     tile_rows: int,
 ) -> None:
     width_pt, height_pt = letter
+    left = 40
+    top = height_pt - 48
     pdf.setFont("Helvetica-Bold", 22)
-    pdf.drawString(40, height_pt - 58, "Cutout Studio Template Pack")
+    pdf.drawString(left, top, project_name)
     pdf.setFont("Helvetica", 11)
-    pdf.drawString(40, height_pt - 86, "Print at 100 percent scale. Do not use fit-to-page.")
-    pdf.drawString(40, height_pt - 106, f"Finished size: {width_in:.2f} in wide x {height_in:.2f} in tall")
-    pdf.drawString(40, height_pt - 126, f"Trace pages: {tile_cols} columns x {tile_rows} rows ({tile_cols * tile_rows} pages)")
+    pdf.drawString(left, top - 28, "Print at 100% / actual size. Do not use fit-to-page.")
+    pdf.drawString(left, top - 48, f"Finished size: {width_in:.2f} in wide x {height_in:.2f} in tall")
+    pdf.drawString(left, top - 68, f"Trace pages: {tile_cols} columns x {tile_rows} rows ({tile_cols * tile_rows} pages)")
 
     preview = _on_white(source)
-    preview.thumbnail((260, 260))
-    pdf.drawImage(ImageReader(preview), 40, height_pt - 430, width=preview.width, height=preview.height, preserveAspectRatio=True)
+    preview.thumbnail((165, 210))
+    pdf.drawImage(ImageReader(preview), left, top - 306, width=preview.width, height=preview.height, preserveAspectRatio=True)
 
     pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(350, height_pt - 180, "Calibration")
+    pdf.drawString(240, top - 118, "Supplies checklist")
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(350, height_pt - 198, "This square should measure exactly 1 inch.")
-    pdf.rect(350, height_pt - 286, 72, 72, stroke=1, fill=0)
+    supplies = [
+        "plywood or foam board",
+        "tape",
+        "pencil/carbon paper",
+        "jigsaw",
+        "paint",
+        "thick black marker",
+        "outdoor clear coat/sealer",
+    ]
+    for index, item in enumerate(supplies):
+        y = top - 138 - index * 16
+        pdf.rect(240, y - 2, 8, 8, stroke=1, fill=0)
+        pdf.drawString(254, y - 2, item)
+
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(430, top - 118, "Workflow")
+    pdf.setFont("Helvetica", 8.5)
+    steps = [
+        "Print all pages at 100%.",
+        "Tape pages together using page labels.",
+        "Trace outer cutline onto wood.",
+        "Cut outer shape.",
+        "Transfer interior details.",
+        "Paint.",
+        "Outline details with marker.",
+        "Seal for outdoor use.",
+    ]
+    for index, step in enumerate(steps, start=1):
+        pdf.drawString(430, top - 122 - index * 15, f"{index}. {step}")
+
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(40, 282, "Page map")
+    _draw_page_map(pdf, 40, 164, tile_cols, tile_rows)
+
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(300, 282, "Linework legend")
+    pdf.setLineWidth(3)
+    pdf.line(300, 258, 372, 258)
+    pdf.setLineWidth(1)
+    pdf.line(300, 234, 372, 234)
+    pdf.setLineWidth(0.5)
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(384, 254, "Outer cutline")
+    pdf.drawString(384, 230, "Detail/paint transfer line")
+    pdf.drawString(300, 208, "Original image/underlay is not printed.")
+    pdf.drawString(300, 194, "Interior details can be transferred with carbon paper or heavy pen pressure.")
+
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(40, 96, "1-inch calibration square")
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(40, 78, "This square should measure exactly 1 inch after printing.")
+    pdf.rect(40, 0.35 * 72, 72, 72, stroke=1, fill=0)
+
+
+def _draw_page_map(pdf: canvas.Canvas, x: float, y: float, tile_cols: int, tile_rows: int) -> None:
+    max_width = 210
+    max_height = 96
+    cell = min(max_width / tile_cols, max_height / tile_rows, 34)
+    pdf.setFont("Helvetica", 6.5)
+    for row in range(tile_rows):
+        for col in range(tile_cols):
+            page_num = row * tile_cols + col + 1
+            cell_x = x + col * cell
+            cell_y = y + (tile_rows - row - 1) * cell
+            pdf.rect(cell_x, cell_y, cell, cell, stroke=1, fill=0)
+            pdf.drawCentredString(cell_x + cell / 2, cell_y + cell / 2 + 3, str(page_num))
+            pdf.drawCentredString(cell_x + cell / 2, cell_y + 5, f"R{row + 1} C{col + 1}")
+    pdf.setFont("Helvetica", 8)
+    pdf.drawString(x, y - 18, "Assemble left to right by row. Row 1 / Column 1 starts at the top left.")
 
 
 def _draw_color_guide_page(pdf: canvas.Canvas, source: Image.Image, palette: tuple[PaletteColor, ...]) -> None:
@@ -839,6 +914,7 @@ def _draw_color_guide_page(pdf: canvas.Canvas, source: Image.Image, palette: tup
 
 def _draw_tile_pages(
     pdf: canvas.Canvas,
+    project_name: str,
     trace: Image.Image,
     width_in: float,
     height_in: float,
@@ -870,8 +946,11 @@ def _draw_tile_pages(
 
             pdf.setFont("Helvetica-Bold", 16)
             pdf.drawString(margin_pt, height_pt - margin_pt - 12, f"Page {page_num} of {tile_cols * tile_rows}")
+            pdf.setFont("Helvetica-Bold", 10)
+            pdf.drawRightString(width_pt - margin_pt, height_pt - margin_pt - 12, project_name[:48])
             pdf.setFont("Helvetica", 9)
-            pdf.drawString(margin_pt + 110, height_pt - margin_pt - 11, f"Row {row + 1}, Column {col + 1}")
+            pdf.drawString(margin_pt, height_pt - margin_pt - 27, f"Row {row + 1} / Column {col + 1}")
+            pdf.drawString(margin_pt + 118, height_pt - margin_pt - 27, f"Overlap guide: {OVERLAP_IN:.2f} in shared edge")
             pdf.drawImage(
                 ImageReader(crop),
                 margin_pt,
@@ -883,6 +962,7 @@ def _draw_tile_pages(
             )
             pdf.setStrokeColor(colors.lightgrey)
             pdf.rect(margin_pt, height_pt - margin_pt - header_pt - tile_h_in * 72, tile_w_in * 72, tile_h_in * 72, stroke=1, fill=0)
+            _draw_crop_marks(pdf, margin_pt, height_pt - margin_pt - header_pt, tile_w_in * 72, tile_h_in * 72)
             pdf.setDash(3, 3)
             if col < tile_cols - 1:
                 x = margin_pt + (tile_w_in - OVERLAP_IN) * 72
@@ -896,6 +976,20 @@ def _draw_tile_pages(
             pdf.setFont("Helvetica", 7)
             pdf.drawRightString(width_pt - margin_pt - 42, margin_pt + 13, "1 in")
             pdf.showPage()
+
+
+def _draw_crop_marks(pdf: canvas.Canvas, x: float, top: float, width: float, height: float) -> None:
+    mark = 12
+    bottom = top - height
+    right = x + width
+    pdf.setStrokeColor(colors.black)
+    pdf.setLineWidth(0.5)
+    for corner_x, horizontal_direction in ((x, 1), (right, -1)):
+        pdf.line(corner_x, top, corner_x + horizontal_direction * mark, top)
+        pdf.line(corner_x, bottom, corner_x + horizontal_direction * mark, bottom)
+    for corner_y, vertical_direction in ((top, -1), (bottom, 1)):
+        pdf.line(x, corner_y, x, corner_y + vertical_direction * mark)
+        pdf.line(right, corner_y, right, corner_y + vertical_direction * mark)
 
 
 def _bounded_int(value: Any, minimum: int, maximum: int, fallback: int) -> int:
@@ -912,6 +1006,13 @@ def _bounded_float(value: Any, minimum: float, maximum: float, fallback: float) 
     except (TypeError, ValueError):
         return fallback
     return max(minimum, min(maximum, parsed))
+
+
+def _safe_project_name(value: Any) -> str:
+    if not isinstance(value, str):
+        return TemplateSettings.project_name
+    name = " ".join(value.strip().split())
+    return name[:80] or TemplateSettings.project_name
 
 
 def _hex(rgb: tuple[int, int, int]) -> str:

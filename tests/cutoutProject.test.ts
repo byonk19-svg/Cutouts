@@ -26,7 +26,8 @@ const settings: Settings = {
   detailLines: false,
   detailCleanup: 100,
   templateStyle: "manual",
-  paletteSize: 6
+  paletteSize: 6,
+  includeInstructionCoverPage: true
 };
 
 const analysis = {
@@ -98,16 +99,19 @@ const analysis = {
   assertEqual(restored.referenceOpacity, 42, "round trip should preserve underlay opacity");
   assertEqual(restored.layerVisibility.showReference, true, "round trip should preserve underlay visibility");
   assertEqual(restored.traceViewport.panY, -8, "round trip should preserve viewport");
+  assertEqual(restored.settings.includeInstructionCoverPage, true, "round trip should preserve instruction cover setting");
 }
 
 {
+  const legacySettings = { ...settings };
+  delete (legacySettings as Partial<Settings>).includeInstructionCoverPage;
   const restored = restoreCutoutProject({
     schemaVersion: CUTOUT_PROJECT_SCHEMA_VERSION,
     projectName: "Minimal",
     createdAt: "2026-07-07T10:00:00.000Z",
     updatedAt: "2026-07-07T10:00:00.000Z",
     sourceImage: { name: "source.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,source" },
-    settings,
+    settings: legacySettings,
     traceMode: "manual",
     analysis,
     manualStrokes: [],
@@ -123,6 +127,7 @@ const analysis = {
   });
 
   assertEqual(restored.layerVisibility.printPreview, false, "project import should leave printable preview off for editing");
+  assertEqual(restored.settings.includeInstructionCoverPage, true, "legacy project import should default instruction cover on");
 }
 
 {

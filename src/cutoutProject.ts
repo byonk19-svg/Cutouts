@@ -149,6 +149,9 @@ function assertSettings(value: unknown): asserts value is Settings {
     assertNumber(value[key], `settings.${key}`);
   }
   if (typeof value.detailLines !== "boolean") throw new Error("Project settings.detailLines is invalid.");
+  if (typeof value.includeInstructionCoverPage !== "boolean") {
+    value.includeInstructionCoverPage = true;
+  }
   assertTraceMode(value.templateStyle);
 }
 
