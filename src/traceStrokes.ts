@@ -23,6 +23,19 @@ export type StrokeEditResult = {
   selectedStrokeId?: string | null;
 };
 
+export type TraceStrokeSelectionSummary = {
+  id: string;
+  shortId: string;
+  index: number;
+  total: number;
+  pointCount: number;
+  width: number;
+};
+
+export type DrawTraceStrokeOptions = {
+  dimUnselected?: boolean;
+};
+
 export function createTraceStroke(id: string, points: TracePoint[], width: number): TraceStroke {
   return {
     id,
@@ -148,6 +161,29 @@ export function selectTraceStroke(strokes: TraceStroke[], point: TracePoint, rad
   return null;
 }
 
+export function selectAdjacentTraceStroke(strokes: TraceStroke[], selectedStrokeId: string | null, direction: -1 | 1): TraceStroke | null {
+  if (strokes.length === 0) return null;
+  const selectedIndex = selectedStrokeId ? strokes.findIndex((stroke) => stroke.id === selectedStrokeId) : -1;
+  if (selectedIndex === -1) return direction === 1 ? strokes[0] : strokes[strokes.length - 1];
+  const nextIndex = (selectedIndex + direction + strokes.length) % strokes.length;
+  return strokes[nextIndex];
+}
+
+export function selectedTraceStrokeSummary(strokes: TraceStroke[], selectedStrokeId: string | null): TraceStrokeSelectionSummary | null {
+  if (!selectedStrokeId) return null;
+  const index = strokes.findIndex((stroke) => stroke.id === selectedStrokeId);
+  if (index === -1) return null;
+  const stroke = strokes[index];
+  return {
+    id: stroke.id,
+    shortId: shortStrokeId(stroke.id),
+    index: index + 1,
+    total: strokes.length,
+    pointCount: stroke.points.length,
+    width: stroke.width
+  };
+}
+
 export function selectTracePointIndex(stroke: TraceStroke, point: TracePoint, radiusPx: number): number | null {
   for (let index = stroke.points.length - 1; index >= 0; index -= 1) {
     if (distance(stroke.points[index], point) <= radiusPx) {
@@ -183,20 +219,23 @@ export function drawTraceStrokes(
   context: CanvasRenderingContext2D,
   strokes: TraceStroke[],
   draftStroke?: TraceStroke,
-  selectedStrokeId?: string | null
+  selectedStrokeId?: string | null,
+  options: DrawTraceStrokeOptions = {}
 ) {
   context.save();
   context.clearRect(0, 0, context.canvas.width, context.canvas.height);
   for (const stroke of draftStroke ? [...strokes, draftStroke] : strokes) {
-    drawTraceStroke(context, stroke, stroke.id === selectedStrokeId);
+    const selected = stroke.id === selectedStrokeId;
+    drawTraceStroke(context, stroke, selected, Boolean(options.dimUnselected && selectedStrokeId && !selected));
   }
   context.restore();
 }
 
-function drawTraceStroke(context: CanvasRenderingContext2D, stroke: TraceStroke, selected: boolean) {
+function drawTraceStroke(context: CanvasRenderingContext2D, stroke: TraceStroke, selected: boolean, dimmed: boolean) {
   if (stroke.points.length === 0) return;
   context.save();
   context.globalCompositeOperation = "source-over";
+  context.globalAlpha = dimmed ? 0.18 : 1;
   context.strokeStyle = selected ? "#1d7a70" : stroke.color;
   context.lineWidth = selected ? stroke.width + 4 : stroke.width;
   context.lineCap = "round";
@@ -213,6 +252,11 @@ function drawTraceStroke(context: CanvasRenderingContext2D, stroke: TraceStroke,
   context.stroke();
   if (selected) drawTracePointHandles(context, stroke);
   context.restore();
+}
+
+function shortStrokeId(id: string) {
+  if (id.length <= 14) return id;
+  return `${id.slice(0, 6)}...${id.slice(-4)}`;
 }
 
 function drawTracePointHandles(context: CanvasRenderingContext2D, stroke: TraceStroke) {

@@ -6,7 +6,9 @@ import {
   duplicateTraceStroke,
   eraseTraceStrokes,
   moveTraceStroke,
+  selectAdjacentTraceStroke,
   selectTracePointIndex,
+  selectedTraceStrokeSummary,
   selectTraceStroke,
   simplifyTraceStrokeById,
   smoothTraceStrokeById,
@@ -89,6 +91,31 @@ function assertEqual(actual: unknown, expected: unknown, message: string) {
   assert(deleted.changed, "delete should remove a selected manual stroke");
   assertEqual(deleted.strokes.length, 1, "delete should leave unselected manual strokes");
   assertEqual(deleted.strokes[0].id, "first", "delete should not affect other manual strokes");
+}
+
+{
+  const strokes: TraceStroke[] = [
+    createTraceStroke("hair", [{ x: 0, y: 0 }, { x: 50, y: 0 }], 8),
+    createTraceStroke("eye", [{ x: 0, y: 20 }, { x: 50, y: 20 }], 20),
+    createTraceStroke("mouth", [{ x: 0, y: 40 }, { x: 50, y: 40 }], 34)
+  ];
+
+  assertEqual(selectAdjacentTraceStroke(strokes, null, 1)?.id, "hair", "next from no selection should select the first stroke");
+  assertEqual(selectAdjacentTraceStroke(strokes, null, -1)?.id, "mouth", "previous from no selection should select the last stroke");
+  assertEqual(selectAdjacentTraceStroke(strokes, "eye", 1)?.id, "mouth", "next should follow creation order");
+  assertEqual(selectAdjacentTraceStroke(strokes, "eye", -1)?.id, "hair", "previous should follow creation order");
+  assertEqual(selectAdjacentTraceStroke(strokes, "mouth", 1)?.id, "hair", "next should wrap to the first stroke");
+  assertEqual(selectAdjacentTraceStroke(strokes, "hair", -1)?.id, "mouth", "previous should wrap to the last stroke");
+  assertEqual(selectAdjacentTraceStroke([], null, 1), null, "cycling empty strokes should return no selection");
+
+  const summary = selectedTraceStrokeSummary(strokes, "eye");
+  assertEqual(summary?.id, "eye", "selection summary should expose selected stroke id");
+  assertEqual(summary?.shortId, "eye", "selection summary should expose a short selected stroke id");
+  assertEqual(summary?.index, 2, "selection summary should be one-based for display");
+  assertEqual(summary?.total, 3, "selection summary should expose total manual stroke count");
+  assertEqual(summary?.pointCount, 2, "selection summary should expose point count");
+  assertEqual(summary?.width, 20, "selection summary should expose stroke width");
+  assertEqual(selectedTraceStrokeSummary(strokes, null), null, "selection summary should be empty without a selected stroke");
 }
 
 {

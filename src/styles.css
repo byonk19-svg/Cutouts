@@ -438,6 +438,92 @@ button:disabled {
   accent-color: #1d7a70;
 }
 
+.selection-inspector {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #f7fbf9;
+}
+
+.selection-inspector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.selection-inspector-header div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.selection-inspector-header strong {
+  color: #17201d;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.selection-inspector-header span,
+.selection-meta,
+.selection-feedback,
+.selection-dim-toggle {
+  color: #65736c;
+  font-size: 12px;
+}
+
+.selection-cycle,
+.selection-actions,
+.selection-width-group,
+.selection-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.selection-meta span {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid #dce4df;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.selection-dim-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.selection-dim-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: #1d7a70;
+}
+
+.selection-feedback {
+  margin: 0;
+  font-weight: 700;
+  color: #1d5d55;
+}
+
+.icon-tool-button {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #b9c8c1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #26352f;
+  cursor: pointer;
+}
+
 .tool-button,
 .editor-tools select,
 .edit-toggle {

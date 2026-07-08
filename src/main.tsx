@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { Copy, Download, Eraser, Eye, FileImage, FileText, FolderOpen, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, Save, SlidersHorizontal, SwatchBook, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, Download, Eraser, Eye, FileImage, FileText, FolderOpen, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, Save, SlidersHorizontal, SwatchBook, Trash2, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import {
   CUTOUT_AUTOSAVE_KEY,
   createCutoutProjectSnapshot,
@@ -19,7 +19,9 @@ import {
   duplicateTraceStroke,
   eraseTraceStrokes,
   moveTraceStroke,
+  selectAdjacentTraceStroke,
   selectTracePointIndex,
+  selectedTraceStrokeSummary,
   selectTraceStroke,
   simplifyTraceStrokeById,
   smoothTraceStrokeById,
@@ -95,6 +97,8 @@ function App() {
   const [printPreview, setPrintPreview] = useState(false);
   const [traceViewport, setTraceViewport] = useState<TraceViewport>(DEFAULT_TRACE_VIEWPORT);
   const [selectedStrokeId, setSelectedStrokeId] = useState<string | null>(null);
+  const [dimUnselectedStrokes, setDimUnselectedStrokes] = useState(false);
+  const [selectionFeedback, setSelectionFeedback] = useState("");
   const [cleanupChecks, setCleanupChecks] = useState<Record<CleanupStep, boolean>>({
     cutline: false,
     remove: false,
@@ -128,6 +132,7 @@ function App() {
   const advancedTraceModeSelected = traceMode === "marker" || traceMode === "extra";
   const traceStudioOpen = traceMode === "manual";
   const selectedStroke = selectedStrokeId ? manualStrokes.find((stroke) => stroke.id === selectedStrokeId) ?? null : null;
+  const selectedStrokeSummary = selectedTraceStrokeSummary(manualStrokes, selectedStrokeId);
   const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
   const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
 
@@ -144,6 +149,8 @@ function App() {
     setManualHistory([]);
     setManualRedoHistory([]);
     setSelectedStrokeId(null);
+    setDimUnselectedStrokes(false);
+    setSelectionFeedback("");
     setTraceViewport(DEFAULT_TRACE_VIEWPORT);
     setPrintPreview(false);
   }
@@ -201,7 +208,13 @@ function App() {
       return;
     }
     loadDetailCanvas(editedDetailDataUrl ?? analysis.detailLinePngDataUrl);
-  }, [analysis, editorOpen, editedDetailDataUrl, manualStrokes, printPreview, selectedStrokeId, traceStudioOpen]);
+  }, [analysis, dimUnselectedStrokes, editorOpen, editedDetailDataUrl, manualStrokes, printPreview, selectedStrokeId, traceStudioOpen]);
+
+  useEffect(() => {
+    if (selectedStrokeId && !manualStrokes.some((stroke) => stroke.id === selectedStrokeId)) {
+      setSelectedStrokeId(null);
+    }
+  }, [manualStrokes, selectedStrokeId]);
 
   useEffect(() => {
     if (printPreview) {
@@ -263,6 +276,9 @@ function App() {
       setError(err instanceof Error ? err.message : "Unable to export PDF.");
     } finally {
       setBusy(false);
+      if (traceStudioOpen) {
+        window.setTimeout(() => renderManualTraceLayer(manualStrokes), 0);
+      }
     }
   }
 
@@ -387,6 +403,8 @@ function App() {
     setPrintPreview(false);
     setTraceViewport(project.traceViewport);
     setSelectedStrokeId(null);
+    setDimUnselectedStrokes(false);
+    setSelectionFeedback("");
     setCleanupChecks({
       cutline: false,
       remove: false,
@@ -462,6 +480,7 @@ function App() {
       setManualRedoHistory((items) => [...items.slice(-19), manualStrokes]);
       setManualStrokes(previous);
       setSelectedStrokeId(null);
+      setSelectionFeedback("Undid stroke edit");
       return;
     }
     const current = currentDetailDataUrl();
@@ -481,6 +500,7 @@ function App() {
       setManualRedoHistory((items) => items.slice(0, -1));
       setManualStrokes(next);
       setSelectedStrokeId(null);
+      setSelectionFeedback("Redid stroke edit");
       return;
     }
     const current = currentDetailDataUrl();
@@ -499,6 +519,7 @@ function App() {
       setManualRedoHistory([]);
       setManualStrokes([]);
       setSelectedStrokeId(null);
+      setSelectionFeedback("Cleared manual strokes");
       return;
     }
     saveHistorySnapshot();
@@ -546,6 +567,7 @@ function App() {
         }
         const stroke = selectTraceStroke(manualStrokes, point, brushPixels(brushSize));
         setSelectedStrokeId(stroke?.id ?? null);
+        setSelectionFeedback(stroke ? `Selected ${shortStrokeLabel(stroke.id)}` : "Selection cleared");
         if (stroke) {
           safelySetPointerCapture(event.currentTarget, event.pointerId);
           strokeDragRef.current = {
@@ -636,6 +658,7 @@ function App() {
         if (drag.moved) {
           setManualHistory((items) => [...items.slice(-19), drag.originalStrokes]);
           setManualRedoHistory([]);
+          setSelectionFeedback(drag.mode === "point" ? "Edited point" : "Moved stroke");
         }
         strokeDragRef.current = null;
         return;
@@ -654,6 +677,7 @@ function App() {
           setManualRedoHistory([]);
           setManualStrokes((items) => [...items, draft]);
           setSelectedStrokeId(draft.id);
+          setSelectionFeedback("Created stroke");
         }
       }
       drawingRef.current = false;
@@ -753,7 +777,9 @@ function App() {
     canvas.height = analysis.previewHeightPx;
     const context = canvas.getContext("2d");
     if (!context) return;
-    drawTraceStrokes(context, strokes, draftStroke, showSelection ? selectedStrokeId : null);
+    drawTraceStrokes(context, strokes, draftStroke, showSelection ? selectedStrokeId : null, {
+      dimUnselected: showSelection && !printPreview && dimUnselectedStrokes
+    });
   }
 
   function removeManualStrokeAt(point: TracePoint) {
@@ -763,6 +789,7 @@ function App() {
     setManualRedoHistory([]);
     setManualStrokes(result.strokes);
     setSelectedStrokeId(null);
+    setSelectionFeedback(result.removedStrokeIds.length === 1 ? "Deleted stroke" : `Deleted ${result.removedStrokeIds.length} strokes`);
   }
 
   function nextStrokeId() {
@@ -786,27 +813,44 @@ function App() {
     setManualRedoHistory([]);
     setManualStrokes(result.strokes);
     setSelectedStrokeId(null);
+    setSelectionFeedback("Deleted stroke");
   }
 
   function duplicateSelectedStroke() {
     if (!selectedStrokeId) return;
     const offset = analysis ? Math.max(10, analysis.previewWidthPx * 0.025) : 12;
     commitManualStrokeEdit(duplicateTraceStroke(manualStrokes, selectedStrokeId, nextStrokeId(), { x: offset, y: offset }));
+    setSelectionFeedback("Duplicated stroke");
   }
 
   function smoothSelectedStroke() {
     if (!selectedStrokeId) return;
     commitManualStrokeEdit(smoothTraceStrokeById(manualStrokes, selectedStrokeId));
+    setSelectionFeedback("Smoothed stroke");
   }
 
   function simplifySelectedStroke() {
     if (!selectedStrokeId) return;
     commitManualStrokeEdit(simplifyTraceStrokeById(manualStrokes, selectedStrokeId, 2.4));
+    setSelectionFeedback("Simplified stroke");
   }
 
   function changeSelectedStrokeWidth(size: BrushSize) {
     if (!selectedStrokeId) return;
     commitManualStrokeEdit(changeTraceStrokeWidth(manualStrokes, selectedStrokeId, brushPixels(size)));
+    setSelectionFeedback(`Set width to ${brushSizeLabel(size)}`);
+  }
+
+  function selectAdjacentStroke(direction: -1 | 1) {
+    const stroke = selectAdjacentTraceStroke(manualStrokes, selectedStrokeId, direction);
+    setSelectedStrokeId(stroke?.id ?? null);
+    setEditorTool("select");
+    setSelectionFeedback(stroke ? `Selected ${shortStrokeLabel(stroke.id)}` : "No strokes to select");
+  }
+
+  function clearSelectedStroke() {
+    setSelectedStrokeId(null);
+    setSelectionFeedback("Selection cleared");
   }
 
   function changeZoom(nextZoom: number) {
@@ -1127,6 +1171,74 @@ function App() {
                       Suggestions
                     </label>
                   </div>
+                  {traceStudioOpen ? (
+                    <section className="selection-inspector" aria-label="Selection Inspector">
+                      <div className="selection-inspector-header">
+                        <div>
+                          <strong>{selectedStrokeSummary ? `Stroke ${selectedStrokeSummary.index} of ${selectedStrokeSummary.total}` : "No stroke selected"}</strong>
+                          <span>{selectedStrokeSummary ? `ID ${selectedStrokeSummary.shortId}` : "Click a line to edit it."}</span>
+                        </div>
+                        <div className="selection-cycle" aria-label="Stroke cycle controls">
+                          <button className="icon-tool-button" onClick={() => selectAdjacentStroke(-1)} disabled={manualStrokes.length === 0} aria-label="Previous stroke">
+                            <ChevronLeft size={16} />
+                          </button>
+                          <button className="icon-tool-button" onClick={() => selectAdjacentStroke(1)} disabled={manualStrokes.length === 0} aria-label="Next stroke">
+                            <ChevronRight size={16} />
+                          </button>
+                        </div>
+                      </div>
+                      {selectedStrokeSummary ? (
+                        <>
+                          <div className="selection-meta">
+                            <span>{selectedStrokeSummary.pointCount} points</span>
+                            <span>{brushSizeLabel(brushSizeName(selectedStrokeSummary.width))} / {selectedStrokeSummary.width}px</span>
+                          </div>
+                          <div className="selection-width-group" aria-label="Selected stroke width">
+                            {(["thin", "normal", "bold"] as BrushSize[]).map((size) => (
+                              <button
+                                key={size}
+                                className={brushSizeName(selectedStrokeSummary.width) === size ? "tool-button selected" : "tool-button"}
+                                onClick={() => changeSelectedStrokeWidth(size)}
+                              >
+                                {brushSizeLabel(size)}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="selection-actions">
+                            <button className="tool-button" onClick={duplicateSelectedStroke}>
+                              <Copy size={15} />
+                              Duplicate
+                            </button>
+                            <button className="tool-button" onClick={smoothSelectedStroke}>
+                              <SlidersHorizontal size={15} />
+                              Smooth
+                            </button>
+                            <button className="tool-button" onClick={simplifySelectedStroke}>
+                              <RefreshCw size={15} />
+                              Simplify
+                            </button>
+                            <button className="tool-button" onClick={deleteSelectedStroke}>
+                              <Trash2 size={15} />
+                              Delete
+                            </button>
+                            <button className="tool-button" onClick={clearSelectedStroke}>
+                              <X size={15} />
+                              Clear
+                            </button>
+                          </div>
+                          <label className="selection-dim-toggle">
+                            <input
+                              type="checkbox"
+                              checked={dimUnselectedStrokes}
+                              onChange={() => setDimUnselectedStrokes((dimmed) => !dimmed)}
+                            />
+                            Dim unselected strokes
+                          </label>
+                        </>
+                      ) : null}
+                      {selectionFeedback ? <p className="selection-feedback" role="status">{selectionFeedback}</p> : null}
+                    </section>
+                  ) : null}
                   <p className="editor-note">
                     {traceMode === "manual"
                       ? "Trace only the face, clothing, and feature lines you want on the final template."
@@ -1254,6 +1366,17 @@ function brushSizeName(width: number): BrushSize {
   if (width <= 12) return "thin";
   if (width >= 30) return "bold";
   return "normal";
+}
+
+function brushSizeLabel(size: BrushSize) {
+  if (size === "thin") return "Thin";
+  if (size === "bold") return "Bold";
+  return "Normal";
+}
+
+function shortStrokeLabel(id: string) {
+  if (id.length <= 14) return id;
+  return `${id.slice(0, 6)}...${id.slice(-4)}`;
 }
 
 function pointHandleHitRadius(width: number) {

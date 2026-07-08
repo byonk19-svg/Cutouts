@@ -69,6 +69,9 @@ const analysis = {
   assert(!svg.includes("original-underlay"), "SVG export should not include the original underlay image");
   assert(!svg.includes("#1d7a70"), "SVG export should not include selection highlight styling");
   assert(!svg.includes("selectedStrokeId"), "SVG export should not include transient selection state");
+  assert(!svg.includes("dimUnselected"), "SVG export should not include editor dimming state");
+  assert(!svg.includes("Selection Inspector"), "SVG export should not include selection inspector UI");
+  assert(!svg.includes("Duplicated stroke"), "SVG export should not include selection feedback text");
 }
 
 {

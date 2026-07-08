@@ -88,6 +88,8 @@ const analysis = {
 
   const serialized = serializeCutoutProject(project);
   assert(!serialized.includes("selectedStrokeId"), "project autosave should not include transient selected stroke state");
+  assert(!serialized.includes("dimUnselectedStrokes"), "project autosave should not include transient dimming state");
+  assert(!serialized.includes("selectionFeedback"), "project autosave should not include transient selection feedback");
 
   const restored = restoreCutoutProject(serialized);
   assertEqual(restored.manualStrokes[0].points[0].x, 10, "round trip should preserve stroke x coordinate");
