@@ -5,3 +5,5 @@ __pycache__/
 tmp/
 .venv/
 .omx/
+test-results/
+playwright-report/
