@@ -42,6 +42,19 @@ class PaintGuideEntry:
 
 
 @dataclass(frozen=True)
+class ManualTracePoint:
+    x: float
+    y: float
+
+
+@dataclass(frozen=True)
+class ManualTraceStroke:
+    id: str
+    points: tuple[ManualTracePoint, ...]
+    width: float
+
+
+@dataclass(frozen=True)
 class TemplateSettings:
     finished_height_in: float = 36.0
     threshold: int = 42
@@ -56,6 +69,9 @@ class TemplateSettings:
     include_paint_guide_page: bool = True
     project_name: str = "Cutout Studio Template Pack"
     paint_guide_entries: tuple[PaintGuideEntry, ...] = field(default_factory=tuple)
+    manual_strokes: tuple[ManualTraceStroke, ...] = field(default_factory=tuple)
+    manual_stroke_source_width_px: float = 0.0
+    manual_stroke_source_height_px: float = 0.0
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "TemplateSettings":
@@ -76,6 +92,9 @@ class TemplateSettings:
             include_paint_guide_page=_bounded_bool(data.get("includePaintGuidePage"), cls.include_paint_guide_page),
             project_name=_safe_project_name(data.get("projectName", cls.project_name)),
             paint_guide_entries=_paint_guide_entries_from_mapping(data.get("paintGuideEntries")),
+            manual_strokes=_manual_strokes_from_mapping(data.get("manualStrokes")),
+            manual_stroke_source_width_px=_bounded_float(data.get("manualStrokeSourceWidthPx"), 0.0, 10000.0, 0.0),
+            manual_stroke_source_height_px=_bounded_float(data.get("manualStrokeSourceHeightPx"), 0.0, 10000.0, 0.0),
         )
 
 
@@ -217,8 +236,10 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_de
     cropped_mask = mask.crop(bounds)
     finished_width = settings.finished_height_in * (cropped_source.width / cropped_source.height)
     tile_cols, tile_rows = tile_grid(finished_width, settings.finished_height_in)
-    trace = _make_trace_image(cropped_source, cropped_mask, settings, finished_width, settings.finished_height_in, edited_detail_png)
+    edited_detail_for_trace = None if settings.manual_strokes else edited_detail_png
+    trace = _make_trace_image(cropped_source, cropped_mask, settings, finished_width, settings.finished_height_in, edited_detail_for_trace)
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
+    manual_stroke_source_size = _manual_stroke_source_size(cropped_source, settings)
 
     out = io.BytesIO()
     pdf = canvas.Canvas(out, pagesize=letter)
@@ -229,7 +250,17 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_de
     if settings.include_paint_guide_page and palette:
         _draw_paint_guide_page(pdf, settings.project_name, palette, settings.paint_guide_entries)
         pdf.showPage()
-    _draw_tile_pages(pdf, settings.project_name, trace, finished_width, settings.finished_height_in, tile_cols, tile_rows)
+    _draw_tile_pages(
+        pdf,
+        settings.project_name,
+        trace,
+        finished_width,
+        settings.finished_height_in,
+        tile_cols,
+        tile_rows,
+        settings.manual_strokes,
+        manual_stroke_source_size,
+    )
     pdf.save()
     return out.getvalue()
 
@@ -988,14 +1019,13 @@ def _draw_paint_guide_page(
     pdf.setFont("Helvetica-Bold", 12)
     pdf.drawString(40, 250, "Shopping list")
     pdf.setFont("Helvetica", 9)
-    included_rows = [row for row in rows if row["included"]]
-    if not included_rows:
+    purchase_items = _group_paint_purchase_items(rows)
+    if not purchase_items:
         pdf.drawString(40, 230, "No paint colors selected.")
         return
-    for index, row in enumerate(included_rows[:10]):
-        y = 230 - index * 18
-        note = f" - {row['note']}" if row["note"] else ""
-        pdf.drawString(40, y, f"- {_shopping_list_pdf_text(row)}{note}"[:112])
+    y = 230
+    for item in purchase_items[:10]:
+        y = _draw_wrapped_pdf_text(pdf, f"- {item}", 40, y, 520, line_height=11, max_lines=2) - 7
 
 
 def _draw_tile_pages(
@@ -1006,6 +1036,8 @@ def _draw_tile_pages(
     height_in: float,
     tile_cols: int,
     tile_rows: int,
+    manual_strokes: tuple[ManualTraceStroke, ...] = (),
+    manual_stroke_source_size: tuple[float, float] | None = None,
 ) -> None:
     width_pt, height_pt = letter
     margin_pt = PDF_MARGIN_IN * 72
@@ -1046,6 +1078,19 @@ def _draw_tile_pages(
                 preserveAspectRatio=False,
                 mask="auto",
             )
+            _draw_manual_vector_strokes(
+                pdf,
+                manual_strokes,
+                manual_stroke_source_size,
+                finished_width_in=width_in,
+                finished_height_in=height_in,
+                crop_left_in=crop_left_in,
+                crop_top_in=crop_top_in,
+                tile_w_in=tile_w_in,
+                tile_h_in=tile_h_in,
+                margin_pt=margin_pt,
+                content_top_pt=height_pt - margin_pt - header_pt,
+            )
             pdf.setStrokeColor(colors.lightgrey)
             pdf.rect(margin_pt, height_pt - margin_pt - header_pt - tile_h_in * 72, tile_w_in * 72, tile_h_in * 72, stroke=1, fill=0)
             _draw_crop_marks(pdf, margin_pt, height_pt - margin_pt - header_pt, tile_w_in * 72, tile_h_in * 72)
@@ -1075,6 +1120,104 @@ def _draw_crop_marks(pdf: canvas.Canvas, x: float, top: float, width: float, hei
         pdf.line(right, corner_y, right, corner_y + vertical_direction * mark)
 
 
+def _draw_manual_vector_strokes(
+    pdf: canvas.Canvas,
+    strokes: tuple[ManualTraceStroke, ...],
+    source_size: tuple[float, float] | None,
+    finished_width_in: float,
+    finished_height_in: float,
+    crop_left_in: float,
+    crop_top_in: float,
+    tile_w_in: float,
+    tile_h_in: float,
+    margin_pt: float,
+    content_top_pt: float,
+) -> None:
+    if not strokes or source_size is None:
+        return
+    source_w, source_h = source_size
+    if source_w <= 0 or source_h <= 0:
+        return
+
+    clip = pdf.beginPath()
+    clip.rect(margin_pt, content_top_pt - tile_h_in * 72, tile_w_in * 72, tile_h_in * 72)
+    pdf.saveState()
+    pdf.clipPath(clip, stroke=0, fill=0)
+    pdf.setStrokeColor(colors.black)
+    pdf.setLineCap(1)
+    pdf.setLineJoin(1)
+
+    for stroke in strokes:
+        if not stroke.points:
+            continue
+        pdf.setLineWidth(_manual_stroke_width_pt(stroke.width))
+        path = pdf.beginPath()
+        first = stroke.points[0]
+        first_x, first_y = _manual_point_to_pdf(
+            first,
+            source_w,
+            source_h,
+            finished_width_in,
+            finished_height_in,
+            crop_left_in,
+            crop_top_in,
+            margin_pt,
+            content_top_pt,
+        )
+        path.moveTo(first_x, first_y)
+        if len(stroke.points) == 1:
+            path.lineTo(first_x + 0.01, first_y)
+        else:
+            for point in stroke.points[1:]:
+                x, y = _manual_point_to_pdf(
+                    point,
+                    source_w,
+                    source_h,
+                    finished_width_in,
+                    finished_height_in,
+                    crop_left_in,
+                    crop_top_in,
+                    margin_pt,
+                    content_top_pt,
+                )
+                path.lineTo(x, y)
+        pdf.drawPath(path, stroke=1, fill=0)
+    pdf.restoreState()
+
+
+def _manual_point_to_pdf(
+    point: ManualTracePoint,
+    source_w: float,
+    source_h: float,
+    finished_width_in: float,
+    finished_height_in: float,
+    crop_left_in: float,
+    crop_top_in: float,
+    margin_pt: float,
+    content_top_pt: float,
+) -> tuple[float, float]:
+    x_in = point.x / source_w * finished_width_in
+    y_in = point.y / source_h * finished_height_in
+    return (
+        margin_pt + (x_in - crop_left_in) * 72,
+        content_top_pt - (y_in - crop_top_in) * 72,
+    )
+
+
+def _manual_stroke_source_size(source: Image.Image, settings: TemplateSettings) -> tuple[float, float] | None:
+    if not settings.manual_strokes:
+        return None
+    if settings.manual_stroke_source_width_px > 0 and settings.manual_stroke_source_height_px > 0:
+        return (settings.manual_stroke_source_width_px, settings.manual_stroke_source_height_px)
+    return tuple(float(value) for value in _preview_size(source))
+
+
+def _preview_size(image: Image.Image) -> tuple[int, int]:
+    preview = image.copy()
+    preview.thumbnail((PREVIEW_MAX_PX, PREVIEW_MAX_PX), Image.Resampling.LANCZOS)
+    return preview.size
+
+
 def _paint_guide_entries_from_mapping(value: Any) -> tuple[PaintGuideEntry, ...]:
     if not isinstance(value, list):
         return ()
@@ -1096,17 +1239,52 @@ def _paint_guide_entries_from_mapping(value: Any) -> tuple[PaintGuideEntry, ...]
     return tuple(entries)
 
 
+def _manual_strokes_from_mapping(value: Any) -> tuple[ManualTraceStroke, ...]:
+    if not isinstance(value, list):
+        return ()
+    strokes: list[ManualTraceStroke] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        color = str(item.get("color", "#000000")).strip().lower()
+        if color != "#000000":
+            continue
+        if str(item.get("tool", "draw")) not in {"draw", "smoothDraw"}:
+            continue
+        stroke_id = _safe_pdf_text(item.get("id"), "", 80)
+        width = _finite_float(item.get("width"))
+        raw_points = item.get("points")
+        if width is None or width <= 0 or not isinstance(raw_points, list):
+            continue
+        points: list[ManualTracePoint] = []
+        for raw_point in raw_points:
+            if not isinstance(raw_point, dict):
+                continue
+            x = _finite_float(raw_point.get("x"))
+            y = _finite_float(raw_point.get("y"))
+            if x is None or y is None:
+                continue
+            points.append(ManualTracePoint(x=x, y=y))
+        if len(points) < 1:
+            continue
+        strokes.append(ManualTraceStroke(id=stroke_id or f"stroke-{len(strokes) + 1}", points=tuple(points), width=width))
+    return tuple(strokes)
+
+
 def _paint_guide_rows(
     palette: tuple[PaletteColor, ...],
     paint_guide_entries: tuple[PaintGuideEntry, ...],
 ) -> list[dict[str, Any]]:
     edits_by_hex = {entry.hex.lower(): entry for entry in paint_guide_entries}
+    used_edit_hexes: set[str] = set()
     rows: list[dict[str, Any]] = []
     for index, color in enumerate(palette, start=1):
         hex_value = _hex(color.rgb)
         edit = edits_by_hex.get(hex_value.lower())
+        if edit:
+            used_edit_hexes.add(edit.hex.lower())
         selected_match_id = edit.selected_match_id if edit else None
-        selected_match = next((match for match in color.matches if match.id == selected_match_id), None)
+        selected_match = _resolve_selected_paint(selected_match_id, color.matches)
         label = _safe_pdf_text(edit.label, f"Color {index}", 64) if edit else f"Color {index}"
         note = _safe_pdf_text(edit.note, "", 96) if edit else ""
         rows.append({
@@ -1119,7 +1297,105 @@ def _paint_guide_rows(
             "selected_match": selected_match,
             "manual_override": edit.manual_override if edit else "",
         })
+    for edit in paint_guide_entries:
+        if edit.hex.lower() in used_edit_hexes:
+            continue
+        rows.append({
+            "index": len(rows) + 1,
+            "hex": edit.hex,
+            "label": _safe_pdf_text(edit.label, f"Color {len(rows) + 1}", 64) or f"Color {len(rows) + 1}",
+            "note": _safe_pdf_text(edit.note, "", 96),
+            "included": edit.included,
+            "coverage": 0,
+            "selected_match": _resolve_selected_paint(edit.selected_match_id, ()),
+            "manual_override": edit.manual_override,
+        })
     return rows
+
+
+def _resolve_selected_paint(selected_match_id: str | None, matches: tuple[PaintMatch, ...]) -> PaintMatch | None:
+    if not selected_match_id:
+        return None
+    selected = next((match for match in matches if match.id == selected_match_id), None)
+    if selected is not None:
+        return selected
+    for paint in load_paint_catalog():
+        if paint.id == selected_match_id:
+            return PaintMatch(
+                id=paint.id,
+                brand=paint.brand,
+                line=paint.line,
+                color_name=paint.color_name,
+                rgb=paint.rgb,
+                finish=paint.finish,
+                outdoor_recommended=paint.outdoor_recommended,
+                retailer=paint.retailer,
+                product_url=paint.product_url,
+                notes=paint.notes,
+                distance=0,
+                confidence="close match",
+            )
+    return None
+
+
+def _group_paint_purchase_items(rows: list[dict[str, Any]]) -> list[str]:
+    groups: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not row["included"]:
+            continue
+        key = _paint_purchase_key(row)
+        if key not in groups:
+            groups[key] = {
+                "purchase_label": _paint_purchase_label(row),
+                "labels": [],
+                "swatches": [],
+            }
+        group = groups[key]
+        _append_unique(group["labels"], row["label"])
+        group["swatches"].append(row["index"])
+
+    items = []
+    for group in groups.values():
+        swatches = sorted(set(group["swatches"]))
+        items.append(f"{group['purchase_label']} - {_format_pdf_list(group['labels'])}, {_format_pdf_swatches(swatches)}")
+    return items
+
+
+def _paint_purchase_key(row: dict[str, Any]) -> str:
+    if row["manual_override"]:
+        return f"manual:{row['manual_override'].strip().lower()}"
+    selected_match = row["selected_match"]
+    if selected_match is not None:
+        return f"paint:{selected_match.id}"
+    return "no-match"
+
+
+def _paint_purchase_label(row: dict[str, Any]) -> str:
+    if row["manual_override"]:
+        return row["manual_override"]
+    selected_match = row["selected_match"]
+    if selected_match is None:
+        return "No match / choose in store"
+    return f"{selected_match.brand} {selected_match.line} {selected_match.color_name}"
+
+
+def _format_pdf_swatches(numbers: list[int]) -> str:
+    if len(numbers) == 1:
+        return f"swatch {numbers[0]}"
+    return f"swatches {_format_pdf_list([str(number) for number in numbers])}"
+
+
+def _format_pdf_list(items: list[str]) -> str:
+    if len(items) <= 1:
+        return items[0] if items else ""
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
+
+
+def _append_unique(items: list[str], value: str) -> None:
+    if value and value not in items:
+        items.append(value)
 
 
 def _paint_match_pdf_text(row: dict[str, Any]) -> str:
@@ -1182,6 +1458,14 @@ def _shopping_list_pdf_text(row: dict[str, Any]) -> str:
     if selected_match is None:
         return f"{row['label']} ({row['hex'].upper()})"
     return f"{row['label']}: {selected_match.brand} {selected_match.line} {selected_match.color_name}"
+
+
+def _manual_stroke_width_pt(width_px: float) -> float:
+    if width_px <= 12:
+        return 2.5
+    if width_px >= 30:
+        return 6
+    return 4
 
 
 def _safe_hex(value: Any) -> str | None:
@@ -1268,6 +1552,14 @@ def _bounded_float(value: Any, minimum: float, maximum: float, fallback: float) 
     except (TypeError, ValueError):
         return fallback
     return max(minimum, min(maximum, parsed))
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def _safe_project_name(value: Any) -> str:

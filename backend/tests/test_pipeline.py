@@ -20,6 +20,7 @@ from backend.cutout_studio.pipeline import (
     _detail_line_mask,
     _fill_small_holes,
     _line_art,
+    _manual_stroke_width_pt,
     _remove_small_components,
 )
 
@@ -319,7 +320,8 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("blue-black hair", text)
         self.assertIn("Coat", text)
         self.assertIn("main coat and bright yellow areas", text)
-        self.assertIn("hood and sleeves", text)
+        self.assertIn("hood and", text)
+        self.assertIn("sleeves", text)
         self.assertIn("Apple Barrel", text)
         self.assertIn("Bright Red", text)
         self.assertIn("Bright Yellow", text)
@@ -340,7 +342,7 @@ class PrintPipelineTest(unittest.TestCase):
         text = PdfReader(io.BytesIO(pdf_bytes)).pages[1].extract_text()
 
         self.assertIn("Custom yellow mix", text)
-        self.assertIn("Coat: Custom yellow mix", text)
+        self.assertIn("Custom yellow mix - Coat, swatch 2", text)
 
     def test_hidden_paint_color_is_omitted_from_shopping_list(self) -> None:
         settings = TemplateSettings(
@@ -361,6 +363,46 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("Hidden from shopping list", text)
         self.assertNotIn("Hidden Hair", shopping_list_text)
         self.assertIn("Visible Coat", shopping_list_text)
+
+    def test_paint_guide_shopping_list_groups_duplicate_purchases(self) -> None:
+        settings = TemplateSettings(
+            finished_height_in=18,
+            threshold=40,
+            palette_size=3,
+            paint_guide_entries=(
+                PaintGuideEntry("#cc2424", "Raincoat yellow", "main coat", True, "apple-barrel-matte-bright-red"),
+                PaintGuideEntry("#fce454", "Raincoat yellow", "hood", True, "apple-barrel-matte-bright-red"),
+                PaintGuideEntry("#e4dc3c", "Boots", "left boot", False, "apple-barrel-matte-bright-yellow"),
+            ),
+        )
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        text = PdfReader(io.BytesIO(pdf_bytes)).pages[1].extract_text()
+        shopping_list_text = text.split("Shopping list", 1)[1]
+
+        self.assertEqual(shopping_list_text.count("Apple Barrel Matte Acrylic Bright Red"), 1)
+        self.assertIn("Raincoat yellow, swatches 1 and 2", shopping_list_text)
+        self.assertNotIn("swatch 3", shopping_list_text)
+
+    def test_manual_override_and_no_match_group_in_pdf_shopping_list(self) -> None:
+        settings = TemplateSettings(
+            finished_height_in=18,
+            threshold=40,
+            palette_size=3,
+            paint_guide_entries=(
+                PaintGuideEntry("#cc2424", "Hair", "outline", True, None, "Custom deep blue"),
+                PaintGuideEntry("#fce454", "Trim", "buttons", True, None, "Custom deep blue"),
+                PaintGuideEntry("#6a5424", "Boots", "choose in store", True, None, ""),
+            ),
+        )
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        shopping_list_text = PdfReader(io.BytesIO(pdf_bytes)).pages[1].extract_text().split("Shopping list", 1)[1]
+
+        self.assertIn("Custom deep blue", shopping_list_text)
+        self.assertIn("Hair and Trim, swatches 1 and 2", shopping_list_text)
+        self.assertIn("No match / choose in store", shopping_list_text)
+        self.assertIn("Boots, swatch 3", shopping_list_text)
 
     def test_paint_guide_page_can_show_ten_palette_colors(self) -> None:
         settings = TemplateSettings(finished_height_in=18, threshold=40, palette_size=10)
@@ -477,6 +519,64 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertFalse(settings.paint_guide_entries[0].included)
         self.assertEqual(settings.paint_guide_entries[0].selected_match_id, "apple-barrel-matte-bright-yellow")
         self.assertEqual(settings.paint_guide_entries[0].manual_override, "custom mix")
+
+    def test_packet_export_settings_accept_manual_vector_strokes(self) -> None:
+        settings = TemplateSettings.from_mapping({
+            "templateStyle": "manual",
+            "manualStrokes": [
+                {
+                    "id": "mouth",
+                    "width": 34,
+                    "color": "#000000",
+                    "tool": "draw",
+                    "points": [{"x": 10, "y": 20}, {"x": 80, "y": 30}],
+                },
+                {
+                    "id": "bad-stroke",
+                    "width": 20,
+                    "color": "#1d7a70",
+                    "tool": "draw",
+                    "points": [{"x": 0, "y": 0}, {"x": 10, "y": 10}],
+                },
+            ],
+            "manualStrokeSourceWidthPx": 120,
+            "manualStrokeSourceHeightPx": 160,
+        })
+
+        self.assertEqual(len(settings.manual_strokes), 1)
+        self.assertEqual(settings.manual_strokes[0].id, "mouth")
+        self.assertEqual(settings.manual_stroke_source_width_px, 120)
+        self.assertEqual(settings.manual_stroke_source_height_px, 160)
+
+    def test_manual_stroke_width_conversion_is_print_calibrated(self) -> None:
+        self.assertEqual(_manual_stroke_width_pt(10), 2.5)
+        self.assertEqual(_manual_stroke_width_pt(20), 4)
+        self.assertEqual(_manual_stroke_width_pt(34), 6)
+
+    def test_pdf_draws_manual_trace_strokes_as_vector_paths(self) -> None:
+        settings = TemplateSettings.from_mapping({
+            "templateStyle": "manual",
+            "detailLines": False,
+            "manualStrokes": [
+                {
+                    "id": "mouth",
+                    "width": 34,
+                    "color": "#000000",
+                    "tool": "draw",
+                    "points": [{"x": 20, "y": 20}, {"x": 100, "y": 80}],
+                }
+            ],
+            "manualStrokeSourceWidthPx": 120,
+            "manualStrokeSourceHeightPx": 160,
+        })
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        content = "\n".join(page.get_contents().get_data().decode("latin-1", errors="ignore") for page in reader.pages)
+
+        self.assertIn("6 w", content)
+        self.assertIn("1 J", content)
+        self.assertIn("1 j", content)
 
     def test_manual_trace_mode_returns_cutline_with_blank_detail_layer(self) -> None:
         settings = TemplateSettings.from_mapping({"templateStyle": "manual", "detailLines": False})

@@ -31,6 +31,14 @@ export type PaintGuideEntry = PaintGuideEdit & {
   selectedMatch: CraftPaintMatch | null;
 };
 
+export type ShoppingListItem = {
+  key: string;
+  purchaseLabel: string;
+  labels: string[];
+  swatchNumbers: number[];
+  notes: string[];
+};
+
 export type PaintReviewFilter = "all" | "missing" | "included";
 
 export function paintGuideEntriesForPalette(palette: ProjectPaletteColor[], edits: PaintGuideEdit[]): PaintGuideEntry[] {
@@ -72,18 +80,36 @@ export function updatePaintGuideEdit(edits: PaintGuideEdit[], nextEdit: PaintGui
 }
 
 export function shoppingListText(entries: PaintGuideEntry[]) {
-  const included = entries.filter((entry) => entry.included);
-  if (included.length === 0) return "No paint colors selected.";
-  return included
-    .map((entry) => {
-      const note = entry.note ? ` - ${entry.note}` : "";
-      if (entry.manualOverride) return `${entry.label}: ${entry.manualOverride}${note}`;
-      if (entry.selectedMatch) {
-        return `${entry.label}: ${entry.selectedMatch.brand} ${entry.selectedMatch.line} ${entry.selectedMatch.colorName}${note}`;
-      }
-      return `${entry.label} (${entry.hex.toUpperCase()})${note}`;
-    })
-    .join("\n");
+  const groups = groupShoppingListItems(entries);
+  if (groups.length === 0) return "No paint colors selected.";
+  return groups.map((group) => {
+    const notes = group.notes.length > 0 ? ` - ${formatHumanList(group.notes)}` : "";
+    return `${group.purchaseLabel} - ${formatHumanList(group.labels)}, ${formatSwatches(group.swatchNumbers)}${notes}`;
+  }).join("\n");
+}
+
+export function groupShoppingListItems(entries: PaintGuideEntry[]): ShoppingListItem[] {
+  const groups = new Map<string, ShoppingListItem>();
+  for (const entry of entries) {
+    if (!entry.included) continue;
+    const key = shoppingListGroupKey(entry);
+    const purchaseLabel = shoppingListPurchaseLabel(entry);
+    const group = groups.get(key) ?? {
+      key,
+      purchaseLabel,
+      labels: [],
+      swatchNumbers: [],
+      notes: []
+    };
+    addUnique(group.labels, entry.label);
+    group.swatchNumbers.push(entry.index);
+    addUnique(group.notes, entry.note);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map((group) => ({
+    ...group,
+    swatchNumbers: [...new Set(group.swatchNumbers)].sort((a, b) => a - b)
+  }));
 }
 
 export function matchDisplayName(match: CraftPaintMatch) {
@@ -103,4 +129,33 @@ function sameHex(a: string, b: string) {
 function normalizeHex(hex: string) {
   const value = hex.trim().toLowerCase();
   return value.startsWith("#") ? value : `#${value}`;
+}
+
+function shoppingListGroupKey(entry: PaintGuideEntry) {
+  if (entry.manualOverride) return `manual:${entry.manualOverride.trim().toLowerCase()}`;
+  if (entry.selectedMatch) return `paint:${entry.selectedMatch.id}`;
+  return "no-match";
+}
+
+function shoppingListPurchaseLabel(entry: PaintGuideEntry) {
+  if (entry.manualOverride) return entry.manualOverride;
+  if (entry.selectedMatch) return matchDisplayName(entry.selectedMatch);
+  return "No match / choose in store";
+}
+
+function addUnique(items: string[], value: string) {
+  const trimmed = value.trim();
+  if (trimmed && !items.includes(trimmed)) items.push(trimmed);
+}
+
+function formatSwatches(numbers: number[]) {
+  const sorted = [...numbers].sort((a, b) => a - b);
+  if (sorted.length === 1) return `swatch ${sorted[0]}`;
+  return `swatches ${formatHumanList(sorted.map(String))}`;
+}
+
+function formatHumanList(items: string[]) {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }

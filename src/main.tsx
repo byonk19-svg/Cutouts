@@ -276,9 +276,17 @@ function App() {
     setError(null);
     try {
       const payload = new FormData();
+      const pdfSettings = {
+        ...settings,
+        projectName,
+        paintGuideEntries,
+        manualStrokes: traceStudioOpen ? manualStrokes : [],
+        manualStrokeSourceWidthPx: traceStudioOpen && analysis ? analysis.previewWidthPx : 0,
+        manualStrokeSourceHeightPx: traceStudioOpen && analysis ? analysis.previewHeightPx : 0
+      };
       payload.append("image", image);
-      payload.append("settings", JSON.stringify({ ...settings, projectName, paintGuideEntries }));
-      const editedDetail = currentDetailDataUrl();
+      payload.append("settings", JSON.stringify(pdfSettings));
+      const editedDetail = traceStudioOpen ? null : currentDetailDataUrl();
       if (editedDetail) payload.append("editedDetail", editedDetail);
       const response = await fetch("/api/export", { method: "POST", body: payload });
       if (!response.ok) {

@@ -62,9 +62,9 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await paintRows.nth(3).getByLabel("Include in shopping list").uncheck();
 
   const shoppingList = page.locator(".shopping-list-preview");
-  await expect(shoppingList).toContainText("Hair:");
-  await expect(shoppingList).toContainText("Coat: Bring source swatch");
-  await expect(shoppingList).toContainText("Boots (");
+  await expect(shoppingList).toContainText("Hair");
+  await expect(shoppingList).toContainText("Bring source swatch and choose a yellow craft paint - Coat");
+  await expect(shoppingList).toContainText("No match / choose in store - Boots");
   await expect(shoppingList).not.toContainText("Background test");
 
   const projectDownload = await downloadFrom(page, "Export JSON");
