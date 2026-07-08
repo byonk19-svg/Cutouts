@@ -26,6 +26,7 @@ TILE_HEADER_IN = 0.42
 OVERLAP_IN = 0.25
 PREVIEW_MAX_PX = 960
 PRINT_DPI = 144
+CALIBRATION_SQUARE_PT = 72
 DETAIL_LINE_COLOR = (118, 118, 118)
 BLACK_LINE_COLOR = (0, 0, 0, 255)
 
@@ -805,9 +806,10 @@ def _draw_overview_page(
     pdf.setFont("Helvetica-Bold", 22)
     pdf.drawString(left, top, project_name)
     pdf.setFont("Helvetica", 11)
-    pdf.drawString(left, top - 28, "Print at 100% / actual size. Do not use fit-to-page.")
-    pdf.drawString(left, top - 48, f"Finished size: {width_in:.2f} in wide x {height_in:.2f} in tall")
-    pdf.drawString(left, top - 68, f"Trace pages: {tile_cols} columns x {tile_rows} rows ({tile_cols * tile_rows} pages)")
+    pdf.drawString(left, top - 28, "Print at 100% / actual size.")
+    pdf.drawString(left, top - 48, "In the print dialog, choose Actual size or 100% scale - never Fit to page.")
+    pdf.drawString(left, top - 68, f"Finished size: {width_in:.2f} in wide x {height_in:.2f} in tall")
+    pdf.drawString(left, top - 88, f"Trace pages: {tile_cols} columns x {tile_rows} rows ({tile_cols * tile_rows} pages)")
 
     preview = _on_white(source)
     preview.thumbnail((165, 210))
@@ -860,14 +862,14 @@ def _draw_overview_page(
     pdf.setFont("Helvetica", 9)
     pdf.drawString(384, 254, "Outer cutline")
     pdf.drawString(384, 230, "Detail/paint transfer line")
-    pdf.drawString(300, 208, "Original image/underlay is not printed.")
+    pdf.drawString(300, 208, "Original image/underlay is not printed on tiled template pages.")
     pdf.drawString(300, 194, "Interior details can be transferred with carbon paper or heavy pen pressure.")
 
     pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(40, 96, "1-inch calibration square")
+    pdf.drawString(40, 130, "1-inch calibration square")
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(40, 78, "This square should measure exactly 1 inch after printing.")
-    pdf.rect(40, 0.35 * 72, 72, 72, stroke=1, fill=0)
+    pdf.drawString(40, 112, "This square should measure exactly 1 inch after printing.")
+    pdf.rect(40, 0.35 * 72, CALIBRATION_SQUARE_PT, CALIBRATION_SQUARE_PT, stroke=1, fill=0)
 
 
 def _draw_page_map(pdf: canvas.Canvas, x: float, y: float, tile_cols: int, tile_rows: int) -> None:
@@ -972,9 +974,6 @@ def _draw_tile_pages(
                 pdf.line(margin_pt, y, margin_pt + tile_w_in * 72, y)
             pdf.setDash()
             pdf.setStrokeColor(colors.black)
-            pdf.rect(width_pt - margin_pt - 36, margin_pt, 36, 36, stroke=1, fill=0)
-            pdf.setFont("Helvetica", 7)
-            pdf.drawRightString(width_pt - margin_pt - 42, margin_pt + 13, "1 in")
             pdf.showPage()
 
 

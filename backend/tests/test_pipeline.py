@@ -9,6 +9,7 @@ from backend.cutout_studio.pipeline import (
     TemplateSettings,
     analyze_template,
     build_template_pdf,
+    CALIBRATION_SQUARE_PT,
     extract_palette,
     load_paint_catalog,
     match_paints,
@@ -225,6 +226,7 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("Coraline Packet", first_text)
         self.assertIn("Finished size:", first_text)
         self.assertIn("Print at 100% / actual size", first_text)
+        self.assertIn("Actual size or 100% scale - never Fit to page", first_text)
         self.assertIn("1-inch calibration square", first_text)
         self.assertIn("Supplies checklist", first_text)
         self.assertIn("plywood or foam board", first_text)
@@ -234,12 +236,13 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("Linework legend", first_text)
         self.assertIn("Outer cutline", first_text)
         self.assertIn("Detail/paint transfer line", first_text)
-        self.assertIn("Original image/underlay is not printed", first_text)
+        self.assertIn("Original image/underlay is not printed on tiled template pages", first_text)
         tile_text = reader.pages[2].extract_text()
         self.assertIn("Page 1 of", tile_text)
         self.assertIn("Coraline Packet", tile_text)
         self.assertIn("Row 1 / Column 1", tile_text)
         self.assertIn("Overlap guide: 0.25 in", tile_text)
+        self.assertNotIn("1 in", tile_text)
 
     def test_pdf_cover_page_can_be_disabled(self) -> None:
         settings = TemplateSettings(finished_height_in=30, threshold=40, palette_size=3, include_instruction_cover_page=False)
@@ -277,6 +280,9 @@ class PrintPipelineTest(unittest.TestCase):
         cols, rows = tile_grid(24, 36)
         self.assertGreater(cols, 1)
         self.assertGreater(rows, 1)
+
+    def test_calibration_square_is_one_printed_inch(self) -> None:
+        self.assertEqual(CALIBRATION_SQUARE_PT, 72)
 
     def test_paint_matches_are_ranked_and_limited(self) -> None:
         paints = load_paint_catalog()
