@@ -14,6 +14,7 @@ import { removeClickedDetailSegment } from "./detailEditor";
 import {
   addProjectPaintColor,
   filterPaintGuideEntries,
+  groupShoppingListItems,
   isValidHexColor,
   matchConfidenceLabel,
   matchDisplayName,
@@ -24,6 +25,7 @@ import {
   seedProjectPaletteFromDetected,
   shoppingListText,
   updateProjectPaintColor,
+  type PaintGuideEntry,
   type PaintReviewFilter,
   type ProjectPaintColor
 } from "./paintGuide";
@@ -63,6 +65,7 @@ type BrushSize = "thin" | "normal" | "bold";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
 type Analysis = CutoutProjectAnalysis;
 type ProjectStatus = "No saved project" | "Unsaved changes" | "Auto-saved" | "Saved" | "Restored auto-save" | "Project opened" | "Project export failed" | "Project import failed" | "Auto-save failed";
+type WorkflowStatus = "Complete" | "Next" | "Needs attention";
 type StrokeDragState = {
   mode: "move" | "point";
   strokeId: string;
@@ -78,9 +81,9 @@ const defaultSettings: Settings = {
   smoothing: 4,
   speckArea: 60,
   holeArea: 220,
-  detailLines: true,
-  detailCleanup: 88,
-  templateStyle: "paint",
+  detailLines: false,
+  detailCleanup: 100,
+  templateStyle: "manual",
   paletteSize: 6,
   includeInstructionCoverPage: true,
   includePaintGuidePage: true
@@ -101,7 +104,7 @@ function App() {
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>("No saved project");
   const [autosavePaused, setAutosavePaused] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
-  const [traceMode, setTraceMode] = useState<TraceMode>("paint");
+  const [traceMode, setTraceMode] = useState<TraceMode>("manual");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -163,6 +166,13 @@ function App() {
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
   const paintShoppingList = shoppingListText(paintGuideEntries);
   const canIncludePaintGuide = paintGuideEntries.length > 0;
+  const workflowSteps = [
+    workflowStep("Generate cutline", analysis !== null, image !== null),
+    workflowStep("Edit template lines", manualStrokes.length > 0 || cleanupChecks.draw, analysis !== null),
+    workflowStep("Review paint palette", paintGuideEntries.length > 0 && !paintGuideEntries.some(isGenericPaintLabel), analysis !== null),
+    workflowStep("Export packet", cleanupChecks.export, canExport)
+  ];
+  const duplicatePaintSuggestion = groupDuplicatePaintPurchases(paintGuideEntries).find((group) => group.swatchNumbers.length > 1);
 
   useEffect(() => {
     if (analysis) return;
@@ -524,6 +534,15 @@ function App() {
 
   function mergeSelectedPaintColors() {
     setProjectPalette((palette) => mergeProjectPaintColors(palette, selectedPaintColorIds));
+    setSelectedPaintColorIds([]);
+    setShoppingListStatus("Colors merged");
+  }
+
+  function mergeProjectPaintColorsBySwatches(swatchNumbers: number[]) {
+    const ids = paintGuideEntries
+      .filter((entry) => swatchNumbers.includes(entry.index))
+      .map((entry) => entry.id);
+    setProjectPalette((palette) => mergeProjectPaintColors(palette, ids));
     setSelectedPaintColorIds([]);
     setShoppingListStatus("Colors merged");
   }
@@ -1076,6 +1095,24 @@ function App() {
             />
           </div>
 
+          <section className="workflow-card" aria-label="Guided workflow">
+            <div className="workflow-card-title">
+              <strong>Workflow</strong>
+              <span>Start with Trace Studio, then clean up paint colors.</span>
+            </div>
+            <ol className="workflow-steps">
+              {workflowSteps.map((step, index) => (
+                <li key={step.label} className={`workflow-step ${step.status === "Complete" ? "complete" : step.status === "Next" ? "next" : ""}`}>
+                  <span>{index + 1}</span>
+                  <div>
+                    <strong>{step.label}</strong>
+                    <em>{step.status}</em>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
+
           <NumberField
             label="Finished height"
             suffix="in"
@@ -1088,6 +1125,10 @@ function App() {
 
           <div className="choice-group" aria-label="Trace style">
             <span className="choice-label">Trace style</span>
+            <button className={traceMode === "manual" ? "choice selected" : "choice"} onClick={() => applyTraceMode("manual")}>
+              <strong>{traceModeLabel("manual")}</strong>
+              <small>{traceModeHelp("manual")}</small>
+            </button>
             <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
               <strong>{traceModeLabel("outline")}</strong>
               <small>{traceModeHelp("outline")}</small>
@@ -1095,10 +1136,6 @@ function App() {
             <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
               <strong>{traceModeLabel("paint")}</strong>
               <small>{traceModeHelp("paint")}</small>
-            </button>
-            <button className={traceMode === "manual" ? "choice selected" : "choice"} onClick={() => applyTraceMode("manual")}>
-              <strong>{traceModeLabel("manual")}</strong>
-              <small>{traceModeHelp("manual")}</small>
             </button>
           </div>
 
@@ -1167,7 +1204,7 @@ function App() {
 
           <button className="secondary-action" onClick={() => analyze()} disabled={!canAnalyze}>
             <RefreshCw size={17} />
-            {busy ? "Working..." : "Generate Starting Template"}
+            {busy ? "Working..." : traceMode === "manual" ? "Generate Cutline + Open Trace Studio" : "Generate Starting Template"}
           </button>
         </aside>
 
@@ -1486,6 +1523,27 @@ function App() {
                   <p>Detected colors are only a starting point. Add skin, hair, trim, or other paint colors manually when the extractor misses them.</p>
                 </div>
                 <div className="palette-editor-actions" aria-label="Paint Palette Editor">
+                  <div className="palette-presets" aria-label="Common missing colors">
+                    {([
+                      ["Skin tone", "#f1c7a5"],
+                      ["Hair", "#0c143a"],
+                      ["Main clothing", "#e4cc24"],
+                      ["Boots/shoes", "#6a5424"],
+                      ["Accent/trim", "#8f2d56"],
+                      ["Custom", newPaintHex]
+                    ] as const).map(([label, hex]) => (
+                      <button
+                        key={label}
+                        className="filter-button"
+                        onClick={() => {
+                          setNewPaintLabel(label);
+                          setNewPaintHex(hex);
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   <label>
                     <span>New color</span>
                     <input
@@ -1542,6 +1600,45 @@ function App() {
                   ))}
                 </div>
               </section>
+              <section className="palette-summary-card" aria-label="Project Palette Summary">
+                <div className="palette-summary-heading">
+                  <div>
+                    <h3>Project Palette Summary</h3>
+                    <p>Clean this list into the paint bottles you actually plan to buy.</p>
+                  </div>
+                </div>
+                {duplicatePaintSuggestion ? (
+                  <div className="merge-suggestion" role="status">
+                    <strong>Duplicate paint cleanup</strong>
+                    <span>
+                      You have {duplicatePaintSuggestion.swatchNumbers.length} colors using {duplicatePaintSuggestion.purchaseLabel}. Merge them if they are one purchase.
+                    </span>
+                    <button className="tool-button" onClick={() => mergeProjectPaintColorsBySwatches(duplicatePaintSuggestion.swatchNumbers)}>
+                      <RefreshCw size={15} />
+                      Merge these
+                    </button>
+                  </div>
+                ) : null}
+                <div className="palette-summary-list">
+                  {paintGuideEntries.map((entry) => (
+                    <article className="palette-summary-item" key={`summary-${entry.id}`}>
+                      <span className="mini-swatch" style={{ backgroundColor: entry.hex }} />
+                      <div>
+                        <strong>{entry.label}</strong>
+                        <span>{entry.note || "Add use note"} / {entry.included ? "Shopping list" : "Excluded"}</span>
+                        <em>
+                          {entry.manualOverride
+                            ? entry.manualOverride
+                            : entry.selectedMatch
+                              ? matchDisplayName(entry.selectedMatch)
+                              : "Choose a paint match below or choose in store."}
+                        </em>
+                      </div>
+                      {isGenericPaintLabel(entry) ? <b>Needs label</b> : null}
+                    </article>
+                  ))}
+                </div>
+              </section>
               <div className="palette-list">
                 {visiblePaintGuideEntries.map((entry) => (
                   <article className={entry.included ? "palette-row" : "palette-row muted-paint"} key={entry.id}>
@@ -1551,6 +1648,7 @@ function App() {
                         <strong>{entry.index}. {entry.label}</strong>
                         <span>{entry.hex.toUpperCase()} / {entry.source === "manual" ? "manual" : `${Math.round(entry.coverage * 100)}%`}{entry.locked ? " / locked" : ""}</span>
                       </div>
+                      {isGenericPaintLabel(entry) ? <span className="needs-label-badge">Needs label</span> : null}
                       <div className="palette-row-tools">
                         <label className="toggle-row compact-toggle">
                           <input
@@ -1580,7 +1678,7 @@ function App() {
                             ? entry.manualOverride
                             : entry.selectedMatch
                               ? matchDisplayName(entry.selectedMatch)
-                              : "No match selected"}
+                              : "Choose a paint match below or choose in store."}
                         </strong>
                         {entry.selectedMatch ? (
                           <em>{matchConfidenceLabel(entry.selectedMatch)}</em>
@@ -1651,6 +1749,14 @@ function App() {
                           <option value="__manual__">Manual override</option>
                         </select>
                       </label>
+                      <div className="paint-match-actions">
+                        <button className="tool-button" onClick={() => updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: "" })}>
+                          Choose in store
+                        </button>
+                        <button className="tool-button" onClick={() => updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: entry.manualOverride || "Choose in store" })}>
+                          Manual override
+                        </button>
+                      </div>
                       {entry.matches.length > 0 ? (
                         <div className="paint-match-suggestions" aria-label={`Suggested paints for ${entry.label}`}>
                           {entry.matches.map((match) => (
@@ -1664,7 +1770,7 @@ function App() {
                                 <span className="mini-swatch" style={{ backgroundColor: match.hex }} />
                               </span>
                               <span>{matchDisplayName(match)}</span>
-                              <em>{matchConfidenceLabel(match)}{match.outdoorRecommended ? " / Outdoor" : ""}</em>
+                              <em>Use this paint / {matchConfidenceLabel(match)}{match.outdoorRecommended ? " / Outdoor" : ""}</em>
                             </button>
                           ))}
                         </div>
@@ -1721,6 +1827,19 @@ function brushPixels(size: BrushSize) {
   if (size === "thin") return 10;
   if (size === "bold") return 34;
   return 20;
+}
+
+function workflowStep(label: string, complete: boolean, available: boolean) {
+  const status: WorkflowStatus = complete ? "Complete" : available ? "Next" : "Needs attention";
+  return { label, status };
+}
+
+function isGenericPaintLabel(entry: PaintGuideEntry) {
+  return /^Color \d+$/i.test(entry.label.trim());
+}
+
+function groupDuplicatePaintPurchases(entries: PaintGuideEntry[]) {
+  return groupShoppingListItems(entries).filter((group) => group.key !== "no-match" && group.swatchNumbers.length > 1);
 }
 
 function brushSizeName(width: number): BrushSize {

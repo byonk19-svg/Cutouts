@@ -12,8 +12,11 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
     buffer: sourceImage
   });
 
-  await page.getByRole("button", { name: /Trace Studio/ }).click();
-  await page.getByRole("button", { name: /Generate Starting Template/ }).click();
+  await expect(page.getByLabel("Guided workflow")).toContainText("Generate cutline");
+  const traceStyleChoices = page.getByLabel("Trace style");
+  await expect(traceStyleChoices.getByRole("button", { name: /Trace Studio/ })).toContainText("Best for printable wood templates");
+  await traceStyleChoices.getByRole("button", { name: /Trace Studio/ }).click();
+  await page.getByRole("button", { name: /Generate Cutline|Generate Starting Template/ }).click();
   await expect(page.getByText(/Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
 
@@ -47,6 +50,8 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   const paintRows = page.locator(".palette-row");
   await expect(paintRows.nth(3)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByLabel("Paint Match Review")).toBeVisible();
+  await expect(page.getByLabel("Project Palette Summary")).toBeVisible();
+  await expect(page.getByText("Needs label").first()).toBeVisible();
 
   await addProjectPaintColor(page, "#f1c7a5", "Skin tone");
   await expect(page.locator(".palette-row").filter({ hasText: "Skin tone" })).toBeVisible();

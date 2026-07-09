@@ -67,19 +67,19 @@ export function traceModeSettings(mode: TraceMode, current: Settings): Settings 
 }
 
 export function traceModeLabel(mode: TraceMode) {
-  if (mode === "outline") return "Cutline Only";
+  if (mode === "outline") return "Outside Shape Only";
   if (mode === "manual") return "Trace Studio";
   if (mode === "marker") return "Experimental Auto Suggestions";
   if (mode === "extra") return "Detailed Paint Map";
-  return "Clean Template Starter";
+  return "Auto Starter Lines";
 }
 
 export function traceModeHelp(mode: TraceMode) {
-  if (mode === "outline") return "Outside shape for jigsaw cutting.";
-  if (mode === "manual") return "Auto cutline with manual clean line tracing.";
+  if (mode === "outline") return "Quick outside shape for jigsaw cutting.";
+  if (mode === "manual") return "Best for printable wood templates.";
   if (mode === "marker") return "Rough starter lines. Usually needs cleanup.";
   if (mode === "extra") return "More color boundaries for paint planning.";
-  return "Bold cutline with editable starter feature lines.";
+  return "Optional rough details to edit.";
 }
 
 export function startsWithBlankManualLayer(mode: TraceMode) {

@@ -33,6 +33,7 @@ const baseSettings: Settings = {
   const settings = traceModeSettings("manual", baseSettings);
 
   assertEqual(traceModeLabel("manual"), "Trace Studio", "manual mode should be labeled as the Trace Studio workflow");
+  assertEqual(traceModeHelp("manual"), "Best for printable wood templates.", "manual mode should be presented as the recommended workflow");
   assert(startsWithBlankManualLayer("manual"), "manual mode should start with a blank detail layer");
   assert(opensEditorWithReference("manual"), "manual mode should open the editor with the reference visible");
   assertEqual(settings.detailLines, false, "manual mode should not import generated detail suggestions into the editable layer");
@@ -41,6 +42,9 @@ const baseSettings: Settings = {
 }
 
 {
+  assertEqual(traceModeLabel("outline"), "Outside Shape Only", "outline mode should be described as the outside shape path");
+  assertEqual(traceModeLabel("paint"), "Auto Starter Lines", "paint mode should be described as suggestions, not final output");
+  assert(traceModeHelp("paint").includes("Optional rough details"), "paint mode copy should set expectation that starter lines are optional");
   assertEqual(traceModeLabel("marker"), "Experimental Auto Suggestions", "marker mode should no longer promise final marker template art");
   assert(
     traceModeHelp("marker").includes("Usually needs cleanup"),
