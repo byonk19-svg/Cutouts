@@ -466,6 +466,12 @@ button {
   line-height: 1.4;
 }
 
+.reset-tracing-settings {
+  display: grid;
+  gap: 5px;
+  padding-top: 2px;
+}
+
 .number-field div {
   display: flex;
   align-items: center;

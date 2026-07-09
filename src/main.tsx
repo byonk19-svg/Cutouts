@@ -168,6 +168,7 @@ function App() {
   const selectedStrokeSummary = selectedTraceStrokeSummary(manualStrokes, selectedStrokeId);
   const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
   const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
+  const primaryTraceActionLabel = traceActionLabel({ image, analysis, busy, traceMode });
   const paintGuideEntries = paintGuideEntriesForProjectPalette(projectPalette);
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
   const paintShoppingList = shoppingListText(paintGuideEntries);
@@ -272,6 +273,11 @@ function App() {
 
   async function analyze(nextSettings = settings) {
     if (!image) return;
+    const preservedManualStrokes = traceStudioOpen ? manualStrokes : [];
+    if (analysis && preservedManualStrokes.length > 0) {
+      const shouldRegenerate = window.confirm("Regenerate the cutline? This may replace the cutline and starter lines. Your manual Trace Studio lines will be kept unless you reset details.");
+      if (!shouldRegenerate) return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -284,9 +290,10 @@ function App() {
       const openEditor = opensEditorWithReference(nextSettings.templateStyle);
       resetEditorState();
       setAnalysis(body);
+      if (preservedManualStrokes.length > 0) setManualStrokes(preservedManualStrokes);
       setProjectPalette(seedProjectPaletteFromDetected(body.palette, []));
       setSelectedPaintColorIds([]);
-      setEditorOpen(openEditor);
+      setEditorOpen(openEditor || preservedManualStrokes.length > 0);
       setShowReference(openEditor);
       resetCleanupChecks();
     } catch (err) {
@@ -548,6 +555,23 @@ function App() {
     const next = { ...settings, [key]: value };
     setSettings(next);
     setAnalysis(null);
+  }
+
+  function resetTracingSettings() {
+    setSettings((current) => ({
+      ...current,
+      threshold: defaultSettings.threshold,
+      smoothing: defaultSettings.smoothing,
+      speckArea: defaultSettings.speckArea,
+      holeArea: defaultSettings.holeArea,
+      detailLines: defaultSettings.detailLines,
+      detailCleanup: defaultSettings.detailCleanup,
+      templateStyle: defaultSettings.templateStyle
+    }));
+    setTraceMode("manual");
+    setAutoStarterOpen(false);
+    setAdvancedOpen(false);
+    setProjectStatus(image ? "Unsaved changes" : "No saved project");
   }
 
   function applyTraceMode(mode: TraceMode) {
@@ -1200,44 +1224,28 @@ function App() {
                 <strong>{traceModeLabel("manual")}</strong>
                 <small>Draw clean template lines over the image underlay. Best for printable wood cutouts.</small>
               </button>
-              <details
-                className="auto-starter-card"
-                open={autoStarterOpen}
-                onToggle={(event) => setAutoStarterOpen(event.currentTarget.open)}
-              >
+              <details className="auto-starter-card" open={autoStarterOpen} onToggle={(event) => setAutoStarterOpen(event.currentTarget.open)}>
                 <summary>
                   <span>
-                    <strong>Optional Auto Starter Lines</strong>
-                    <small>Use these only when you want a rough starting point to clean up.</small>
+                    <strong>Optional helpers</strong>
+                    <small>Need help getting started? Add rough detail lines or generate only the outside shape.</small>
                   </span>
                 </summary>
                 <div className="auto-starter-options">
-                  <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
-                    <strong>{traceModeLabel("outline")}</strong>
-                    <small>{traceModeHelp("outline")}</small>
-                  </button>
                   <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
                     <strong>{traceModeLabel("paint")}</strong>
                     <small>{traceModeHelp("paint")}</small>
                   </button>
+                  <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
+                    <strong>{traceModeLabel("outline")}</strong>
+                    <small>{traceModeHelp("outline")}</small>
+                  </button>
                 </div>
               </details>
-              <p className="helper-note">Start with Trace Studio for clean manual lines. Auto Starter Lines are optional rough details and usually need cleanup.</p>
+              <p className="helper-note">Best results come from tracing clean, simple lines over the image underlay. Starter Detail Lines are optional and usually need cleanup.</p>
             </div>
           </div>
 
-          <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
-          {settings.detailLines ? (
-            <RangeField
-              label={traceMode === "paint" || traceMode === "marker" ? "Cleanup strength" : "Inside detail"}
-              min={traceMode === "marker" ? 85 : traceMode === "paint" ? 76 : 0}
-              max={100}
-              value={traceMode === "paint" || traceMode === "marker" ? settings.detailCleanup : 100 - settings.detailCleanup}
-              onChange={updateInteriorDetail}
-              lowLabel={traceMode === "paint" || traceMode === "marker" ? "More lines" : undefined}
-              highLabel={traceMode === "paint" || traceMode === "marker" ? "Cleaner" : undefined}
-            />
-          ) : null}
           <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => updateSetting("paletteSize", value)} />
           <label className="toggle-row">
             <input
@@ -1272,10 +1280,29 @@ function App() {
           </button>
           {advancedOpen ? (
             <div className="advanced-panel">
-              <p className="helper-note">These settings only affect automatic starter lines, not manual Trace Studio strokes.</p>
+              <p className="helper-note">These settings only affect automatic starter lines, not your manual Trace Studio strokes.</p>
+              <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
+              {settings.detailLines ? (
+                <RangeField
+                  label={traceMode === "paint" || traceMode === "marker" ? "Cleanup strength" : "Inside detail"}
+                  min={traceMode === "marker" ? 85 : traceMode === "paint" ? 76 : 0}
+                  max={100}
+                  value={traceMode === "paint" || traceMode === "marker" ? settings.detailCleanup : 100 - settings.detailCleanup}
+                  onChange={updateInteriorDetail}
+                  lowLabel={traceMode === "paint" || traceMode === "marker" ? "More lines" : undefined}
+                  highLabel={traceMode === "paint" || traceMode === "marker" ? "Cleaner" : undefined}
+                />
+              ) : null}
               <RangeField label="Background sensitivity" min={0} max={180} value={settings.threshold} onChange={(value) => updateSetting("threshold", value)} />
               <RangeField label="Remove tiny marks" min={0} max={600} value={settings.speckArea} onChange={(value) => updateSetting("speckArea", value)} />
               <RangeField label="Close small gaps" min={0} max={1500} value={settings.holeArea} onChange={(value) => updateSetting("holeArea", value)} />
+              <div className="reset-tracing-settings">
+                <button className="tool-button" onClick={resetTracingSettings}>
+                  <RotateCcw size={15} />
+                  Reset tracing settings
+                </button>
+                <p className="helper-note">Restores the recommended starter settings. Your manual Trace Studio lines are not changed.</p>
+              </div>
               <div className="choice-group" aria-label="Advanced trace styles">
                 <span className="choice-label">Experimental detail sources</span>
                 <button className={traceMode === "marker" ? "choice selected" : "choice"} onClick={() => applyTraceMode("marker")}>
@@ -1293,7 +1320,7 @@ function App() {
           <div className="workflow-anchor-section">
             <button className="secondary-action" onClick={() => analyze()} disabled={!canAnalyze}>
               <RefreshCw size={17} />
-              {busy ? "Working..." : traceMode === "manual" ? "Generate Cutline + Open Trace Studio" : "Generate Starting Template"}
+              {primaryTraceActionLabel}
             </button>
           </div>
         </aside>
@@ -1941,6 +1968,15 @@ function brushPixels(size: BrushSize) {
   if (size === "thin") return 10;
   if (size === "bold") return 34;
   return 20;
+}
+
+function traceActionLabel({ image, analysis, busy, traceMode }: { image: File | null; analysis: Analysis | null; busy: boolean; traceMode: TraceMode }) {
+  if (busy) return "Working...";
+  if (!image) return "Upload an image to start";
+  if (analysis) return "Regenerate Cutline";
+  if (traceMode === "paint" || traceMode === "marker" || traceMode === "extra") return "Start Trace Studio with Starter Lines";
+  if (traceMode === "outline") return "Generate Outside Cutline Only";
+  return "Start Trace Studio";
 }
 
 function workflowStep(label: string, target: WorkflowTarget, complete: boolean, available: boolean) {

@@ -15,10 +15,13 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByLabel("Guided workflow")).toContainText("Generate cutline");
   await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Generate cutline/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Start New/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start Trace Studio" })).toBeVisible();
+  await expect(page.getByLabel("Trace style")).toContainText("Optional helpers");
+  await expect(page.getByText("Line smoothness")).toBeHidden();
   const traceStyleChoices = page.getByLabel("Trace style");
   await expect(traceStyleChoices.getByRole("button", { name: /Trace Studio/ })).toContainText("Draw clean template lines");
   await traceStyleChoices.getByRole("button", { name: /Trace Studio/ }).click();
-  await page.getByRole("button", { name: /Generate Cutline|Generate Starting Template/ }).click();
+  await page.getByRole("button", { name: "Start Trace Studio" }).click();
   await expect(page.getByText(/Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
 
@@ -36,6 +39,9 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByText(/Stroke 1 of 1/)).toBeVisible();
   await page.locator('select[aria-label="Selected stroke width"]').selectOption("bold");
   await expect(page.getByText(/Bold \/ 34px/)).toBeVisible();
+  await page.getByRole("button", { name: /Show advanced auto-start settings/ }).click();
+  await page.getByRole("button", { name: /Reset tracing settings/ }).click();
+  await expect(page.getByText(/Stroke 1 of 1/)).toBeVisible();
 
   const editorTools = page.getByLabel("Template editor tools");
   await editorTools.getByRole("button", { name: /^Duplicate$/ }).click();

@@ -42,9 +42,9 @@ const baseSettings: Settings = {
 }
 
 {
-  assertEqual(traceModeLabel("outline"), "Outside Shape Only", "outline mode should be described as the outside shape path");
-  assertEqual(traceModeLabel("paint"), "Auto Starter Lines", "paint mode should be described as suggestions, not final output");
-  assert(traceModeHelp("paint").includes("Optional rough details"), "paint mode copy should set expectation that starter lines are optional");
+  assertEqual(traceModeLabel("outline"), "Outside Shape Only Export", "outline mode should be described as a secondary outside shape path");
+  assertEqual(traceModeLabel("paint"), "Starter Detail Lines", "paint mode should be described as editable starter detail lines");
+  assert(traceModeHelp("paint").includes("Optional rough interior lines"), "paint mode copy should set expectation that starter lines are optional and editable");
   assertEqual(traceModeLabel("marker"), "Experimental Auto Suggestions", "marker mode should no longer promise final marker template art");
   assert(
     traceModeHelp("marker").includes("Usually needs cleanup"),
