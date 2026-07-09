@@ -16,7 +16,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Generate cutline/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Start New/ })).toBeVisible();
   const traceStyleChoices = page.getByLabel("Trace style");
-  await expect(traceStyleChoices.getByRole("button", { name: /Trace Studio/ })).toContainText("Best for printable wood templates");
+  await expect(traceStyleChoices.getByRole("button", { name: /Trace Studio/ })).toContainText("Draw clean template lines");
   await traceStyleChoices.getByRole("button", { name: /Trace Studio/ }).click();
   await page.getByRole("button", { name: /Generate Cutline|Generate Starting Template/ }).click();
   await expect(page.getByText(/Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });

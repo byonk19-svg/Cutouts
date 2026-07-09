@@ -106,6 +106,7 @@ function App() {
   const [autosavePaused, setAutosavePaused] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [traceMode, setTraceMode] = useState<TraceMode>("manual");
+  const [autoStarterOpen, setAutoStarterOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -404,6 +405,7 @@ function App() {
     setProjectStatus("No saved project");
     setSettings(defaultSettings);
     setTraceMode("manual");
+    setAutoStarterOpen(false);
     setAdvancedOpen(false);
     setAnalysis(null);
     setEditorOpen(false);
@@ -507,6 +509,7 @@ function App() {
     setProjectCreatedAt(project.createdAt);
     setSettings(project.settings);
     setTraceMode(project.traceMode);
+    setAutoStarterOpen(project.traceMode !== "manual");
     setManualStrokes(project.manualStrokes);
     setProjectPalette(project.projectPalette);
     setSelectedPaintColorIds([]);
@@ -549,6 +552,7 @@ function App() {
 
   function applyTraceMode(mode: TraceMode) {
     setTraceMode(mode);
+    setAutoStarterOpen(mode !== "manual");
     const next = traceModeSettings(mode, settings);
     setSettings(next);
     setAnalysis(null);
@@ -1189,21 +1193,36 @@ function App() {
               onChange={(value) => updateSetting("finishedHeightIn", value)}
             />
 
-            <div className="choice-group" aria-label="Trace style">
-              <span className="choice-label">Trace style</span>
-              <button className={traceMode === "manual" ? "choice selected" : "choice"} onClick={() => applyTraceMode("manual")}>
+            <div className="choice-group trace-method-picker" aria-label="Trace style">
+              <span className="choice-label">Tracing method</span>
+              <button className={traceMode === "manual" ? "choice selected recommended-choice" : "choice recommended-choice"} onClick={() => applyTraceMode("manual")}>
+                <span className="choice-kicker">Recommended</span>
                 <strong>{traceModeLabel("manual")}</strong>
-                <small>{traceModeHelp("manual")}</small>
+                <small>Draw clean template lines over the image underlay. Best for printable wood cutouts.</small>
               </button>
-              <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
-                <strong>{traceModeLabel("outline")}</strong>
-                <small>{traceModeHelp("outline")}</small>
-              </button>
-              <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
-                <strong>{traceModeLabel("paint")}</strong>
-                <small>{traceModeHelp("paint")}</small>
-              </button>
-              <p className="helper-note">Auto Starter Lines are optional rough details. They usually need cleanup.</p>
+              <details
+                className="auto-starter-card"
+                open={autoStarterOpen}
+                onToggle={(event) => setAutoStarterOpen(event.currentTarget.open)}
+              >
+                <summary>
+                  <span>
+                    <strong>Optional Auto Starter Lines</strong>
+                    <small>Use these only when you want a rough starting point to clean up.</small>
+                  </span>
+                </summary>
+                <div className="auto-starter-options">
+                  <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
+                    <strong>{traceModeLabel("outline")}</strong>
+                    <small>{traceModeHelp("outline")}</small>
+                  </button>
+                  <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
+                    <strong>{traceModeLabel("paint")}</strong>
+                    <small>{traceModeHelp("paint")}</small>
+                  </button>
+                </div>
+              </details>
+              <p className="helper-note">Start with Trace Studio for clean manual lines. Auto Starter Lines are optional rough details and usually need cleanup.</p>
             </div>
           </div>
 

@@ -330,6 +330,10 @@ button {
   color: #43524c;
 }
 
+.trace-method-picker {
+  gap: 9px;
+}
+
 .choice {
   display: grid;
   gap: 2px;
@@ -363,6 +367,76 @@ button {
   border-color: #1d7a70;
   background: #eef8f5;
   box-shadow: inset 3px 0 0 #1d7a70;
+}
+
+.recommended-choice {
+  padding: 13px 12px;
+}
+
+.choice-kicker {
+  width: fit-content;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #145f56;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.auto-starter-card {
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #fbfdfc;
+  overflow: hidden;
+}
+
+.auto-starter-card summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 11px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.auto-starter-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.auto-starter-card summary::after {
+  content: "+";
+  color: #65736c;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.auto-starter-card[open] summary::after {
+  content: "-";
+}
+
+.auto-starter-card strong,
+.auto-starter-card small {
+  display: block;
+}
+
+.auto-starter-card summary strong {
+  color: #26352f;
+  font-size: 12px;
+}
+
+.auto-starter-card summary small {
+  margin-top: 2px;
+  color: #65736c;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.auto-starter-options {
+  display: grid;
+  gap: 7px;
+  padding: 0 10px 10px;
 }
 
 .advanced-toggle {
