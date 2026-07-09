@@ -66,6 +66,7 @@ type CleanupStep = "cutline" | "remove" | "draw" | "export";
 type Analysis = CutoutProjectAnalysis;
 type ProjectStatus = "No saved project" | "Unsaved changes" | "Auto-saved" | "Saved" | "Restored auto-save" | "Project opened" | "Project export failed" | "Project import failed" | "Auto-save failed";
 type WorkflowStatus = "Complete" | "Next" | "Needs attention";
+type WorkflowTarget = "setup" | "editor" | "paint" | "export";
 type StrokeDragState = {
   mode: "move" | "point";
   strokeId: string;
@@ -141,6 +142,10 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement | null>(null);
+  const setupSectionRef = useRef<HTMLDivElement | null>(null);
+  const traceEditorSectionRef = useRef<HTMLDivElement | null>(null);
+  const paintReviewSectionRef = useRef<HTMLElement | null>(null);
+  const exportSectionRef = useRef<HTMLDivElement | null>(null);
   const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
   const drawingRef = useRef(false);
@@ -167,10 +172,10 @@ function App() {
   const paintShoppingList = shoppingListText(paintGuideEntries);
   const canIncludePaintGuide = paintGuideEntries.length > 0;
   const workflowSteps = [
-    workflowStep("Generate cutline", analysis !== null, image !== null),
-    workflowStep("Edit template lines", manualStrokes.length > 0 || cleanupChecks.draw, analysis !== null),
-    workflowStep("Review paint palette", paintGuideEntries.length > 0 && !paintGuideEntries.some(isGenericPaintLabel), analysis !== null),
-    workflowStep("Export packet", cleanupChecks.export, canExport)
+    workflowStep("Generate cutline", "setup", analysis !== null, image !== null),
+    workflowStep("Edit template lines", "editor", manualStrokes.length > 0 || cleanupChecks.draw, analysis !== null),
+    workflowStep("Review paint palette", "paint", paintGuideEntries.length > 0 && !paintGuideEntries.some(isGenericPaintLabel), analysis !== null),
+    workflowStep("Export packet", "export", cleanupChecks.export, canExport)
   ];
   const duplicatePaintSuggestion = groupDuplicatePaintPurchases(paintGuideEntries).find((group) => group.swatchNumbers.length > 1);
 
@@ -376,6 +381,60 @@ function App() {
     } catch {
       setError("Unable to read the selected image.");
     }
+  }
+
+  function startNewProject() {
+    const hasCurrentWork =
+      image !== null ||
+      analysis !== null ||
+      manualStrokes.length > 0 ||
+      projectPalette.length > 0 ||
+      sourceImageDataUrl !== null;
+
+    if (hasCurrentWork && !window.confirm("Start a new project? This clears the current image, strokes, and paint palette on this device. Export the project JSON first if you want to keep it.")) {
+      return;
+    }
+
+    setAutosavePaused(true);
+    localStorage.removeItem(CUTOUT_AUTOSAVE_KEY);
+    setImage(null);
+    setSourceImageDataUrl(null);
+    setProjectName("Cutout Project");
+    setProjectCreatedAt(null);
+    setProjectStatus("No saved project");
+    setSettings(defaultSettings);
+    setTraceMode("manual");
+    setAdvancedOpen(false);
+    setAnalysis(null);
+    setEditorOpen(false);
+    setEditorTool("erase");
+    setBrushSize("normal");
+    setShowReference(false);
+    setReferenceOpacity(35);
+    setShowCutline(true);
+    setShowManualLines(true);
+    setShowSuggestions(false);
+    setProjectPalette([]);
+    setSelectedPaintColorIds([]);
+    setPaintReviewFilter("all");
+    setShoppingListStatus("");
+    resetCleanupChecks();
+    resetEditorState();
+    setError(null);
+    strokeIdRef.current = 0;
+    window.setTimeout(() => setAutosavePaused(false), 100);
+  }
+
+  function scrollToWorkflowTarget(target: WorkflowTarget) {
+    const targetElement = target === "setup"
+      ? setupSectionRef.current
+      : target === "editor"
+        ? traceEditorSectionRef.current
+        : target === "paint"
+          ? paintReviewSectionRef.current
+          : exportSectionRef.current;
+
+    targetElement?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function buildProjectSnapshot() {
@@ -1035,7 +1094,7 @@ function App() {
           <h1>Cutout Studio</h1>
           <p>Personal wood cutout template generator</p>
         </div>
-        <div className="topbar-actions">
+        <div className="topbar-actions" ref={exportSectionRef}>
           <button className="secondary-topbar-action" onClick={exportSvgLinework} disabled={!canExportSvg}>
             <FileText size={18} />
             Export SVG Linework
@@ -1069,6 +1128,10 @@ function App() {
               <span>{projectStatus}</span>
             </div>
             <div className="project-actions">
+              <button className="tool-button danger-lite" onClick={startNewProject}>
+                <X size={15} />
+                Start New
+              </button>
               <button className="tool-button" onClick={() => projectFileInputRef.current?.click()}>
                 <FolderOpen size={15} />
                 Open Project
@@ -1103,40 +1166,45 @@ function App() {
             <ol className="workflow-steps">
               {workflowSteps.map((step, index) => (
                 <li key={step.label} className={`workflow-step ${step.status === "Complete" ? "complete" : step.status === "Next" ? "next" : ""}`}>
-                  <span>{index + 1}</span>
-                  <div>
-                    <strong>{step.label}</strong>
-                    <em>{step.status}</em>
-                  </div>
+                  <button type="button" onClick={() => scrollToWorkflowTarget(step.target)}>
+                    <span>{index + 1}</span>
+                    <div>
+                      <strong>{step.label}</strong>
+                      <em>{step.status}</em>
+                    </div>
+                  </button>
                 </li>
               ))}
             </ol>
           </section>
 
-          <NumberField
-            label="Finished height"
-            suffix="in"
-            min={6}
-            max={96}
-            step={1}
-            value={settings.finishedHeightIn}
-            onChange={(value) => updateSetting("finishedHeightIn", value)}
-          />
+          <div className="workflow-anchor-section" ref={setupSectionRef}>
+            <NumberField
+              label="Finished height"
+              suffix="in"
+              min={6}
+              max={96}
+              step={1}
+              value={settings.finishedHeightIn}
+              onChange={(value) => updateSetting("finishedHeightIn", value)}
+            />
 
-          <div className="choice-group" aria-label="Trace style">
-            <span className="choice-label">Trace style</span>
-            <button className={traceMode === "manual" ? "choice selected" : "choice"} onClick={() => applyTraceMode("manual")}>
-              <strong>{traceModeLabel("manual")}</strong>
-              <small>{traceModeHelp("manual")}</small>
-            </button>
-            <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
-              <strong>{traceModeLabel("outline")}</strong>
-              <small>{traceModeHelp("outline")}</small>
-            </button>
-            <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
-              <strong>{traceModeLabel("paint")}</strong>
-              <small>{traceModeHelp("paint")}</small>
-            </button>
+            <div className="choice-group" aria-label="Trace style">
+              <span className="choice-label">Trace style</span>
+              <button className={traceMode === "manual" ? "choice selected" : "choice"} onClick={() => applyTraceMode("manual")}>
+                <strong>{traceModeLabel("manual")}</strong>
+                <small>{traceModeHelp("manual")}</small>
+              </button>
+              <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
+                <strong>{traceModeLabel("outline")}</strong>
+                <small>{traceModeHelp("outline")}</small>
+              </button>
+              <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
+                <strong>{traceModeLabel("paint")}</strong>
+                <small>{traceModeHelp("paint")}</small>
+              </button>
+              <p className="helper-note">Auto Starter Lines are optional rough details. They usually need cleanup.</p>
+            </div>
           </div>
 
           <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
@@ -1178,13 +1246,14 @@ function App() {
 
           <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
             {advancedOpen
-              ? "Hide advanced cleanup"
+              ? "Hide advanced auto-start settings"
               : advancedTraceModeSelected
-                ? `Show advanced cleanup (${traceModeLabel(traceMode)} selected)`
-                : "Show advanced cleanup"}
+                ? `Show advanced auto-start settings (${traceModeLabel(traceMode)} selected)`
+                : "Show advanced auto-start settings"}
           </button>
           {advancedOpen ? (
             <div className="advanced-panel">
+              <p className="helper-note">These settings only affect automatic starter lines, not manual Trace Studio strokes.</p>
               <RangeField label="Background sensitivity" min={0} max={180} value={settings.threshold} onChange={(value) => updateSetting("threshold", value)} />
               <RangeField label="Remove tiny marks" min={0} max={600} value={settings.speckArea} onChange={(value) => updateSetting("speckArea", value)} />
               <RangeField label="Close small gaps" min={0} max={1500} value={settings.holeArea} onChange={(value) => updateSetting("holeArea", value)} />
@@ -1202,10 +1271,12 @@ function App() {
             </div>
           ) : null}
 
-          <button className="secondary-action" onClick={() => analyze()} disabled={!canAnalyze}>
-            <RefreshCw size={17} />
-            {busy ? "Working..." : traceMode === "manual" ? "Generate Cutline + Open Trace Studio" : "Generate Starting Template"}
-          </button>
+          <div className="workflow-anchor-section">
+            <button className="secondary-action" onClick={() => analyze()} disabled={!canAnalyze}>
+              <RefreshCw size={17} />
+              {busy ? "Working..." : traceMode === "manual" ? "Generate Cutline + Open Trace Studio" : "Generate Starting Template"}
+            </button>
+          </div>
         </aside>
 
         <section className="preview-stage" aria-label="Trace preview">
@@ -1216,126 +1287,133 @@ function App() {
                 <span>{analysis.tileCols} x {analysis.tileRows} pages</span>
               </div>
               {editorOpen ? (
-                <div className="editor-wrap">
+                <div className="editor-wrap" ref={traceEditorSectionRef}>
                   <div className="editor-tools" aria-label="Template editor tools">
-                    <SegmentedButton
-                      selected={editorTool === "erase"}
-                      onClick={() => setEditorTool("erase")}
-                      icon={<Eraser size={15} />}
-                      label="Erase details"
-                    />
-                    <SegmentedButton
-                      selected={editorTool === "draw"}
-                      onClick={() => setEditorTool("draw")}
-                      icon={<Pencil size={15} />}
-                      label="Draw details"
-                    />
-                    <SegmentedButton
-                      selected={editorTool === "smoothDraw"}
-                      onClick={() => setEditorTool("smoothDraw")}
-                      icon={<Pencil size={15} />}
-                      label="Smooth curve"
-                    />
-                    <SegmentedButton
-                      selected={editorTool === "remove"}
-                      onClick={() => setEditorTool("remove")}
-                      icon={<MousePointerClick size={15} />}
-                      label="Click to remove line"
-                    />
-                    {traceStudioOpen ? (
-                      <>
+                    <div className="tool-group primary-tool-group">
+                      <span>Draw</span>
+                      <SegmentedButton
+                        selected={editorTool === "draw"}
+                        onClick={() => setEditorTool("draw")}
+                        icon={<Pencil size={15} />}
+                        label="Draw details"
+                      />
+                      <SegmentedButton
+                        selected={editorTool === "erase"}
+                        onClick={() => setEditorTool("erase")}
+                        icon={<Eraser size={15} />}
+                        label="Erase details"
+                      />
+                      <SegmentedButton
+                        selected={editorTool === "smoothDraw"}
+                        onClick={() => setEditorTool("smoothDraw")}
+                        icon={<Pencil size={15} />}
+                        label="Smooth curve"
+                      />
+                      <select value={brushSize} onChange={(event) => setBrushSize(event.target.value as BrushSize)} aria-label="Brush size">
+                        <option value="thin">Thin detail</option>
+                        <option value="normal">Normal detail</option>
+                        <option value="bold">Bold outline</option>
+                      </select>
+                    </div>
+                    <div className="tool-group">
+                      <span>Edit</span>
+                      {traceStudioOpen ? (
                         <SegmentedButton
                           selected={editorTool === "select"}
                           onClick={() => setEditorTool("select")}
                           icon={<MousePointerClick size={15} />}
                           label="Select stroke"
                         />
+                      ) : null}
+                      <SegmentedButton
+                        selected={editorTool === "remove"}
+                        onClick={() => setEditorTool("remove")}
+                        icon={<MousePointerClick size={15} />}
+                        label="Click to remove line"
+                      />
+                      {traceStudioOpen ? (
+                        <>
+                          <select
+                            value={selectedStroke ? brushSizeName(selectedStroke.width) : "normal"}
+                            onChange={(event) => changeSelectedStrokeWidth(event.target.value as BrushSize)}
+                            disabled={!selectedStroke}
+                            aria-label="Selected stroke width"
+                          >
+                            <option value="thin">Selected thin</option>
+                            <option value="normal">Selected normal</option>
+                            <option value="bold">Selected bold</option>
+                          </select>
+                          <button className="tool-button" onClick={duplicateSelectedStroke} disabled={!selectedStroke}>
+                            <Copy size={15} />
+                            Duplicate
+                          </button>
+                          <button className="tool-button" onClick={smoothSelectedStroke} disabled={!selectedStroke}>
+                            <SlidersHorizontal size={15} />
+                            Smooth selected
+                          </button>
+                          <button className="tool-button" onClick={simplifySelectedStroke} disabled={!selectedStroke}>
+                            <RefreshCw size={15} />
+                            Simplify
+                          </button>
+                          <button className="tool-button" onClick={deleteSelectedStroke} disabled={!selectedStrokeId}>
+                            <Trash2 size={15} />
+                            Delete stroke
+                          </button>
+                        </>
+                      ) : null}
+                      <button className="tool-button" onClick={undoDetailEdit} disabled={undoDisabled}>
+                        <Undo2 size={15} />
+                        Undo
+                      </button>
+                      <button className="tool-button" onClick={redoDetailEdit} disabled={redoDisabled}>
+                        <Redo2 size={15} />
+                        Redo
+                      </button>
+                      <button className="tool-button" onClick={resetDetailLayer}>
+                        <RotateCcw size={15} />
+                        Reset details
+                      </button>
+                    </div>
+                    <div className="tool-group">
+                      <span>View</span>
+                      {traceStudioOpen ? (
                         <SegmentedButton
                           selected={editorTool === "pan"}
                           onClick={() => setEditorTool("pan")}
                           icon={<Hand size={15} />}
                           label="Pan"
                         />
-                      </>
-                    ) : null}
-                    <select value={brushSize} onChange={(event) => setBrushSize(event.target.value as BrushSize)} aria-label="Brush size">
-                      <option value="thin">Thin detail</option>
-                      <option value="normal">Normal detail</option>
-                      <option value="bold">Bold outline</option>
-                    </select>
-                    {traceStudioOpen ? (
-                      <>
-                        <select
-                          value={selectedStroke ? brushSizeName(selectedStroke.width) : "normal"}
-                          onChange={(event) => changeSelectedStrokeWidth(event.target.value as BrushSize)}
-                          disabled={!selectedStroke}
-                          aria-label="Selected stroke width"
-                        >
-                          <option value="thin">Selected thin</option>
-                          <option value="normal">Selected normal</option>
-                          <option value="bold">Selected bold</option>
-                        </select>
-                        <button className="tool-button" onClick={duplicateSelectedStroke} disabled={!selectedStroke}>
-                          <Copy size={15} />
-                          Duplicate
-                        </button>
-                        <button className="tool-button" onClick={smoothSelectedStroke} disabled={!selectedStroke}>
-                          <SlidersHorizontal size={15} />
-                          Smooth selected
-                        </button>
-                        <button className="tool-button" onClick={simplifySelectedStroke} disabled={!selectedStroke}>
-                          <RefreshCw size={15} />
-                          Simplify
-                        </button>
-                      </>
-                    ) : null}
-                    <button className="tool-button" onClick={undoDetailEdit} disabled={undoDisabled}>
-                      <Undo2 size={15} />
-                      Undo
-                    </button>
-                    <button className="tool-button" onClick={redoDetailEdit} disabled={redoDisabled}>
-                      <Redo2 size={15} />
-                      Redo
-                    </button>
-                    <button className="tool-button" onClick={resetDetailLayer}>
-                      <RotateCcw size={15} />
-                      Reset details
-                    </button>
-                    {traceStudioOpen ? (
-                      <button className="tool-button" onClick={deleteSelectedStroke} disabled={!selectedStrokeId}>
-                        <Trash2 size={15} />
-                        Delete stroke
+                      ) : null}
+                      <button className="tool-button" onClick={() => changeZoom(traceViewport.zoom * 1.2)}>
+                        <ZoomIn size={15} />
+                        Zoom in
                       </button>
-                    ) : null}
-                    <button className="tool-button" onClick={() => changeZoom(traceViewport.zoom * 1.2)}>
-                      <ZoomIn size={15} />
-                      Zoom in
-                    </button>
-                    <button className="tool-button" onClick={() => changeZoom(traceViewport.zoom / 1.2)}>
-                      <ZoomOut size={15} />
-                      Zoom out
-                    </button>
-                    <button className="tool-button" onClick={resetZoom}>Fit</button>
-                    <button className="tool-button" onClick={hundredPercentZoom}>100%</button>
-                    <button className={printPreview ? "tool-button selected" : "tool-button"} onClick={() => setPrintPreview((shown) => !shown)}>
-                      Preview Printable Template
-                    </button>
-                    <button className={showReference ? "tool-button selected" : "tool-button"} onClick={() => setShowReference((shown) => !shown)}>
-                      <Eye size={15} />
-                      Show original
-                    </button>
-                    {showReference ? (
-                      <label className="opacity-control">
-                        <span>Opacity</span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={referenceOpacity}
-                          onChange={(event) => setReferenceOpacity(Number(event.target.value))}
-                        />
-                      </label>
-                    ) : null}
+                      <button className="tool-button" onClick={() => changeZoom(traceViewport.zoom / 1.2)}>
+                        <ZoomOut size={15} />
+                        Zoom out
+                      </button>
+                      <button className="tool-button" onClick={resetZoom}>Fit</button>
+                      <button className="tool-button" onClick={hundredPercentZoom}>100%</button>
+                      <button className={printPreview ? "tool-button selected" : "tool-button"} onClick={() => setPrintPreview((shown) => !shown)}>
+                        Preview Printable Template
+                      </button>
+                      <button className={showReference ? "tool-button selected" : "tool-button"} onClick={() => setShowReference((shown) => !shown)}>
+                        <Eye size={15} />
+                        Show original
+                      </button>
+                      {showReference ? (
+                        <label className="opacity-control">
+                          <span>Opacity</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={referenceOpacity}
+                            onChange={(event) => setReferenceOpacity(Number(event.target.value))}
+                          />
+                        </label>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="layer-controls" aria-label="Trace Studio layer visibility">
                     <label>
@@ -1425,7 +1503,7 @@ function App() {
                   ) : null}
                   <p className="editor-note">
                     {traceMode === "manual"
-                      ? "Trace only the face, clothing, and feature lines you want on the final template."
+                      ? "Best results come from tracing clean, simple lines over the image underlay. Trace only the face, clothing, and feature lines you want on the final template."
                       : "Best results: erase extra marks, draw missing face/clothing lines, then export."}
                   </p>
                   <div className="template-editor" ref={editorViewportRef}>
@@ -1481,7 +1559,7 @@ function App() {
           )}
         </section>
 
-        <aside className="right-panel" aria-label="Paint guide and export summary">
+        <aside className="right-panel" aria-label="Paint guide and export summary" ref={paintReviewSectionRef}>
           <PanelTitle icon={<SwatchBook size={18} />} title="Paint Guide" />
           {analysis ? (
             <>
@@ -1641,9 +1719,25 @@ function App() {
               </section>
               <div className="palette-list">
                 {visiblePaintGuideEntries.map((entry) => (
-                  <article className={entry.included ? "palette-row" : "palette-row muted-paint"} key={entry.id}>
-                    <div className="swatch" style={{ backgroundColor: entry.hex }} />
-                    <div className="paint-guide-fields">
+                  <details className={entry.included ? "palette-row" : "palette-row muted-paint"} key={entry.id}>
+                    <summary className="palette-row-summary">
+                      <span className="swatch" style={{ backgroundColor: entry.hex }} />
+                      <span className="palette-row-compact-copy">
+                        <strong>{entry.index}. {entry.label}</strong>
+                        <span>{entry.note || "Add use note"} / {entry.included ? "Shopping list" : "Excluded"}</span>
+                        <em>
+                          {entry.manualOverride
+                            ? entry.manualOverride
+                            : entry.selectedMatch
+                              ? matchDisplayName(entry.selectedMatch)
+                              : "Choose in store"}
+                        </em>
+                      </span>
+                      {isGenericPaintLabel(entry) ? <span className="needs-label-badge">Needs label</span> : null}
+                    </summary>
+                    <div className="palette-row-body">
+                      <div className="swatch" style={{ backgroundColor: entry.hex }} />
+                      <div className="paint-guide-fields">
                       <div className="palette-row-header">
                         <strong>{entry.index}. {entry.label}</strong>
                         <span>{entry.hex.toUpperCase()} / {entry.source === "manual" ? "manual" : `${Math.round(entry.coverage * 100)}%`}{entry.locked ? " / locked" : ""}</span>
@@ -1794,8 +1888,9 @@ function App() {
                         />
                         Include in shopping list
                       </label>
+                      </div>
                     </div>
-                  </article>
+                  </details>
                 ))}
               </div>
               {visiblePaintGuideEntries.length === 0 ? (
@@ -1829,9 +1924,9 @@ function brushPixels(size: BrushSize) {
   return 20;
 }
 
-function workflowStep(label: string, complete: boolean, available: boolean) {
+function workflowStep(label: string, target: WorkflowTarget, complete: boolean, available: boolean) {
   const status: WorkflowStatus = complete ? "Complete" : available ? "Next" : "Needs attention";
-  return { label, status };
+  return { label, target, status };
 }
 
 function isGenericPaintLabel(entry: PaintGuideEntry) {

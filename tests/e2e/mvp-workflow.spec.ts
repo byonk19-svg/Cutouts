@@ -13,6 +13,8 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   });
 
   await expect(page.getByLabel("Guided workflow")).toContainText("Generate cutline");
+  await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Generate cutline/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Start New/ })).toBeVisible();
   const traceStyleChoices = page.getByLabel("Trace style");
   await expect(traceStyleChoices.getByRole("button", { name: /Trace Studio/ })).toContainText("Best for printable wood templates");
   await traceStyleChoices.getByRole("button", { name: /Trace Studio/ }).click();
@@ -49,6 +51,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
 
   const paintRows = page.locator(".palette-row");
   await expect(paintRows.nth(3)).toBeVisible({ timeout: 30_000 });
+  expect(await paintRows.nth(0).evaluate((element) => element instanceof HTMLDetailsElement)).toBe(true);
   await expect(page.getByLabel("Paint Match Review")).toBeVisible();
   await expect(page.getByLabel("Project Palette Summary")).toBeVisible();
   await expect(page.getByText("Needs label").first()).toBeVisible();
@@ -168,6 +171,8 @@ async function canvasLocalPoint(canvas: Locator, xFraction: number, yFraction: n
 }
 
 async function updatePaintRow(row: Locator, label: string, note: string) {
+  const isClosedDetails = await row.evaluate((element) => element instanceof HTMLDetailsElement && !element.open);
+  if (isClosedDetails) await row.locator("summary").click();
   await row.getByLabel("Label").fill(label);
   await row.getByLabel("Notes/use").fill(note);
 }
