@@ -25,6 +25,13 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await page.getByRole("button", { name: "Start Trace Studio" }).click();
   await expect(page.getByText(/Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
+  const traceQuality = page.getByLabel("Trace Quality Review");
+  await expect(traceQuality).toBeVisible();
+  await expect(traceQuality).toContainText("Cutline");
+  await expect(traceQuality).toContainText("Vector cutline");
+  await expect(traceQuality).toContainText("Original underlay");
+  await expect(traceQuality).toContainText("Visible");
+  await expect(traceQuality).toContainText("Manual tracing recommended");
 
   const canvas = page.getByLabel("Editable interior detail lines");
   await page.getByRole("button", { name: /Draw details/ }).click();

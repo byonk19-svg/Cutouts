@@ -936,6 +936,78 @@ button:disabled {
   font-size: 14px;
 }
 
+.trace-quality-card {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 12px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.trace-quality-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1d5d55;
+}
+
+.trace-quality-title h3 {
+  margin: 0;
+  color: #17201d;
+  font-size: 13px;
+}
+
+.trace-quality-grid {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.trace-quality-grid div {
+  display: grid;
+  gap: 2px;
+}
+
+.trace-quality-grid dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #65736c;
+  font-weight: 800;
+}
+
+.trace-quality-grid dd {
+  margin: 0;
+  color: #17201d;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.trace-quality-warnings {
+  display: grid;
+  gap: 6px;
+}
+
+.trace-quality-warnings p,
+.trace-quality-ok {
+  margin: 0;
+  padding: 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.trace-quality-warnings p {
+  background: #fff7df;
+  color: #6a4a0a;
+}
+
+.trace-quality-ok {
+  background: #eef8f5;
+  color: #1d5d55;
+}
+
 .cleanup-card {
   display: grid;
   gap: 10px;

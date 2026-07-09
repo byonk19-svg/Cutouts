@@ -51,6 +51,7 @@ import {
   type TraceStroke
 } from "./traceStrokes";
 import { buildTraceLineworkSvg, svgLineworkFileName } from "./traceLineworkSvg";
+import { buildTraceQualityReview } from "./traceQuality";
 import {
   DEFAULT_TRACE_VIEWPORT,
   boundsFromTraceStrokes,
@@ -191,6 +192,14 @@ function App() {
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
   const paintShoppingList = shoppingListText(paintGuideEntries);
   const canIncludePaintGuide = paintGuideEntries.length > 0;
+  const traceQualityReview = analysis
+    ? buildTraceQualityReview({
+      analysis,
+      manualStrokeCount: manualStrokes.length,
+      showReference,
+      printPreview
+    })
+    : null;
   const workflowSteps = [
     workflowStep("Generate cutline", "setup", analysis !== null, image !== null),
     workflowStep("Edit template lines", "editor", manualStrokes.length > 0 || cleanupChecks.draw, analysis !== null),
@@ -350,6 +359,10 @@ function App() {
 
   async function exportPdf() {
     if (!image) return;
+    if (traceStudioOpen && manualStrokes.length === 0) {
+      const shouldContinue = window.confirm("No manual detail lines have been drawn yet. Export an outside-cutline-only packet?");
+      if (!shouldContinue) return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -1712,6 +1725,57 @@ function App() {
                   <dd>US letter, 100%</dd>
                 </div>
               </dl>
+              {traceQualityReview ? (
+                <section className="trace-quality-card" aria-label="Trace Quality Review">
+                  <div className="trace-quality-title">
+                    <ListChecks size={16} />
+                    <h3>Trace Quality Review</h3>
+                  </div>
+                  <dl className="trace-quality-grid">
+                    <div>
+                      <dt>Cutline</dt>
+                      <dd>{traceQualityReview.cutlineStatus}</dd>
+                    </div>
+                    <div>
+                      <dt>Vector cutline</dt>
+                      <dd>{traceQualityReview.vectorCutlinePresent ? `Present (${traceQualityReview.vectorPointCount} points)` : "Missing"}</dd>
+                    </div>
+                    <div>
+                      <dt>Preview bounds</dt>
+                      <dd>{traceQualityReview.previewBoundsText}</dd>
+                    </div>
+                    <div>
+                      <dt>Subject bounds</dt>
+                      <dd>{traceQualityReview.subjectBoundsText}</dd>
+                    </div>
+                    <div>
+                      <dt>Tile layout</dt>
+                      <dd>{traceQualityReview.tileCountText}</dd>
+                    </div>
+                    <div>
+                      <dt>Original underlay</dt>
+                      <dd>{traceQualityReview.originalUnderlayStatus}</dd>
+                    </div>
+                    <div>
+                      <dt>Manual detail lines</dt>
+                      <dd>{traceQualityReview.manualDetailLineCount}</dd>
+                    </div>
+                    <div>
+                      <dt>Export readiness</dt>
+                      <dd>{traceQualityReview.exportReadiness}</dd>
+                    </div>
+                  </dl>
+                  {traceQualityReview.warnings.length > 0 ? (
+                    <div className="trace-quality-warnings">
+                      {traceQualityReview.warnings.map((warning) => (
+                        <p key={warning}>{warning}</p>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="trace-quality-ok">No trace quality warnings.</p>
+                  )}
+                </section>
+              ) : null}
               <div className="cleanup-card">
                 <div className="cleanup-title">
                   <ListChecks size={17} />

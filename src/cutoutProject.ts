@@ -20,7 +20,20 @@ export type ProjectPaletteColor = {
   matches: ProjectPaintMatch[];
 };
 
+export type TraceQualityMetadata = {
+  subjectCoverage: number;
+  fakeCheckerboardBackground: boolean;
+  discardedComponentCount?: number;
+  discardedComponentCoverage?: number;
+  vectorCutlinePointCount?: number;
+  pathBoundsPx?: [number, number, number, number] | null;
+  warnings: string[];
+};
+
 export type CutoutProjectAnalysis = {
+  sourceWidthPx?: number;
+  sourceHeightPx?: number;
+  subjectBoundsPx?: [number, number, number, number];
   finishedWidthIn: number;
   finishedHeightIn: number;
   tileCols: number;
@@ -34,6 +47,7 @@ export type CutoutProjectAnalysis = {
   previewWidthPx: number;
   previewHeightPx: number;
   palette: ProjectPaletteColor[];
+  traceQuality?: TraceQualityMetadata;
 };
 
 export type ProjectLayerVisibility = {
@@ -217,6 +231,38 @@ function assertAnalysis(value: unknown): asserts value is CutoutProjectAnalysis 
     value.outerCutPath = "";
   }
   if (!Array.isArray(value.palette)) throw new Error("Project analysis palette is invalid.");
+  if ("sourceWidthPx" in value) assertNumber(value.sourceWidthPx, "analysis.sourceWidthPx");
+  if ("sourceHeightPx" in value) assertNumber(value.sourceHeightPx, "analysis.sourceHeightPx");
+  if ("subjectBoundsPx" in value) assertBounds(value.subjectBoundsPx, "analysis.subjectBoundsPx");
+  if ("traceQuality" in value && value.traceQuality !== undefined) assertTraceQuality(value.traceQuality);
+}
+
+function assertBounds(value: unknown, label: string): asserts value is [number, number, number, number] {
+  if (!Array.isArray(value) || value.length !== 4) throw new Error(`Project ${label} is invalid.`);
+  for (const item of value) {
+    assertNumber(item, label);
+  }
+}
+
+function assertTraceQuality(value: unknown): asserts value is TraceQualityMetadata {
+  if (!isRecord(value)) throw new Error("Project analysis.traceQuality is invalid.");
+  assertNumber(value.subjectCoverage, "analysis.traceQuality.subjectCoverage");
+  if (typeof value.fakeCheckerboardBackground !== "boolean") throw new Error("Project analysis.traceQuality.fakeCheckerboardBackground is invalid.");
+  if (!Array.isArray(value.warnings) || value.warnings.some((warning) => typeof warning !== "string")) {
+    throw new Error("Project analysis.traceQuality.warnings is invalid.");
+  }
+  if ("discardedComponentCount" in value && value.discardedComponentCount !== undefined) {
+    assertNumber(value.discardedComponentCount, "analysis.traceQuality.discardedComponentCount");
+  }
+  if ("discardedComponentCoverage" in value && value.discardedComponentCoverage !== undefined) {
+    assertNumber(value.discardedComponentCoverage, "analysis.traceQuality.discardedComponentCoverage");
+  }
+  if ("vectorCutlinePointCount" in value && value.vectorCutlinePointCount !== undefined) {
+    assertNumber(value.vectorCutlinePointCount, "analysis.traceQuality.vectorCutlinePointCount");
+  }
+  if (value.pathBoundsPx !== null && value.pathBoundsPx !== undefined) {
+    assertBounds(value.pathBoundsPx, "analysis.traceQuality.pathBoundsPx");
+  }
 }
 
 function assertManualStrokes(value: unknown): asserts value is TraceStroke[] {

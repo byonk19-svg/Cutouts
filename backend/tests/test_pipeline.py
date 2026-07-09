@@ -77,6 +77,20 @@ def high_resolution_line_art_fixture() -> bytes:
     return out.getvalue()
 
 
+def checkerboard_background_fixture() -> bytes:
+    image = Image.new("RGB", (320, 360), "white")
+    pixels = image.load()
+    colors = [(214, 214, 214), (246, 246, 246)]
+    for y in range(image.height):
+        for x in range(image.width):
+            pixels[x, y] = colors[((x // 16) + (y // 16)) % 2]
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((96, 52, 224, 300), fill=(242, 212, 86), outline=(12, 12, 12), width=8)
+    out = io.BytesIO()
+    image.save(out, format="JPEG", quality=94)
+    return out.getvalue()
+
+
 def ten_color_fixture() -> bytes:
     image = Image.new("RGBA", (300, 300), (255, 255, 255, 0))
     draw = ImageDraw.Draw(image)
@@ -298,6 +312,14 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertLessEqual(max_y, analysis.preview_height_px)
         self.assertLessEqual(analysis.preview_width_px, 960)
         self.assertLessEqual(analysis.preview_height_px, 960)
+
+    def test_trace_quality_warns_about_baked_in_checkerboard_backgrounds(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)
+
+        analysis = analyze_template(checkerboard_background_fixture(), settings)
+
+        self.assertTrue(analysis.trace_quality["fakeCheckerboardBackground"])
+        self.assertTrue(any("checkerboard background" in warning for warning in analysis.trace_quality["warnings"]))
 
     def test_trace_debug_export_writes_inspection_layers(self) -> None:
         settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)

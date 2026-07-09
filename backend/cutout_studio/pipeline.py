@@ -157,6 +157,7 @@ class TemplateAnalysis:
     preview_width_px: int
     preview_height_px: int
     palette: tuple[PaletteColor, ...]
+    trace_quality: dict[str, Any]
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -175,6 +176,7 @@ class TemplateAnalysis:
             "paintGuidePngDataUrl": "data:image/png;base64," + base64.b64encode(self.paint_guide_png).decode("ascii"),
             "previewWidthPx": self.preview_width_px,
             "previewHeightPx": self.preview_height_px,
+            "traceQuality": self.trace_quality,
             "palette": [
                 {
                     "rgb": color.rgb,
@@ -206,7 +208,8 @@ class TemplateAnalysis:
 
 def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> TemplateAnalysis:
     source = _load_image(image_bytes)
-    mask = _subject_mask(source, settings)
+    initial_mask = _initial_subject_mask(source, settings)
+    mask = _clean_subject_mask(initial_mask, settings)
     bounds = _mask_bounds(mask)
     cropped_source = source.crop(bounds)
     cropped_mask = mask.crop(bounds)
@@ -216,6 +219,14 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
     preview_mask = _preview_mask(cropped_source, cropped_mask)
     outer_cut_path = _mask_to_svg_path(preview_mask, simplify_px=max(1.2, settings.smoothing))
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
+    trace_quality = _trace_quality_summary(
+        source,
+        initial_mask,
+        mask,
+        bounds,
+        preview_mask.size,
+        outer_cut_path,
+    )
 
     return TemplateAnalysis(
         source_width_px=source.width,
@@ -234,6 +245,7 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
         preview_width_px=Image.open(io.BytesIO(preview)).width,
         preview_height_px=Image.open(io.BytesIO(preview)).height,
         palette=palette,
+        trace_quality=trace_quality,
     )
 
 
@@ -386,6 +398,10 @@ def _load_image(image_bytes: bytes) -> Image.Image:
 
 
 def _subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image:
+    return _clean_subject_mask(_initial_subject_mask(image, settings), settings)
+
+
+def _initial_subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image:
     arr = np.asarray(image, dtype=np.int16)
     alpha = arr[:, :, 3]
     rgb = arr[:, :, :3]
@@ -403,6 +419,10 @@ def _subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image
         foreground = distance_from_bg > settings.threshold
         mask = Image.fromarray((foreground.astype(np.uint8) * 255), mode="L")
 
+    return mask
+
+
+def _clean_subject_mask(mask: Image.Image, settings: TemplateSettings) -> Image.Image:
     if settings.smoothing > 0:
         radius = max(1, settings.smoothing)
         mask = mask.filter(ImageFilter.GaussianBlur(radius=radius)).point(lambda px: 255 if px >= 128 else 0)
@@ -415,6 +435,122 @@ def _subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image
     if not np.any(np.asarray(mask) > 0):
         raise ValueError("No subject was detected. Try lowering the threshold or using a simpler background.")
     return mask
+
+
+def _trace_quality_summary(
+    image: Image.Image,
+    initial_mask: Image.Image,
+    final_mask: Image.Image,
+    bounds: tuple[int, int, int, int],
+    preview_size: tuple[int, int],
+    outer_cut_path: str,
+) -> dict[str, Any]:
+    source_area = max(1, image.width * image.height)
+    subject_pixels = _mask_pixel_count(final_mask)
+    subject_coverage = subject_pixels / source_area
+    path_bounds = _svg_path_bounds(outer_cut_path)
+    warnings: list[str] = []
+    fake_checkerboard = _looks_like_fake_checkerboard_background(image)
+    discarded_component_count, discarded_component_coverage = _discarded_component_summary(initial_mask, final_mask)
+    left, top, right, bottom = bounds
+    subject_w = max(0, right - left)
+    subject_h = max(0, bottom - top)
+
+    if fake_checkerboard:
+        warnings.append(
+            "This image looks like it has a checkerboard background baked into the file. "
+            "For cleaner tracing, use a PNG with real transparency or remove the background first."
+        )
+    if subject_coverage < 0.05:
+        warnings.append("The trace has a small detected subject. Check that the source image contains one complete cutout subject.")
+    if subject_w < image.width * 0.18 or subject_h < image.height * 0.18:
+        warnings.append("The detected subject bounds are small compared with the uploaded image. Crop or remove extra page/background space before tracing.")
+    if discarded_component_count > 0 and discarded_component_coverage > 0.003:
+        warnings.append("Small isolated marks were removed from the detected subject. Check for page numbers, tile labels, or background specks.")
+    if _looks_like_finished_tile_page(image, initial_mask, subject_coverage):
+        warnings.append("This input may be a finished trace tile or PDF page. Upload one complete source image instead of an output template page.")
+    if path_bounds is not None:
+        min_x, min_y, max_x, max_y = path_bounds
+        preview_w, preview_h = preview_size
+        if min_x < 0 or min_y < 0 or max_x > preview_w or max_y > preview_h:
+            warnings.append("The vector cutline extends outside the preview bounds. Regenerate the cutline before exporting SVG.")
+
+    return {
+        "subjectCoverage": round(subject_coverage, 4),
+        "fakeCheckerboardBackground": fake_checkerboard,
+        "discardedComponentCount": discarded_component_count,
+        "discardedComponentCoverage": round(discarded_component_coverage, 4),
+        "vectorCutlinePointCount": _svg_path_point_count(outer_cut_path),
+        "pathBoundsPx": tuple(round(value, 3) for value in path_bounds) if path_bounds is not None else None,
+        "warnings": warnings,
+    }
+
+
+def _mask_pixel_count(mask: Image.Image) -> int:
+    return int(np.count_nonzero(np.asarray(mask.convert("L")) > 0))
+
+
+def _svg_path_point_count(path_data: str) -> int:
+    return len(re.findall(r"[ML]\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?", path_data))
+
+
+def _svg_path_bounds(path_data: str) -> tuple[float, float, float, float] | None:
+    values = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", path_data)]
+    if len(values) < 4:
+        return None
+    xs = values[0::2]
+    ys = values[1::2]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _discarded_component_summary(initial_mask: Image.Image, final_mask: Image.Image) -> tuple[int, float]:
+    initial = np.asarray(initial_mask.convert("L")) > 0
+    final = np.asarray(final_mask.convert("L")) > 0
+    discarded = initial & ~final
+    labels, stats = _connected_components(discarded)
+    component_count = max(0, len(stats) - 1)
+    coverage = float(np.count_nonzero(discarded)) / max(1, discarded.size)
+    return component_count, coverage
+
+
+def _looks_like_fake_checkerboard_background(image: Image.Image) -> bool:
+    rgba = np.asarray(image.convert("RGBA"), dtype=np.uint8)
+    alpha = rgba[:, :, 3]
+    if np.any(alpha < 245):
+        return False
+
+    rgb = rgba[:, :, :3]
+    edge = max(10, min(80, image.width // 5, image.height // 5))
+    samples = np.concatenate(
+        [
+            rgb[:edge, :, :].reshape(-1, 3),
+            rgb[-edge:, :, :].reshape(-1, 3),
+            rgb[:, :edge, :].reshape(-1, 3),
+            rgb[:, -edge:, :].reshape(-1, 3),
+        ],
+        axis=0,
+    ).astype(np.float32)
+    gray = np.mean(samples, axis=1)
+    saturation = np.max(samples, axis=1) - np.min(samples, axis=1)
+    low = float(np.percentile(gray, 10))
+    high = float(np.percentile(gray, 90))
+    dark_ratio = float(np.mean(gray <= low + 6))
+    light_ratio = float(np.mean(gray >= high - 6))
+    return (
+        high - low > 24
+        and float(np.mean(saturation)) < 10
+        and 155 <= low <= 235
+        and high >= 220
+        and dark_ratio > 0.18
+        and light_ratio > 0.18
+    )
+
+
+def _looks_like_finished_tile_page(image: Image.Image, initial_mask: Image.Image, subject_coverage: float) -> bool:
+    aspect = image.height / max(1, image.width)
+    has_letterish_aspect = 1.18 <= aspect <= 1.42
+    initial_coverage = _mask_pixel_count(initial_mask) / max(1, image.width * image.height)
+    return has_letterish_aspect and initial_coverage < 0.18 and subject_coverage < 0.18
 
 
 def _border_background_rgb(rgb: np.ndarray) -> np.ndarray:

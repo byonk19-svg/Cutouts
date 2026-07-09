@@ -3,14 +3,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import numpy as np
 from PIL import Image
 
 from .pipeline import (
     TemplateSettings,
-    _border_background_rgb,
+    _initial_subject_mask,
     _load_image,
-    _looks_like_line_art,
     _make_preview_layers,
     _mask_bounds,
     _mask_to_svg_path,
@@ -24,7 +22,7 @@ def export_trace_debug_layers(image_bytes: bytes, settings: TemplateSettings, ou
     output_path.mkdir(parents=True, exist_ok=True)
 
     source = _load_image(image_bytes)
-    initial_mask = _initial_debug_mask(source, settings)
+    initial_mask = _initial_subject_mask(source, settings)
     subject_mask = _subject_mask(source, settings)
     bounds = _mask_bounds(subject_mask)
 
@@ -43,25 +41,6 @@ def export_trace_debug_layers(image_bytes: bytes, settings: TemplateSettings, ou
         _write_bytes(output_path / "final-preview.png", preview_png),
     ]
     return written
-
-
-def _initial_debug_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image:
-    arr = np.asarray(image, dtype=np.int16)
-    alpha = arr[:, :, 3]
-    rgb = arr[:, :, :3]
-
-    if np.any(alpha < 245):
-        foreground = alpha > 24
-    elif _looks_like_line_art(rgb, alpha):
-        rgb_float = rgb.astype(np.float32)
-        distance_from_white = np.sqrt(np.sum((255.0 - rgb_float) ** 2, axis=2))
-        foreground = (distance_from_white > max(28, settings.threshold)) & (alpha > 24)
-    else:
-        rgb_float = rgb.astype(np.float32)
-        bg = _border_background_rgb(rgb)
-        distance_from_bg = np.sqrt(np.sum((rgb_float - bg) ** 2, axis=2))
-        foreground = distance_from_bg > settings.threshold
-    return Image.fromarray((foreground.astype(np.uint8) * 255), mode="L")
 
 
 def _debug_svg(width: int, height: int, path_data: str) -> str:
