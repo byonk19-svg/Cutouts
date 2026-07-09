@@ -2,6 +2,7 @@ import {
   addProjectPaintColor,
   filterPaintGuideEntries,
   groupShoppingListItems,
+  paintSanityWarnings,
   matchConfidenceLabel,
   matchDisplayName,
   mergeProjectPaintColors,
@@ -94,6 +95,51 @@ const palette: ProjectPaletteColor[] = [
   assertEqual(merged.length, 1, "merge should collapse duplicate project palette colors");
   assertEqual(merged[0].coverage, 0.42, "merge should preserve combined coverage");
   assert(shoppingList.includes("Apple Barrel Matte Acrylic Bright Yellow - Raincoat yellow, swatch 1"), "merged color should appear once in grouped shopping list");
+}
+
+{
+  const conflictPalette = seedProjectPaletteFromDetected([
+    {
+      hex: "#f1ce2d",
+      coverage: 0.24,
+      matches: [
+        paintMatch("apple-barrel-bright-yellow", "Apple Barrel", "Matte Acrylic", "Bright Yellow", "#f6cc27"),
+        paintMatch("folkart-outdoor-navy", "FolkArt", "Outdoor", "Navy", "#1f315d")
+      ]
+    },
+    {
+      hex: "#0c143a",
+      coverage: 0.12,
+      matches: [
+        paintMatch("apple-barrel-bright-yellow", "Apple Barrel", "Matte Acrylic", "Bright Yellow", "#f6cc27"),
+        paintMatch("folkart-outdoor-navy", "FolkArt", "Outdoor", "Navy", "#1f315d")
+      ]
+    }
+  ], [
+    { hex: "#f1ce2d", label: "Raincoat yellow", note: "main coat", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" },
+    { hex: "#0c143a", label: "Hair / outline", note: "blue hair", included: true, selectedMatchId: "folkart-outdoor-navy", manualOverride: "" }
+  ]);
+  const merged = mergeProjectPaintColors(conflictPalette, conflictPalette.map((color) => color.id));
+  const entries = paintGuideEntriesForProjectPalette(merged);
+
+  assertEqual(merged[0].label, "Raincoat yellow", "merge should preserve the first useful label instead of concatenating awkward labels");
+  assertEqual(merged[0].selectedMatchId, null, "merge should clear conflicting selected paint matches");
+  assert(paintSanityWarnings(entries).some((warning) => warning.reason.includes("Needs paint choice")), "conflicting merge should leave a visible paint review warning");
+}
+
+{
+  const entries = paintGuideEntriesForPalette(palette, [
+    { hex: "#0c143a", label: "Color 1", note: "", included: true, selectedMatchId: null, manualOverride: "" },
+    { hex: "#f1ce2d", label: "Hair / outline", note: "blue hair", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" },
+    { hex: "#6a5424", label: "Skin tone", note: "face", included: true, selectedMatchId: null, manualOverride: "" }
+  ]);
+  const warnings = paintSanityWarnings(entries).map((warning) => warning.reason);
+  const shoppingList = shoppingListText(entries);
+
+  assert(warnings.some((reason) => reason.includes("hair/blue") && reason.includes("yellow")), "hair or blue labels matched to yellow paint should warn");
+  assert(shoppingList.includes("Needs review / choose in store - Hair / outline"), "hair or blue labels matched to yellow paint should not group as a yellow purchase");
+  assert(warnings.some((reason) => reason.includes("Needs label")), "generic Color labels should warn");
+  assert(warnings.some((reason) => reason.includes("important manual color") || reason.includes("Needs paint choice")), "skin/face colors without a match should warn");
 }
 
 {

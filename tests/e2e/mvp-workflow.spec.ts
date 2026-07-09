@@ -11,6 +11,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
     mimeType: "image/png",
     buffer: sourceImage
   });
+  await expect(page.getByLabel("Project name")).toHaveValue("Mvp Smoke Character");
 
   await expect(page.getByLabel("Guided workflow")).toContainText("Generate cutline");
   await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Generate cutline/ })).toBeVisible();

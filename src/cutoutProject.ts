@@ -111,10 +111,13 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
   }
 
   const project = parsed as CutoutProject & { paintGuideEdits?: unknown; projectPalette?: unknown };
-  assertString(project.projectName, "projectName");
   assertString(project.createdAt, "createdAt");
   assertString(project.updatedAt, "updatedAt");
   assertSourceImage(project.sourceImage);
+  if (typeof project.projectName !== "string") {
+    project.projectName = cleanedProjectNameFromFileName(project.sourceImage.name);
+  }
+  assertString(project.projectName, "projectName");
   assertSettings(project.settings);
   assertTraceMode(project.traceMode);
   assertAnalysis(project.analysis);
@@ -145,6 +148,29 @@ export function projectFileName(projectName: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return `${slug || "cutout-project"}.cutout.json`;
+}
+
+export function cleanedProjectNameFromFileName(fileName: string) {
+  const baseName = fileName
+    .replace(/\.[^.]+$/, "")
+    .replace(/\b(png|jpg|jpeg|webp|favpng|transparent|image|download)\b/gi, " ")
+    .replace(/[()[\]{}]/g, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const words = baseName
+    .split(" ")
+    .filter((word) => word.length > 1 && !/^[a-f0-9]{8,}$/i.test(word))
+    .slice(0, 4);
+  const cleaned = words.length > 0 ? words.join(" ") : baseName;
+  return titleCaseProjectName(cleaned).slice(0, 48).trim() || "Cutout Project";
+}
+
+function titleCaseProjectName(value: string) {
+  return value.replace(/\b[a-z0-9][a-z0-9']*/gi, (word) => {
+    if (/^[A-Z0-9]+$/.test(word) && word.length <= 4) return word;
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+  });
 }
 
 function assertSourceImage(value: unknown): asserts value is ProjectSourceImage {

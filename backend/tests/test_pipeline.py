@@ -274,6 +274,45 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("Overlap guide: 0.25 in", tile_text)
         self.assertNotIn("1 in", tile_text)
 
+    def test_pdf_clamps_long_project_titles_and_marks_unresolved_paint(self) -> None:
+        long_name = "coraline-jones-wybie-lovat-youtube-other-mother-png-favpng-KtJE4LMVAEBZCVcR067bzMXqu"
+        settings = TemplateSettings(
+            finished_height_in=18,
+            threshold=40,
+            palette_size=3,
+            project_name="Coraline Yard Cutout",
+            paint_guide_entries=(
+                PaintGuideEntry("#0c143a", "Blue hair", "hair", True),
+            ),
+        )
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        text = "\n".join(page.extract_text() for page in reader.pages[:3])
+
+        self.assertIn("Coraline Yard Cutout", text)
+        self.assertNotIn(long_name, text)
+        self.assertIn("Paint: Needs review / choose in store", text)
+
+    def test_pdf_paint_guide_marks_suspicious_paint_family_mismatch(self) -> None:
+        settings = TemplateSettings(
+            finished_height_in=18,
+            threshold=40,
+            palette_size=3,
+            project_name="Coraline Yard Cutout",
+            paint_guide_entries=(
+                PaintGuideEntry("#fce454", "Hair / outline", "blue hair", True, "apple-barrel-matte-bright-yellow"),
+            ),
+        )
+
+        pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        paint_text = reader.pages[1].extract_text()
+
+        self.assertIn("Hair / outline", paint_text)
+        self.assertIn("Paint: Needs review / choose in store", paint_text)
+        self.assertIn("Needs review / choose in store - Hair / outline", paint_text)
+
     def test_pdf_cover_page_can_be_disabled(self) -> None:
         settings = TemplateSettings(finished_height_in=30, threshold=40, palette_size=3, include_instruction_cover_page=False)
         analysis = analyze_template(transparent_fixture(), settings)

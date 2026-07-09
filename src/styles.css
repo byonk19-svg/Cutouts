@@ -168,6 +168,29 @@ button {
   font-size: 12px;
 }
 
+.project-name-field {
+  display: grid;
+  gap: 4px;
+}
+
+.project-name-field span {
+  color: #65736c;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.project-name-field input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cbd8d2;
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: #17201d;
+  font-size: 12px;
+  background: #ffffff;
+}
+
 .project-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1137,6 +1160,51 @@ button:disabled {
 
 .palette-editor-actions .tool-button {
   min-height: 32px;
+}
+
+.paint-sanity-card {
+  display: grid;
+  gap: 9px;
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid #ead1a2;
+  border-radius: 7px;
+  background: #fffaf0;
+}
+
+.paint-sanity-card h3,
+.paint-sanity-card p {
+  margin: 0;
+}
+
+.paint-sanity-card h3 {
+  color: #5f4314;
+  font-size: 13px;
+}
+
+.paint-sanity-card p,
+.paint-sanity-card span {
+  color: #6f5a32;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.paint-sanity-card ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.paint-sanity-card li {
+  display: grid;
+  gap: 2px;
+}
+
+.paint-sanity-card strong {
+  color: #3f2d11;
+  font-size: 11px;
 }
 
 .palette-summary-card {

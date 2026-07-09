@@ -47,6 +47,13 @@ export type ShoppingListItem = {
 
 export type PaintReviewFilter = "all" | "missing" | "included";
 
+export type PaintSanityWarning = {
+  id: string;
+  label: string;
+  swatchNumber: number;
+  reason: string;
+};
+
 export function seedProjectPaletteFromDetected(palette: ProjectPaletteColor[], edits: PaintGuideEdit[] = []): ProjectPaintColor[] {
   const colors = palette.map((color, index) => {
     const edit = edits.find((item) => sameHex(item.hex, color.hex));
@@ -167,15 +174,19 @@ export function mergeProjectPaintColors(palette: ProjectPaintColor[], ids: strin
   const selected = palette.filter((color) => ids.includes(color.id));
   if (selected.length < 2) return palette;
   const primary = selected[0];
+  const selectedMatchIds = uniqueValues(selected.map((color) => color.selectedMatchId ?? ""));
+  const manualOverrides = uniqueValues(selected.map((color) => color.manualOverride));
+  const preservedSelectedMatchId = selectedMatchIds.length === 1 ? selectedMatchIds[0] || null : null;
+  const preservedManualOverride = manualOverrides.length === 1 ? manualOverrides[0] : "";
   const merged: ProjectPaintColor = {
     ...primary,
-    label: formatHumanList(uniqueValues(selected.map((color) => color.label))),
+    label: bestMergedPaintLabel(selected),
     note: uniqueValues(selected.map((color) => color.note)).join("; "),
     included: selected.some((color) => color.included),
     coverage: selected.reduce((total, color) => total + color.coverage, 0),
     locked: selected.some((color) => color.locked),
-    manualOverride: primary.manualOverride,
-    selectedMatchId: primary.selectedMatchId,
+    manualOverride: preservedManualOverride,
+    selectedMatchId: preservedManualOverride ? null : preservedSelectedMatchId,
     matches: primary.matches
   };
   return palette.flatMap((color) => {
@@ -249,6 +260,44 @@ export function groupShoppingListItems(entries: PaintGuideEntry[]): ShoppingList
   }));
 }
 
+export function paintSanityWarnings(entries: PaintGuideEntry[]): PaintSanityWarning[] {
+  const warnings: PaintSanityWarning[] = [];
+  for (const entry of entries) {
+    if (!entry.included) continue;
+    const labelText = `${entry.label} ${entry.note}`.toLowerCase();
+    const paintText = entry.selectedMatch ? matchDisplayName(entry.selectedMatch).toLowerCase() : "";
+    const unresolved = !entry.selectedMatch && !entry.manualOverride;
+    const addWarning = (reason: string) => warnings.push({
+      id: `${entry.id}:${reason}`,
+      label: entry.label,
+      swatchNumber: entry.index,
+      reason
+    });
+
+    if (/^color\s+\d+$/i.test(entry.label.trim())) {
+      addWarning("Needs label");
+    }
+    if (unresolved) {
+      addWarning("Needs paint choice or choose-in-store review");
+    }
+    if (unresolved && /\b(skin|face|hair|blue|boots?|shoes?)\b/.test(labelText)) {
+      addWarning("Important manual color still needs review");
+    }
+    if (entry.selectedMatch) {
+      if (hasPaintFamilyMismatch(entry, labelText, paintText, "hairBlue")) {
+        addWarning("Possible mismatch: hair/blue label is matched to yellow/orange/brown paint");
+      }
+      if (hasPaintFamilyMismatch(entry, labelText, paintText, "skinFace")) {
+        addWarning("Possible mismatch: skin/face label is matched to black/blue/yellow paint");
+      }
+      if (hasPaintFamilyMismatch(entry, labelText, paintText, "boots")) {
+        addWarning("Possible mismatch: boots/shoes label is matched to skin/face paint");
+      }
+    }
+  }
+  return warnings;
+}
+
 export function matchDisplayName(match: CraftPaintMatch) {
   return `${match.brand} ${match.line} ${match.colorName}`;
 }
@@ -273,15 +322,37 @@ export function isValidHexColor(hex: string) {
 }
 
 function shoppingListGroupKey(entry: PaintGuideEntry) {
+  if (hasAnyPaintFamilyMismatch(entry)) return `review:${entry.id}`;
   if (entry.manualOverride) return `manual:${entry.manualOverride.trim().toLowerCase()}`;
   if (entry.selectedMatch) return `paint:${entry.selectedMatch.id}`;
   return "no-match";
 }
 
 function shoppingListPurchaseLabel(entry: PaintGuideEntry) {
+  if (hasAnyPaintFamilyMismatch(entry)) return "Needs review / choose in store";
   if (entry.manualOverride) return entry.manualOverride;
   if (entry.selectedMatch) return matchDisplayName(entry.selectedMatch);
   return "No match / choose in store";
+}
+
+function hasAnyPaintFamilyMismatch(entry: PaintGuideEntry) {
+  if (!entry.selectedMatch) return false;
+  const labelText = `${entry.label} ${entry.note}`.toLowerCase();
+  const paintText = matchDisplayName(entry.selectedMatch).toLowerCase();
+  return hasPaintFamilyMismatch(entry, labelText, paintText, "hairBlue")
+    || hasPaintFamilyMismatch(entry, labelText, paintText, "skinFace")
+    || hasPaintFamilyMismatch(entry, labelText, paintText, "boots");
+}
+
+function hasPaintFamilyMismatch(
+  _entry: PaintGuideEntry,
+  labelText: string,
+  paintText: string,
+  family: "hairBlue" | "skinFace" | "boots"
+) {
+  if (family === "hairBlue") return /\b(hair|blue|navy)\b/.test(labelText) && /\b(yellow|orange|brown)\b/.test(paintText);
+  if (family === "skinFace") return /\b(skin|face)\b/.test(labelText) && /\b(black|blue|navy|yellow)\b/.test(paintText);
+  return /\b(boots?|shoes?)\b/.test(labelText) && /\b(skin|face|portrait|flesh|peach)\b/.test(paintText);
 }
 
 function addUnique(items: string[], value: string) {
@@ -293,6 +364,13 @@ function uniqueValues(values: string[]) {
   const output: string[] = [];
   for (const value of values) addUnique(output, value);
   return output;
+}
+
+function bestMergedPaintLabel(colors: ProjectPaintColor[]) {
+  const usefulLabels = uniqueValues(colors.map((color) => color.label.trim()))
+    .filter((label) => label && !/^color\s+\d+$/i.test(label));
+  if (usefulLabels.length === 0) return colors[0].label || "Merged color";
+  return usefulLabels[0];
 }
 
 function nextPaintColorId(palette: ProjectPaintColor[], prefix: string) {

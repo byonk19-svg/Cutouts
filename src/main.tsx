@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ChevronLeft, ChevronRight, Copy, Download, Eraser, Eye, FileImage, FileText, FolderOpen, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, Save, SlidersHorizontal, SwatchBook, Trash2, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import {
   CUTOUT_AUTOSAVE_KEY,
+  cleanedProjectNameFromFileName,
   createCutoutProjectSnapshot,
   projectFileName,
   restoreCutoutProject,
@@ -21,6 +22,7 @@ import {
   mergeProjectPaintColors,
   paintGuideEditsFromProjectPalette,
   paintGuideEntriesForProjectPalette,
+  paintSanityWarnings,
   removeProjectPaintColor,
   seedProjectPaletteFromDetected,
   shoppingListText,
@@ -170,13 +172,14 @@ function App() {
   const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
   const primaryTraceActionLabel = traceActionLabel({ image, analysis, busy, traceMode });
   const paintGuideEntries = paintGuideEntriesForProjectPalette(projectPalette);
+  const paintWarnings = paintSanityWarnings(paintGuideEntries);
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
   const paintShoppingList = shoppingListText(paintGuideEntries);
   const canIncludePaintGuide = paintGuideEntries.length > 0;
   const workflowSteps = [
     workflowStep("Generate cutline", "setup", analysis !== null, image !== null),
     workflowStep("Edit template lines", "editor", manualStrokes.length > 0 || cleanupChecks.draw, analysis !== null),
-    workflowStep("Review paint palette", "paint", paintGuideEntries.length > 0 && !paintGuideEntries.some(isGenericPaintLabel), analysis !== null),
+    workflowStep("Review paint palette", "paint", paintGuideEntries.length > 0 && paintWarnings.length === 0, analysis !== null),
     workflowStep("Export packet", "export", cleanupChecks.export, canExport)
   ];
   const duplicatePaintSuggestion = groupDuplicatePaintPurchases(paintGuideEntries).find((group) => group.swatchNumbers.length > 1);
@@ -384,7 +387,7 @@ function App() {
 
     try {
       setSourceImageDataUrl(await readFileAsDataUrl(file));
-      setProjectName(file.name.replace(/\.[^.]+$/, "") || "Cutout Project");
+      setProjectName(cleanedProjectNameFromFileName(file.name));
       setProjectCreatedAt(new Date().toISOString());
     } catch {
       setError("Unable to read the selected image.");
@@ -1151,6 +1154,15 @@ function App() {
           </label>
 
           <div className="project-card">
+            <label className="project-name-field">
+              <span>Project name</span>
+              <input
+                type="text"
+                value={projectName}
+                onChange={(event) => setProjectName(event.target.value)}
+                onBlur={() => setProjectName((name) => name.trim() || "Cutout Project")}
+              />
+            </label>
             <div className="project-card-title">
               <strong>{projectName}</strong>
               <span>{projectStatus}</span>
@@ -1724,6 +1736,23 @@ function App() {
                   ))}
                 </div>
               </section>
+              {paintWarnings.length > 0 ? (
+                <section className="paint-sanity-card" aria-label="Paint Sanity Check">
+                  <div>
+                    <h3>Paint Sanity Check</h3>
+                    <p>Review these before exporting. They are warnings, not blockers.</p>
+                  </div>
+                  <ul>
+                    {paintWarnings.slice(0, 8).map((warning) => (
+                      <li key={warning.id}>
+                        <strong>Swatch {warning.swatchNumber}: {warning.label}</strong>
+                        <span>{warning.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {paintWarnings.length > 8 ? <p className="helper-note">+{paintWarnings.length - 8} more paint warnings</p> : null}
+                </section>
+              ) : null}
               <section className="palette-summary-card" aria-label="Project Palette Summary">
                 <div className="palette-summary-heading">
                   <div>

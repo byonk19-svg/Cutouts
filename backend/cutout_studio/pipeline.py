@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -914,19 +915,20 @@ def _draw_overview_page(
     left = 40
     top = height_pt - 48
     pdf.setFont("Helvetica-Bold", 22)
-    pdf.drawString(left, top, project_name)
+    title_bottom = _draw_wrapped_pdf_text(pdf, project_name, left, top, 520, line_height=24, max_lines=2)
+    info_top = title_bottom - 8
     pdf.setFont("Helvetica", 11)
-    pdf.drawString(left, top - 28, "Print at 100% / actual size.")
-    pdf.drawString(left, top - 48, "In the print dialog, choose Actual size or 100% scale - never Fit to page.")
-    pdf.drawString(left, top - 68, f"Finished size: {width_in:.2f} in wide x {height_in:.2f} in tall")
-    pdf.drawString(left, top - 88, f"Trace pages: {tile_cols} columns x {tile_rows} rows ({tile_cols * tile_rows} pages)")
+    pdf.drawString(left, info_top, "Print at 100% / actual size.")
+    pdf.drawString(left, info_top - 20, "In the print dialog, choose Actual size or 100% scale - never Fit to page.")
+    pdf.drawString(left, info_top - 40, f"Finished size: {width_in:.2f} in wide x {height_in:.2f} in tall")
+    pdf.drawString(left, info_top - 60, f"Trace pages: {tile_cols} columns x {tile_rows} rows ({tile_cols * tile_rows} pages)")
 
     preview = _on_white(source)
     preview.thumbnail((165, 210))
-    pdf.drawImage(ImageReader(preview), left, top - 306, width=preview.width, height=preview.height, preserveAspectRatio=True)
+    pdf.drawImage(ImageReader(preview), left, info_top - 278, width=preview.width, height=preview.height, preserveAspectRatio=True)
 
     pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(240, top - 118, "Supplies checklist")
+    pdf.drawString(240, info_top - 90, "Supplies checklist")
     pdf.setFont("Helvetica", 9)
     supplies = [
         "plywood or foam board",
@@ -938,12 +940,12 @@ def _draw_overview_page(
         "outdoor clear coat/sealer",
     ]
     for index, item in enumerate(supplies):
-        y = top - 138 - index * 16
+        y = info_top - 110 - index * 16
         pdf.rect(240, y - 2, 8, 8, stroke=1, fill=0)
         pdf.drawString(254, y - 2, item)
 
     pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(430, top - 118, "Workflow")
+    pdf.drawString(430, info_top - 90, "Workflow")
     pdf.setFont("Helvetica", 8.5)
     steps = [
         "Print all pages at 100%.",
@@ -956,7 +958,7 @@ def _draw_overview_page(
         "Seal for outdoor use.",
     ]
     for index, step in enumerate(steps, start=1):
-        pdf.drawString(430, top - 122 - index * 15, f"{index}. {step}")
+        pdf.drawString(430, info_top - 94 - index * 15, f"{index}. {step}")
 
     pdf.setFont("Helvetica-Bold", 12)
     pdf.drawString(40, 282, "Page map")
@@ -1012,7 +1014,7 @@ def _draw_paint_guide_page(
     pdf.setFont("Helvetica-Bold", 20)
     pdf.drawString(40, height_pt - 54, "Paint Guide")
     pdf.setFont("Helvetica", 10)
-    pdf.drawString(40, height_pt - 76, project_name)
+    pdf.drawString(40, height_pt - 76, _ellipsize_pdf_text(pdf, project_name, 520))
     pdf.setFont("Helvetica", 8.5)
     pdf.drawString(40, height_pt - 96, "Screen colors and printed colors may vary. Use swatches as a shopping/planning guide.")
     pdf.drawString(40, height_pt - 110, "Paint matches are approximate. Screen, printer, lighting, wood primer, and sealer can change color appearance.")
@@ -1092,7 +1094,7 @@ def _draw_tile_pages(
             pdf.setFont("Helvetica-Bold", 16)
             pdf.drawString(margin_pt, height_pt - margin_pt - 12, f"Page {page_num} of {tile_cols * tile_rows}")
             pdf.setFont("Helvetica-Bold", 10)
-            pdf.drawRightString(width_pt - margin_pt, height_pt - margin_pt - 12, project_name[:48])
+            pdf.drawRightString(width_pt - margin_pt, height_pt - margin_pt - 12, _ellipsize_pdf_text(pdf, project_name, 260))
             pdf.setFont("Helvetica", 9)
             pdf.drawString(margin_pt, height_pt - margin_pt - 27, f"Row {row + 1} / Column {col + 1}")
             pdf.drawString(margin_pt + 118, height_pt - margin_pt - 27, f"Overlap guide: {OVERLAP_IN:.2f} in shared edge")
@@ -1405,6 +1407,8 @@ def _group_paint_purchase_items(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def _paint_purchase_key(row: dict[str, Any]) -> str:
+    if _has_paint_family_mismatch(row):
+        return f"review:{row['index']}"
     if row["manual_override"]:
         return f"manual:{row['manual_override'].strip().lower()}"
     selected_match = row["selected_match"]
@@ -1414,6 +1418,8 @@ def _paint_purchase_key(row: dict[str, Any]) -> str:
 
 
 def _paint_purchase_label(row: dict[str, Any]) -> str:
+    if _has_paint_family_mismatch(row):
+        return "Needs review / choose in store"
     if row["manual_override"]:
         return row["manual_override"]
     selected_match = row["selected_match"]
@@ -1442,12 +1448,27 @@ def _append_unique(items: list[str], value: str) -> None:
 
 
 def _paint_match_pdf_text(row: dict[str, Any]) -> str:
+    if _has_paint_family_mismatch(row):
+        return "Paint: Needs review / choose in store"
     if row["manual_override"]:
         return f"Paint: {row['manual_override']}"
     selected_match = row["selected_match"]
     if selected_match is None:
-        return ""
+        return "Paint: Needs review / choose in store"
     return f"Paint: {selected_match.brand} {selected_match.line} {selected_match.color_name}"
+
+
+def _has_paint_family_mismatch(row: dict[str, Any]) -> bool:
+    selected_match = row["selected_match"]
+    if selected_match is None:
+        return False
+    label_text = f"{row['label']} {row['note']}".lower()
+    paint_text = f"{selected_match.brand} {selected_match.line} {selected_match.color_name}".lower()
+    return (
+        bool(re.search(r"\b(hair|blue|navy)\b", label_text) and re.search(r"\b(yellow|orange|brown)\b", paint_text))
+        or bool(re.search(r"\b(skin|face)\b", label_text) and re.search(r"\b(black|blue|navy|yellow)\b", paint_text))
+        or bool(re.search(r"\b(boots?|shoes?)\b", label_text) and re.search(r"\b(skin|face|portrait|flesh|peach)\b", paint_text))
+    )
 
 
 def _draw_wrapped_pdf_text(

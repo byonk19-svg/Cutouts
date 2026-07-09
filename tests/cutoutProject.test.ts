@@ -1,5 +1,6 @@
 import {
   CUTOUT_PROJECT_SCHEMA_VERSION,
+  cleanedProjectNameFromFileName,
   createCutoutProjectSnapshot,
   projectFileName,
   restoreCutoutProject,
@@ -197,6 +198,32 @@ const analysis = {
 }
 
 {
+  const rawProject = JSON.parse(serializeCutoutProject(createCutoutProjectSnapshot({
+    projectName: "Temporary",
+    createdAt: "2026-07-07T10:00:00.000Z",
+    updatedAt: "2026-07-07T10:00:00.000Z",
+    sourceImage: { name: "source.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,source" },
+    settings,
+    traceMode: "manual",
+    analysis,
+    manualStrokes: [],
+    referenceOpacity: 35,
+    layerVisibility: {
+      showReference: false,
+      showCutline: true,
+      showManualLines: true,
+      showSuggestions: false,
+      printPreview: false
+    },
+    traceViewport: DEFAULT_TRACE_VIEWPORT
+  })));
+  delete rawProject.projectName;
+  const restored = restoreCutoutProject(rawProject);
+
+  assertEqual(restored.projectName, "Source", "older project imports should generate a safe project name fallback");
+}
+
+{
   let failed = false;
   try {
     restoreCutoutProject({ schemaVersion: 999 });
@@ -209,4 +236,9 @@ const analysis = {
 {
   assertEqual(projectFileName("Coraline test"), "coraline-test.cutout.json", "project filename should use cutout extension");
   assertEqual(projectFileName(""), "cutout-project.cutout.json", "empty project names should use a safe fallback");
+  assertEqual(
+    cleanedProjectNameFromFileName("coraline-jones-wybie-lovat-youtube-other-mother-png-favpng-KtJE4LMVAEBZCVcR067bzMXqu.jpg"),
+    "Coraline Jones Wybie Lovat",
+    "long noisy source filenames should become readable project names"
+  );
 }
