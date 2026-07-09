@@ -28,6 +28,7 @@ export type CutoutProjectAnalysis = {
   tileCount: number;
   previewPngDataUrl: string;
   outerLinePngDataUrl: string;
+  outerCutPath: string;
   detailLinePngDataUrl: string;
   paintGuidePngDataUrl: string;
   previewWidthPx: number;
@@ -211,6 +212,9 @@ function assertAnalysis(value: unknown): asserts value is CutoutProjectAnalysis 
   }
   for (const key of ["previewPngDataUrl", "outerLinePngDataUrl", "detailLinePngDataUrl", "paintGuidePngDataUrl"] as const) {
     assertString(value[key], `analysis.${key}`);
+  }
+  if (typeof value.outerCutPath !== "string") {
+    value.outerCutPath = "";
   }
   if (!Array.isArray(value.palette)) throw new Error("Project analysis palette is invalid.");
 }

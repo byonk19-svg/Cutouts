@@ -1,4 +1,5 @@
 import io
+import re
 import unittest
 from pathlib import Path
 
@@ -23,7 +24,9 @@ from backend.cutout_studio.pipeline import (
     _line_art,
     _manual_stroke_width_pt,
     _remove_small_components,
+    _subject_mask,
 )
+from backend.cutout_studio.debug_trace_layers import export_trace_debug_layers
 
 
 CORALINE_FIXTURE_DIR = Path(__file__).with_name("fixtures") / "coraline"
@@ -45,6 +48,32 @@ def white_background_fixture() -> bytes:
     draw.rectangle((46, 40, 214, 180), fill=(45, 116, 70))
     out = io.BytesIO()
     image.save(out, format="JPEG", quality=95)
+    return out.getvalue()
+
+
+def line_art_fixture() -> bytes:
+    image = Image.new("RGB", (220, 260), "white")
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((52, 34, 168, 226), outline=(0, 0, 0), width=5)
+    draw.ellipse((82, 86, 96, 104), outline=(0, 0, 0), width=3)
+    draw.ellipse((124, 86, 138, 104), fill=(0, 0, 0))
+    draw.arc((86, 128, 134, 158), start=20, end=160, fill=(0, 0, 0), width=4)
+    draw.text((12, 232), "7", fill=(0, 0, 0))
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+def high_resolution_line_art_fixture() -> bytes:
+    image = Image.new("RGB", (2000, 3000), "white")
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((460, 300, 1540, 2700), outline=(0, 0, 0), width=42)
+    draw.ellipse((780, 920, 930, 1100), outline=(0, 0, 0), width=24)
+    draw.ellipse((1080, 920, 1230, 1100), fill=(0, 0, 0))
+    draw.arc((800, 1420, 1220, 1720), start=20, end=160, fill=(0, 0, 0), width=34)
+    draw.text((130, 2800), "8", fill=(0, 0, 0))
+    out = io.BytesIO()
+    image.save(out, format="PNG")
     return out.getvalue()
 
 
@@ -238,6 +267,59 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertLess(top, 55)
         self.assertGreater(right, 200)
         self.assertGreater(bottom, 165)
+
+    def test_line_art_input_fills_subject_silhouette_and_drops_page_marks(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)
+        source = Image.open(io.BytesIO(line_art_fixture())).convert("RGBA")
+
+        mask = _subject_mask(source, settings)
+
+        self.assertEqual(mask.getpixel((110, 130)), 255)
+        self.assertEqual(mask.getpixel((14, 238)), 0)
+        self.assertGreater(self._count_mask_pixels(mask), 15_000)
+
+    def test_analysis_returns_vector_outer_cut_path(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)
+
+        analysis = analyze_template(line_art_fixture(), settings)
+
+        self.assertTrue(analysis.outer_cut_path.startswith("M "))
+        self.assertIn(" Z", analysis.outer_cut_path)
+
+    def test_outer_cut_path_uses_preview_coordinate_space_for_large_uploads(self) -> None:
+        settings = TemplateSettings(finished_height_in=36, threshold=35, detail_lines=False)
+
+        analysis = analyze_template(high_resolution_line_art_fixture(), settings)
+        min_x, min_y, max_x, max_y = self._svg_path_bounds(analysis.outer_cut_path)
+
+        self.assertGreaterEqual(min_x, 0)
+        self.assertGreaterEqual(min_y, 0)
+        self.assertLessEqual(max_x, analysis.preview_width_px)
+        self.assertLessEqual(max_y, analysis.preview_height_px)
+        self.assertLessEqual(analysis.preview_width_px, 960)
+        self.assertLessEqual(analysis.preview_height_px, 960)
+
+    def test_trace_debug_export_writes_inspection_layers(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)
+        output_dir = Path("tmp/test-debug-trace")
+
+        analysis = analyze_template(line_art_fixture(), settings)
+        written = export_trace_debug_layers(line_art_fixture(), settings, output_dir)
+
+        expected = {
+            "source.png",
+            "mask.png",
+            "filled-mask.png",
+            "outer-line.png",
+            "outer-cut-path.svg",
+            "final-preview.png",
+        }
+        self.assertEqual({path.name for path in written}, expected)
+        for path in written:
+            self.assertTrue(path.exists())
+            self.assertGreater(path.stat().st_size, 0)
+        with Image.open(output_dir / "final-preview.png") as final_preview:
+            self.assertEqual(final_preview.size, (analysis.preview_width_px, analysis.preview_height_px))
 
     def test_pdf_contains_polished_cover_paint_guide_and_all_tile_pages(self) -> None:
         settings = TemplateSettings(finished_height_in=30, threshold=40, palette_size=3, project_name="Coraline Packet")
@@ -832,6 +914,13 @@ class PrintPipelineTest(unittest.TestCase):
 
     def _count_region_pixels(self, image: Image.Image, box: tuple[int, int, int, int]) -> int:
         return self._count_mask_pixels(image.crop(box))
+
+    def _svg_path_bounds(self, path_data: str) -> tuple[float, float, float, float]:
+        values = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", path_data)]
+        self.assertGreaterEqual(len(values), 4)
+        xs = values[0::2]
+        ys = values[1::2]
+        return min(xs), min(ys), max(xs), max(ys)
 
     def _has_transparent_background(self, image: Image.Image) -> bool:
         return any(pixel[3] == 0 for pixel in image.get_flattened_data())

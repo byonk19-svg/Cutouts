@@ -178,7 +178,7 @@ function App() {
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
   const canSaveProject = image !== null && sourceImageDataUrl !== null && analysis !== null && !busy;
-  const canExportSvg = analysis !== null && !busy;
+  const canExportSvg = analysis !== null && analysis.outerCutPath.trim().length > 0 && !busy;
   const advancedTraceModeSelected = traceMode === "marker" || traceMode === "extra";
   const traceStudioOpen = traceMode === "manual";
   const selectedStroke = selectedStrokeId ? manualStrokes.find((stroke) => stroke.id === selectedStrokeId) ?? null : null;
@@ -391,6 +391,10 @@ function App() {
 
   function exportSvgLinework() {
     if (!analysis) return;
+    if (!analysis.outerCutPath.trim()) {
+      setError("Regenerate the cutline before exporting SVG linework.");
+      return;
+    }
     try {
       const svg = buildTraceLineworkSvg({
         projectName,
@@ -1191,7 +1195,12 @@ function App() {
           <p>Personal wood cutout template generator</p>
         </div>
         <div className="topbar-actions" ref={exportSectionRef}>
-          <button className="secondary-topbar-action" onClick={exportSvgLinework} disabled={!canExportSvg}>
+          <button
+            className="secondary-topbar-action"
+            onClick={exportSvgLinework}
+            disabled={!canExportSvg}
+            title={analysis && !analysis.outerCutPath.trim() ? "Regenerate the cutline before exporting SVG linework." : undefined}
+          >
             <FileText size={18} />
             Export SVG Linework
           </button>
@@ -1217,6 +1226,9 @@ function App() {
               }}
             />
           </label>
+          <p className="helper-note">
+            Upload one complete source image, not a finished template PDF or an individual tiled page. Cutout Studio generates the tiled trace packet for you.
+          </p>
 
           <div className="project-card">
             <label className="project-name-field">

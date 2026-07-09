@@ -40,6 +40,7 @@ const analysis = {
   tileCount: 8,
   previewPngDataUrl: "data:image/png;base64,preview",
   outerLinePngDataUrl: "data:image/png;base64,outer",
+  outerCutPath: "M 1 1 L 119 1 L 119 159 L 1 159 Z",
   detailLinePngDataUrl: "data:image/png;base64,detail",
   paintGuidePngDataUrl: "data:image/png;base64,paint",
   previewWidthPx: 400,

@@ -34,6 +34,7 @@ const analysis = {
   tileCount: 8,
   previewPngDataUrl: "data:image/png;base64,preview",
   outerLinePngDataUrl: "data:image/png;base64,outer-cutline",
+  outerCutPath: "M 4 4 L 276 4 L 276 716 L 4 716 Z",
   detailLinePngDataUrl: "data:image/png;base64,suggestion-lines",
   paintGuidePngDataUrl: "data:image/png;base64,original-underlay",
   previewWidthPx: 280,
@@ -60,7 +61,9 @@ const analysis = {
   assert(svg.startsWith("<svg"), "SVG export should produce an SVG document");
   assert(svg.includes('width="14in"'), "SVG export should set finished physical width");
   assert(svg.includes('height="36in"'), "SVG export should set finished physical height");
-  assert(svg.includes("data:image/png;base64,outer-cutline"), "SVG export should include the locked cutline layer");
+  assert(svg.includes('id="cutline-layer"'), "SVG export should include the locked cutline layer");
+  assert(svg.includes('d="M 4 4 L 276 4 L 276 716 L 4 716 Z"'), "SVG export should include the cutline as vector path data");
+  assert(!svg.includes("data:image/png;base64,outer-cutline"), "SVG export should not embed the cutline PNG");
   assert(svg.includes('id="manual-strokes"'), "SVG export should include a manual stroke layer");
   assert(svg.includes('stroke-width="12"'), "SVG export should preserve thin manual stroke widths");
   assert(svg.includes('stroke-width="20"'), "SVG export should preserve normal manual stroke widths");
@@ -132,6 +135,19 @@ const analysis = {
   });
 
   assert(svg.includes("data:image/png;base64,suggestion-lines"), "SVG export should include suggestions when explicitly enabled");
+}
+
+{
+  const svg = buildTraceLineworkSvg({
+    projectName: "Old Project",
+    analysis: { ...analysis, outerCutPath: "" },
+    manualStrokes: [],
+    includeCutline: true
+  });
+
+  assert(svg.includes("Missing vector cutline"), "SVG export should include a regenerate hint when old projects have no vector cutline");
+  assert(!svg.includes('id="cutline-layer"'), "SVG export should not emit an empty cutline path");
+  assert(!svg.includes("data:image/png;base64,outer-cutline"), "SVG export should not fall back to embedding the cutline PNG");
 }
 
 {

@@ -151,6 +151,7 @@ class TemplateAnalysis:
     tile_count: int
     preview_png: bytes
     outer_line_png: bytes
+    outer_cut_path: str
     detail_line_png: bytes
     paint_guide_png: bytes
     preview_width_px: int
@@ -169,6 +170,7 @@ class TemplateAnalysis:
             "tileCount": self.tile_count,
             "previewPngDataUrl": "data:image/png;base64," + base64.b64encode(self.preview_png).decode("ascii"),
             "outerLinePngDataUrl": "data:image/png;base64," + base64.b64encode(self.outer_line_png).decode("ascii"),
+            "outerCutPath": self.outer_cut_path,
             "detailLinePngDataUrl": "data:image/png;base64," + base64.b64encode(self.detail_line_png).decode("ascii"),
             "paintGuidePngDataUrl": "data:image/png;base64," + base64.b64encode(self.paint_guide_png).decode("ascii"),
             "previewWidthPx": self.preview_width_px,
@@ -211,6 +213,8 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
     finished_width = settings.finished_height_in * (cropped_source.width / cropped_source.height)
     tile_cols, tile_rows = tile_grid(finished_width, settings.finished_height_in)
     preview, outer_line, detail_line, paint_guide = _make_preview_layers(cropped_source, cropped_mask, settings)
+    preview_mask = _preview_mask(cropped_source, cropped_mask)
+    outer_cut_path = _mask_to_svg_path(preview_mask, simplify_px=max(1.2, settings.smoothing))
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
 
     return TemplateAnalysis(
@@ -224,6 +228,7 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
         tile_count=tile_cols * tile_rows,
         preview_png=preview,
         outer_line_png=outer_line,
+        outer_cut_path=outer_cut_path,
         detail_line_png=detail_line,
         paint_guide_png=paint_guide,
         preview_width_px=Image.open(io.BytesIO(preview)).width,
@@ -388,12 +393,16 @@ def _subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image
 
     if has_alpha_subject:
         foreground = alpha > 24
+        mask = Image.fromarray((foreground.astype(np.uint8) * 255), mode="L")
+    elif _looks_like_line_art(rgb, alpha):
+        mask = _filled_line_art_mask(rgb, alpha, settings)
     else:
-        rgb_float = rgb.astype(float)
-        distance_from_white = np.sqrt(np.sum((255.0 - rgb_float) ** 2, axis=2))
-        foreground = distance_from_white > settings.threshold
+        rgb_float = rgb.astype(np.float32)
+        bg = _border_background_rgb(rgb)
+        distance_from_bg = np.sqrt(np.sum((rgb_float - bg) ** 2, axis=2))
+        foreground = distance_from_bg > settings.threshold
+        mask = Image.fromarray((foreground.astype(np.uint8) * 255), mode="L")
 
-    mask = Image.fromarray((foreground.astype(np.uint8) * 255), mode="L")
     if settings.smoothing > 0:
         radius = max(1, settings.smoothing)
         mask = mask.filter(ImageFilter.GaussianBlur(radius=radius)).point(lambda px: 255 if px >= 128 else 0)
@@ -401,10 +410,81 @@ def _subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image
         mask = _remove_small_components(mask, settings.speck_area)
     if settings.hole_area > 0:
         mask = _fill_small_holes(mask, settings.hole_area)
+    mask = _keep_largest_component(mask)
 
     if not np.any(np.asarray(mask) > 0):
         raise ValueError("No subject was detected. Try lowering the threshold or using a simpler background.")
     return mask
+
+
+def _border_background_rgb(rgb: np.ndarray) -> np.ndarray:
+    edge = max(2, min(12, rgb.shape[0] // 8, rgb.shape[1] // 8))
+    samples = np.concatenate(
+        [
+            rgb[:edge, :, :].reshape(-1, 3),
+            rgb[-edge:, :, :].reshape(-1, 3),
+            rgb[:, :edge, :].reshape(-1, 3),
+            rgb[:, -edge:, :].reshape(-1, 3),
+        ],
+        axis=0,
+    )
+    return np.median(samples.astype(np.float32), axis=0)
+
+
+def _looks_like_line_art(rgb: np.ndarray, alpha: np.ndarray) -> bool:
+    opaque = alpha > 24
+    if not np.any(opaque):
+        return False
+
+    gray = np.mean(rgb, axis=2)
+    dark_ratio = float(np.mean((gray < 210) & opaque))
+    light_ratio = float(np.mean((gray > 238) & opaque))
+    return 0.002 < dark_ratio < 0.22 and light_ratio > 0.55
+
+
+def _filled_line_art_mask(rgb: np.ndarray, alpha: np.ndarray, settings: TemplateSettings) -> Image.Image:
+    rgb_float = rgb.astype(np.float32)
+    distance_from_white = np.sqrt(np.sum((255.0 - rgb_float) ** 2, axis=2))
+    ink = (distance_from_white > max(28, settings.threshold)) & (alpha > 24)
+
+    kernel_size = _odd_filter_size(max(3, settings.smoothing * 2 + 1))
+    kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+    barrier = cv2.morphologyEx(ink.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+    barrier = cv2.dilate(barrier, kernel, iterations=1)
+
+    height, width = barrier.shape
+    flood = ((barrier == 0).astype(np.uint8) * 255)
+    flood_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
+
+    for x in range(width):
+        if flood[0, x] == 255:
+            cv2.floodFill(flood, flood_mask, (x, 0), 128)
+        if flood[height - 1, x] == 255:
+            cv2.floodFill(flood, flood_mask, (x, height - 1), 128)
+
+    for y in range(height):
+        if flood[y, 0] == 255:
+            cv2.floodFill(flood, flood_mask, (0, y), 128)
+        if flood[y, width - 1] == 255:
+            cv2.floodFill(flood, flood_mask, (width - 1, y), 128)
+
+    subject = flood != 128
+    return _keep_largest_component(Image.fromarray((subject.astype(np.uint8) * 255), mode="L"))
+
+
+def _keep_largest_component(mask: Image.Image) -> Image.Image:
+    arr = np.asarray(mask.convert("L")) > 0
+    labels, stats = _connected_components(arr)
+    if len(stats) <= 1:
+        return mask
+
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    if len(areas) == 0 or int(areas.max()) == 0:
+        return mask
+
+    keep_label = int(np.argmax(areas) + 1)
+    keep = labels == keep_label
+    return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 
 def _remove_small_components(mask: Image.Image, min_area: int) -> Image.Image:
@@ -506,9 +586,8 @@ def _mask_bounds(mask: Image.Image) -> tuple[int, int, int, int]:
 
 def _make_preview_layers(image: Image.Image, mask: Image.Image, settings: TemplateSettings) -> tuple[bytes, bytes, bytes, bytes]:
     preview_image = image.copy()
-    preview_mask = mask.copy()
     preview_image.thumbnail((PREVIEW_MAX_PX, PREVIEW_MAX_PX), Image.Resampling.LANCZOS)
-    preview_mask = preview_mask.resize(preview_image.size, Image.Resampling.NEAREST)
+    preview_mask = mask.resize(preview_image.size, Image.Resampling.NEAREST)
     composed, outer, detail = _line_art_layers(
         preview_image,
         preview_mask,
@@ -526,6 +605,30 @@ def _make_preview_layers(image: Image.Image, mask: Image.Image, settings: Templa
         _png_bytes(detail),
         _png_bytes(paint_guide),
     )
+
+
+def _preview_mask(image: Image.Image, mask: Image.Image) -> Image.Image:
+    preview_image = image.copy()
+    preview_image.thumbnail((PREVIEW_MAX_PX, PREVIEW_MAX_PX), Image.Resampling.LANCZOS)
+    return mask.resize(preview_image.size, Image.Resampling.NEAREST)
+
+
+def _mask_to_svg_path(mask: Image.Image, simplify_px: float = 2.0) -> str:
+    arr = (np.asarray(mask.convert("L")) > 0).astype(np.uint8) * 255
+    contours, _hierarchy = cv2.findContours(arr, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not contours:
+        return ""
+
+    contour = max(contours, key=cv2.contourArea)
+    epsilon = max(0.6, float(simplify_px))
+    approx = cv2.approxPolyDP(contour, epsilon, True).reshape(-1, 2)
+    if len(approx) == 0:
+        return ""
+
+    commands = [f"M {approx[0][0]:.3f} {approx[0][1]:.3f}"]
+    commands.extend(f"L {x:.3f} {y:.3f}" for x, y in approx[1:])
+    commands.append("Z")
+    return " ".join(commands)
 
 
 def _png_bytes(image: Image.Image) -> bytes:

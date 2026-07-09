@@ -33,7 +33,11 @@ export function buildTraceLineworkSvg({
     parts.push(`<rect id="white-background" x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>`);
   }
   if (includeCutline) {
-    parts.push(imageLayer("cutline-layer", analysis.outerLinePngDataUrl, width, height, "1"));
+    if (analysis.outerCutPath.trim()) {
+      parts.push(cutlinePathLayer(analysis.outerCutPath));
+    } else {
+      parts.push("<!-- Missing vector cutline. Regenerate analysis to create outerCutPath. -->");
+    }
   }
   if (includeSuggestions) {
     parts.push(imageLayer("suggestion-layer", analysis.detailLinePngDataUrl, width, height, "0.35"));
@@ -66,6 +70,10 @@ export function svgLineworkFileName(projectName: string) {
 
 function imageLayer(id: string, dataUrl: string, width: string, height: string, opacity: string) {
   return `<image id="${id}" href="${escapeXml(dataUrl)}" x="0" y="0" width="${width}" height="${height}" opacity="${opacity}" preserveAspectRatio="none"/>`;
+}
+
+function cutlinePathLayer(pathData: string) {
+  return `<path id="cutline-layer" d="${escapeXml(pathData)}" fill="none" stroke="#000000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
 }
 
 function strokePathData(stroke: TraceStroke) {
