@@ -51,7 +51,20 @@ import {
   type TraceStroke
 } from "./traceStrokes";
 import { buildTraceLineworkSvg, svgLineworkFileName } from "./traceLineworkSvg";
-import { DEFAULT_TRACE_VIEWPORT, fittedTraceSize, panViewport, screenToTracePoint, zoomViewport, type TraceViewport } from "./traceViewport";
+import {
+  DEFAULT_TRACE_VIEWPORT,
+  boundsFromTraceStrokes,
+  centerBoundsInViewport,
+  fitBoundsToViewport,
+  fittedTraceSize,
+  fullCanvasBounds,
+  mergeTraceBounds,
+  panViewport,
+  screenToTracePoint,
+  zoomViewport,
+  type TraceBounds,
+  type TraceViewport
+} from "./traceViewport";
 import {
   opensEditorWithReference,
   traceModeHelp,
@@ -121,6 +134,7 @@ function App() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [printPreview, setPrintPreview] = useState(false);
   const [traceViewport, setTraceViewport] = useState<TraceViewport>(DEFAULT_TRACE_VIEWPORT);
+  const [cutlineBounds, setCutlineBounds] = useState<TraceBounds | null>(null);
   const [selectedStrokeId, setSelectedStrokeId] = useState<string | null>(null);
   const [dimUnselectedStrokes, setDimUnselectedStrokes] = useState(false);
   const [selectionFeedback, setSelectionFeedback] = useState("");
@@ -159,6 +173,7 @@ function App() {
   const draftStrokeRef = useRef<TraceStroke | null>(null);
   const strokeDragRef = useRef<StrokeDragState | null>(null);
   const strokeIdRef = useRef(0);
+  const pendingContentFitRef = useRef(false);
 
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
@@ -200,6 +215,7 @@ function App() {
     setDimUnselectedStrokes(false);
     setSelectionFeedback("");
     setTraceViewport(DEFAULT_TRACE_VIEWPORT);
+    setCutlineBounds(null);
     setPrintPreview(false);
   }
 
@@ -260,6 +276,30 @@ function App() {
   }, [analysis, dimUnselectedStrokes, editorOpen, editedDetailDataUrl, manualStrokes, printPreview, selectedStrokeId, traceStudioOpen]);
 
   useEffect(() => {
+    let cancelled = false;
+    setCutlineBounds(null);
+    if (!analysis) return;
+    void imageContentBounds(analysis.outerLinePngDataUrl, {
+      width: analysis.previewWidthPx,
+      height: analysis.previewHeightPx
+    }).then((bounds) => {
+      if (!cancelled) {
+        setCutlineBounds(bounds ?? fullCanvasBounds({ width: analysis.previewWidthPx, height: analysis.previewHeightPx }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [analysis]);
+
+  useEffect(() => {
+    if (!pendingContentFitRef.current || !analysis || !editorOpen || !traceStudioOpen || !cutlineBounds) return;
+    if (fitTraceViewportToContent()) {
+      pendingContentFitRef.current = false;
+    }
+  }, [analysis, editorOpen, traceStudioOpen, cutlineBounds]);
+
+  useEffect(() => {
     if (selectedStrokeId && !manualStrokes.some((stroke) => stroke.id === selectedStrokeId)) {
       setSelectedStrokeId(null);
     }
@@ -298,6 +338,7 @@ function App() {
       setSelectedPaintColorIds([]);
       setEditorOpen(openEditor || preservedManualStrokes.length > 0);
       setShowReference(openEditor);
+      pendingContentFitRef.current = openEditor || preservedManualStrokes.length > 0;
       resetCleanupChecks();
     } catch (err) {
       setAnalysis(null);
@@ -534,6 +575,7 @@ function App() {
     setShowSuggestions(project.layerVisibility.showSuggestions);
     setPrintPreview(false);
     setTraceViewport(project.traceViewport);
+    pendingContentFitRef.current = isDefaultTraceViewport(project.traceViewport);
     setSelectedStrokeId(null);
     setDimUnselectedStrokes(false);
     setSelectionFeedback("");
@@ -1098,7 +1140,9 @@ function App() {
   }
 
   function resetZoom() {
-    setTraceViewport(DEFAULT_TRACE_VIEWPORT);
+    if (!fitTraceViewportToContent()) {
+      setTraceViewport(DEFAULT_TRACE_VIEWPORT);
+    }
   }
 
   function hundredPercentZoom() {
@@ -1111,11 +1155,32 @@ function App() {
       { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
       { width: viewport.clientWidth, height: viewport.clientHeight }
     );
-    setTraceViewport({
-      zoom: analysis.previewWidthPx / fitted.width,
-      panX: 0,
-      panY: 0
-    });
+    setTraceViewport(centerBoundsInViewport(
+      traceContentBounds(),
+      { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
+      { width: viewport.clientWidth, height: viewport.clientHeight },
+      analysis.previewWidthPx / fitted.width
+    ));
+  }
+
+  function fitTraceViewportToContent() {
+    const viewport = editorViewportRef.current;
+    if (!viewport || !analysis) return false;
+    setTraceViewport(fitBoundsToViewport(
+      traceContentBounds(),
+      { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
+      { width: viewport.clientWidth, height: viewport.clientHeight },
+      56
+    ));
+    return true;
+  }
+
+  function traceContentBounds() {
+    if (!analysis) return fullCanvasBounds({ width: 1, height: 1 });
+    const canvasBounds = fullCanvasBounds({ width: analysis.previewWidthPx, height: analysis.previewHeightPx });
+    const strokeBounds = boundsFromTraceStrokes(manualStrokes);
+    if (strokeBounds) return mergeTraceBounds([cutlineBounds, strokeBounds]) ?? strokeBounds;
+    return cutlineBounds ?? canvasBounds;
   }
 
   return (
@@ -2036,6 +2101,48 @@ function brushSizeLabel(size: BrushSize) {
 function shortStrokeLabel(id: string) {
   if (id.length <= 14) return id;
   return `${id.slice(0, 6)}...${id.slice(-4)}`;
+}
+
+function imageContentBounds(dataUrl: string, expectedSize: { width: number; height: number }): Promise<TraceBounds | null> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = expectedSize.width;
+      canvas.height = expectedSize.height;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        resolve(null);
+        return;
+      }
+      context.drawImage(image, 0, 0, expectedSize.width, expectedSize.height);
+      const pixels = context.getImageData(0, 0, expectedSize.width, expectedSize.height).data;
+      let left = expectedSize.width;
+      let top = expectedSize.height;
+      let right = 0;
+      let bottom = 0;
+      for (let y = 0; y < expectedSize.height; y += 1) {
+        for (let x = 0; x < expectedSize.width; x += 1) {
+          const offset = (y * expectedSize.width + x) * 4;
+          if (pixels[offset + 3] > 8) {
+            left = Math.min(left, x);
+            top = Math.min(top, y);
+            right = Math.max(right, x + 1);
+            bottom = Math.max(bottom, y + 1);
+          }
+        }
+      }
+      resolve(right > left && bottom > top ? { left, top, right, bottom } : null);
+    };
+    image.onerror = () => resolve(null);
+    image.src = dataUrl;
+  });
+}
+
+function isDefaultTraceViewport(viewport: TraceViewport) {
+  return viewport.zoom === DEFAULT_TRACE_VIEWPORT.zoom
+    && viewport.panX === DEFAULT_TRACE_VIEWPORT.panX
+    && viewport.panY === DEFAULT_TRACE_VIEWPORT.panY;
 }
 
 function pointHandleHitRadius(width: number) {

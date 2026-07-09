@@ -1,9 +1,16 @@
-import type { TracePoint } from "./traceStrokes";
+import type { TracePoint, TraceStroke } from "./traceStrokes";
 
 export type TraceViewport = {
   zoom: number;
   panX: number;
   panY: number;
+};
+
+export type TraceBounds = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 };
 
 export const DEFAULT_TRACE_VIEWPORT: TraceViewport = {
@@ -54,6 +61,76 @@ export function resetViewport(): TraceViewport {
   return DEFAULT_TRACE_VIEWPORT;
 }
 
+export function fitBoundsToViewport(
+  bounds: TraceBounds,
+  canvasSize: { width: number; height: number },
+  viewportSize: { width: number; height: number },
+  paddingPx = 48
+): TraceViewport {
+  const normalized = normalizeBounds(bounds, canvasSize);
+  const fitted = fittedTraceSize(canvasSize, viewportSize);
+  const displayWidth = Math.max(1, ((normalized.right - normalized.left) / canvasSize.width) * fitted.width);
+  const displayHeight = Math.max(1, ((normalized.bottom - normalized.top) / canvasSize.height) * fitted.height);
+  const availableWidth = Math.max(1, viewportSize.width - paddingPx * 2);
+  const availableHeight = Math.max(1, viewportSize.height - paddingPx * 2);
+  const zoom = clamp(Math.min(availableWidth / displayWidth, availableHeight / displayHeight), 0.35, 4);
+  return centerBoundsInViewport(normalized, canvasSize, viewportSize, zoom);
+}
+
+export function centerBoundsInViewport(
+  bounds: TraceBounds,
+  canvasSize: { width: number; height: number },
+  viewportSize: { width: number; height: number },
+  zoom: number
+): TraceViewport {
+  const normalized = normalizeBounds(bounds, canvasSize);
+  const fitted = fittedTraceSize(canvasSize, viewportSize);
+  const centerX = (normalized.left + normalized.right) / 2;
+  const centerY = (normalized.top + normalized.bottom) / 2;
+  const boundedZoom = clamp(zoom, 0.35, 4);
+  return {
+    zoom: boundedZoom,
+    panX: (0.5 - centerX / canvasSize.width) * fitted.width * boundedZoom,
+    panY: (0.5 - centerY / canvasSize.height) * fitted.height * boundedZoom
+  };
+}
+
+export function mergeTraceBounds(bounds: Array<TraceBounds | null | undefined>): TraceBounds | null {
+  const validBounds = bounds.filter((item): item is TraceBounds => Boolean(item));
+  if (validBounds.length === 0) return null;
+  return validBounds.reduce((merged, item) => ({
+    left: Math.min(merged.left, item.left),
+    top: Math.min(merged.top, item.top),
+    right: Math.max(merged.right, item.right),
+    bottom: Math.max(merged.bottom, item.bottom)
+  }));
+}
+
+export function boundsFromTraceStrokes(strokes: TraceStroke[]): TraceBounds | null {
+  const points = strokes.flatMap((stroke) => stroke.points);
+  if (points.length === 0) return null;
+  return points.reduce<TraceBounds>((bounds, point) => ({
+    left: Math.min(bounds.left, point.x),
+    top: Math.min(bounds.top, point.y),
+    right: Math.max(bounds.right, point.x),
+    bottom: Math.max(bounds.bottom, point.y)
+  }), {
+    left: points[0].x,
+    top: points[0].y,
+    right: points[0].x,
+    bottom: points[0].y
+  });
+}
+
+export function fullCanvasBounds(canvasSize: { width: number; height: number }): TraceBounds {
+  return {
+    left: 0,
+    top: 0,
+    right: canvasSize.width,
+    bottom: canvasSize.height
+  };
+}
+
 export function fittedTraceSize(
   canvasSize: { width: number; height: number },
   viewportSize: { width: number; height: number }
@@ -62,6 +139,19 @@ export function fittedTraceSize(
   return {
     width: canvasSize.width * scale,
     height: canvasSize.height * scale
+  };
+}
+
+function normalizeBounds(bounds: TraceBounds, canvasSize: { width: number; height: number }): TraceBounds {
+  const left = clamp(Math.min(bounds.left, bounds.right), 0, canvasSize.width);
+  const right = clamp(Math.max(bounds.left, bounds.right), 0, canvasSize.width);
+  const top = clamp(Math.min(bounds.top, bounds.bottom), 0, canvasSize.height);
+  const bottom = clamp(Math.max(bounds.top, bounds.bottom), 0, canvasSize.height);
+  return {
+    left,
+    top,
+    right: right > left ? right : Math.min(canvasSize.width, left + 1),
+    bottom: bottom > top ? bottom : Math.min(canvasSize.height, top + 1)
   };
 }
 

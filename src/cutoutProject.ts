@@ -1,5 +1,5 @@
 import type { TraceStroke } from "./traceStrokes";
-import type { TraceViewport } from "./traceViewport";
+import { DEFAULT_TRACE_VIEWPORT, type TraceViewport } from "./traceViewport.ts";
 import type { Settings, TraceMode } from "./traceWorkflow";
 import { paintGuideEditsFromProjectPalette, seedProjectPaletteFromDetected, type CraftPaintMatch, type PaintGuideEdit, type ProjectPaintColor } from "./paintGuide.ts";
 
@@ -129,6 +129,9 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
   }
   assertProjectPalette(project.projectPalette);
   assertLayerVisibility(project.layerVisibility);
+  if (!isValidTraceViewport(project.traceViewport)) {
+    project.traceViewport = DEFAULT_TRACE_VIEWPORT;
+  }
   assertTraceViewport(project.traceViewport);
   assertNumber(project.referenceOpacity, "referenceOpacity");
 
@@ -275,6 +278,16 @@ function assertTraceViewport(value: unknown): asserts value is TraceViewport {
   assertNumber(value.zoom, "traceViewport.zoom");
   assertNumber(value.panX, "traceViewport.panX");
   assertNumber(value.panY, "traceViewport.panY");
+}
+
+function isValidTraceViewport(value: unknown): value is TraceViewport {
+  return isRecord(value)
+    && typeof value.zoom === "number"
+    && Number.isFinite(value.zoom)
+    && typeof value.panX === "number"
+    && Number.isFinite(value.panX)
+    && typeof value.panY === "number"
+    && Number.isFinite(value.panY);
 }
 
 function assertString(value: unknown, label: string): asserts value is string {

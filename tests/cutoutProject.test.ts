@@ -224,6 +224,33 @@ const analysis = {
 }
 
 {
+  const rawProject = JSON.parse(serializeCutoutProject(createCutoutProjectSnapshot({
+    projectName: "Missing viewport",
+    createdAt: "2026-07-07T10:00:00.000Z",
+    updatedAt: "2026-07-07T10:00:00.000Z",
+    sourceImage: { name: "source.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,source" },
+    settings,
+    traceMode: "manual",
+    analysis,
+    manualStrokes: [createTraceStroke("line", [{ x: 10, y: 20 }, { x: 30, y: 40 }], 20)],
+    referenceOpacity: 35,
+    layerVisibility: {
+      showReference: true,
+      showCutline: true,
+      showManualLines: true,
+      showSuggestions: false,
+      printPreview: false
+    },
+    traceViewport: DEFAULT_TRACE_VIEWPORT
+  })));
+  delete rawProject.traceViewport;
+  const restored = restoreCutoutProject(rawProject);
+
+  assertEqual(restored.traceViewport.zoom, DEFAULT_TRACE_VIEWPORT.zoom, "missing viewport should restore to safe default zoom");
+  assertEqual(restored.manualStrokes[0].points[0].x, 10, "viewport fallback should not change stroke coordinates");
+}
+
+{
   let failed = false;
   try {
     restoreCutoutProject({ schemaVersion: 999 });
