@@ -64,4 +64,6 @@ See `docs/MVP_ACCEPTANCE_CHECKLIST.md` for the manual print validation steps tha
 
 ## Notes
 
+Tracing baseline: commit `ddcaeb5` is the known-good vector cutline baseline. It moves source analysis toward subject-silhouette detection, returns preview-space `outerCutPath`, exports SVG cutlines as real vector paths, guards old saved projects with missing vector cutlines, and includes high-resolution geometry plus debug-layer regression coverage.
+
 Paint matches are approximate and use an editable local craft paint catalog at `backend/cutout_studio/craft_paint_catalog.json`. Store availability and exact color appearance can vary.
