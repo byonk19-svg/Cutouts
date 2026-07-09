@@ -17,6 +17,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Generate cutline/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Start New/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start Trace Studio" })).toBeVisible();
+  await expect(page.getByLabel("What to trace")).toHaveCount(0);
   await expect(page.getByLabel("Trace style")).toContainText("Optional helpers");
   await expect(page.getByText("Line smoothness")).toBeHidden();
   const traceStyleChoices = page.getByLabel("Trace style");
@@ -32,6 +33,15 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(traceQuality).toContainText("Original underlay");
   await expect(traceQuality).toContainText("Visible");
   await expect(traceQuality).toContainText("Manual tracing recommended");
+  const traceGuidance = page.getByLabel("What to trace");
+  await expect(traceGuidance).toBeVisible();
+  await expect(traceGuidance).toContainText("Face features");
+  await expect(traceGuidance).toContainText("Clothing borders");
+  await expect(traceGuidance).toContainText("Hair shape");
+  await expect(traceGuidance).toContainText("Paint boundaries");
+  await expect(traceGuidance).toContainText("Accessories");
+  await expect(traceGuidance).toContainText("Major folds/details");
+  await expect(traceGuidance).toContainText("Skip shadows, texture, tiny highlights, and photo noise.");
 
   const canvas = page.getByLabel("Editable interior detail lines");
   await page.getByRole("button", { name: /Draw details/ }).click();

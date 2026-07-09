@@ -1654,6 +1654,23 @@ function App() {
                       ? "Best results come from tracing clean, simple lines over the image underlay. Trace only the face, clothing, and feature lines you want on the final template."
                       : "Best results: erase extra marks, draw missing face/clothing lines, then export."}
                   </p>
+                  {traceStudioOpen ? (
+                    <section className="trace-guidance-panel" aria-label="What to trace">
+                      <div>
+                        <strong>Trace only transfer-worthy lines</strong>
+                        <span>Use the underlay as a guide for the lines you need on wood.</span>
+                      </div>
+                      <ul>
+                        <li>Face features</li>
+                        <li>Clothing borders</li>
+                        <li>Hair shape</li>
+                        <li>Paint boundaries</li>
+                        <li>Accessories</li>
+                        <li>Major folds/details</li>
+                      </ul>
+                      <p>Skip shadows, texture, tiny highlights, and photo noise.</p>
+                    </section>
+                  ) : null}
                   <div className="template-editor" ref={editorViewportRef}>
                     <div
                       className="template-canvas-plane"

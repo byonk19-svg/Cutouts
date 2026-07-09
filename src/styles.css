@@ -809,6 +809,53 @@ button:disabled {
   accent-color: #1d7a70;
 }
 
+.trace-guidance-panel {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #f7fbf9;
+  color: #31413b;
+  font-size: 12px;
+}
+
+.trace-guidance-panel div {
+  display: grid;
+  gap: 2px;
+}
+
+.trace-guidance-panel strong {
+  color: #17201d;
+  font-size: 13px;
+}
+
+.trace-guidance-panel span,
+.trace-guidance-panel p {
+  margin: 0;
+  color: #65736c;
+  line-height: 1.35;
+}
+
+.trace-guidance-panel ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trace-guidance-panel li {
+  padding: 4px 7px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #26352f;
+  font-weight: 700;
+}
+
 .template-editor {
   position: relative;
   align-self: start;
