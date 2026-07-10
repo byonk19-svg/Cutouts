@@ -23,11 +23,11 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   const traceStyleChoices = page.getByLabel("Trace style");
   await expect(traceStyleChoices.getByRole("button", { name: /Trace Studio/ })).toContainText("Draw clean template lines");
   await traceStyleChoices.getByText("Optional helpers").click();
-  await traceStyleChoices.getByRole("button", { name: /Starter Detail Lines/ }).click();
-  await page.getByRole("button", { name: "Start Trace Studio with Starter Lines" }).click();
+  await traceStyleChoices.getByRole("button", { name: /Starter lines/ }).click();
+  await page.getByRole("button", { name: "Start Trace Studio with Starter lines" }).click();
   const starterGuidance = page.getByLabel("Starter detail line guidance");
   await expect(starterGuidance).toBeVisible({ timeout: 60_000 });
-  await expect(starterGuidance).toContainText("Auto starter lines are only a rough reference");
+  await expect(starterGuidance).toContainText("Starter lines are only a rough reference");
   await expect(starterGuidance).toContainText("Rendered or shaded characters can create messy extra lines");
   await starterGuidance.getByRole("button", { name: "Use blank Trace Studio" }).click();
   await expect(page.getByText(/Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
@@ -69,7 +69,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByText(/Stroke 1 of 1/)).toBeVisible();
   await page.locator('select[aria-label="Selected stroke width"]').selectOption("bold");
   await expect(page.getByText(/Bold \/ 34px/)).toBeVisible();
-  await page.getByRole("button", { name: /Show advanced auto-start settings/ }).click();
+  await page.getByRole("button", { name: /Show advanced starter-line settings/ }).click();
   await page.getByRole("button", { name: /Reset tracing settings/ }).click();
   await expect(page.getByText(/Stroke 1 of 1/)).toBeVisible();
 

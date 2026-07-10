@@ -667,8 +667,7 @@ function App() {
   }
 
   function updateInteriorDetail(value: number) {
-    const detailCleanup = traceMode === "paint" || traceMode === "marker" ? value : 100 - value;
-    setSettings((current) => ({ ...current, detailCleanup, detailLines: true, templateStyle: traceMode }));
+    setSettings((current) => ({ ...current, detailCleanup: value, detailLines: true, templateStyle: traceMode }));
     setAnalysis(null);
   }
 
@@ -1352,7 +1351,7 @@ function App() {
                 <summary>
                   <span>
                     <strong>Optional helpers</strong>
-                    <small>Need help getting started? Add rough detail lines or generate only the outside shape.</small>
+                    <small>Need help getting started? Add rough starter lines or generate only the outside shape.</small>
                   </span>
                 </summary>
                 <div className="auto-starter-options">
@@ -1366,7 +1365,7 @@ function App() {
                   </button>
                 </div>
               </details>
-              <p className="helper-note">Best results come from tracing clean, simple lines over the image underlay. Starter Detail Lines are optional and usually need cleanup.</p>
+              <p className="helper-note">Best results come from tracing clean, simple lines over the image underlay. Starter lines are optional and usually need cleanup.</p>
             </div>
           </div>
 
@@ -1397,29 +1396,36 @@ function App() {
 
           <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
             {advancedOpen
-              ? "Hide advanced auto-start settings"
+              ? "Hide advanced starter-line settings"
               : advancedTraceModeSelected
-                ? `Show advanced auto-start settings (${traceModeLabel(traceMode)} selected)`
-                : "Show advanced auto-start settings"}
+                ? `Show advanced starter-line settings (${traceModeLabel(traceMode)} selected)`
+                : "Show advanced starter-line settings"}
           </button>
           {advancedOpen ? (
             <div className="advanced-panel">
-              <p className="helper-note">These settings only affect automatic starter lines, not your manual Trace Studio strokes.</p>
+              <p className="helper-note">These settings only affect starter lines, not your manual Trace Studio strokes.</p>
               <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
+              <p className="helper-note">Higher values round out jagged edges in the cut line.</p>
               {settings.detailLines ? (
                 <RangeField
-                  label={traceMode === "paint" || traceMode === "marker" ? "Cleanup strength" : "Inside detail"}
+                  label="Cleanup strength"
                   min={traceMode === "marker" ? 85 : traceMode === "paint" ? 76 : 0}
                   max={100}
-                  value={traceMode === "paint" || traceMode === "marker" ? settings.detailCleanup : 100 - settings.detailCleanup}
+                  value={settings.detailCleanup}
                   onChange={updateInteriorDetail}
-                  lowLabel={traceMode === "paint" || traceMode === "marker" ? "More lines" : undefined}
-                  highLabel={traceMode === "paint" || traceMode === "marker" ? "Cleaner" : undefined}
+                  lowLabel="More lines"
+                  highLabel="Cleaner"
                 />
               ) : null}
+              {settings.detailLines ? (
+                <p className="helper-note">Higher values remove faint or noisy interior lines; lower values keep more detail.</p>
+              ) : null}
               <RangeField label="Background sensitivity" min={0} max={180} value={settings.threshold} onChange={(value) => updateSetting("threshold", value)} />
+              <p className="helper-note">How different a color must be from the background to count as part of the subject.</p>
               <RangeField label="Remove tiny marks" min={0} max={600} value={settings.speckArea} onChange={(value) => updateSetting("speckArea", value)} />
+              <p className="helper-note">Deletes small stray specks smaller than this size.</p>
               <RangeField label="Close small gaps" min={0} max={1500} value={settings.holeArea} onChange={(value) => updateSetting("holeArea", value)} />
+              <p className="helper-note">Fills in small holes/gaps in the cutout shape smaller than this size.</p>
               <div className="reset-tracing-settings">
                 <button className="tool-button" onClick={resetTracingSettings}>
                   <RotateCcw size={15} />
@@ -1567,29 +1573,25 @@ function App() {
                       <button className={printPreview ? "tool-button selected" : "tool-button"} onClick={() => setPrintPreview((shown) => !shown)}>
                         Preview Printable Template
                       </button>
-                      <button className={showReference ? "tool-button selected" : "tool-button"} onClick={() => setShowReference((shown) => !shown)}>
-                        <Eye size={15} />
-                        Show original
-                      </button>
-                      {showReference ? (
-                        <label className="opacity-control">
-                          <span>Opacity</span>
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            value={referenceOpacity}
-                            onChange={(event) => setReferenceOpacity(Number(event.target.value))}
-                          />
-                        </label>
-                      ) : null}
                     </div>
                   </div>
                   <div className="layer-controls" aria-label="Trace Studio layer visibility">
                     <label>
                       <input type="checkbox" checked={showReference} onChange={() => setShowReference((shown) => !shown)} />
-                      Original underlay
+                      Show original
                     </label>
+                    {showReference ? (
+                      <label className="opacity-control">
+                        <span>Opacity</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={referenceOpacity}
+                          onChange={(event) => setReferenceOpacity(Number(event.target.value))}
+                        />
+                      </label>
+                    ) : null}
                     <label>
                       <input type="checkbox" checked={showCutline} onChange={() => setShowCutline((shown) => !shown)} />
                       Cutline
@@ -1600,7 +1602,7 @@ function App() {
                     </label>
                     <label>
                       <input type="checkbox" checked={showSuggestions} onChange={() => setShowSuggestions((shown) => !shown)} />
-                      Suggestions
+                      Starter lines
                     </label>
                   </div>
                   {traceStudioOpen ? (
@@ -1621,7 +1623,7 @@ function App() {
                   {!traceStudioOpen ? (
                     <section className="starter-lines-warning" aria-label="Starter detail line guidance">
                       <div>
-                        <strong>Auto starter lines are only a rough reference</strong>
+                        <strong>Starter lines are only a rough reference</strong>
                         <span>Rendered or shaded characters can create messy extra lines. For a cleaner wood template, use the original image as the underlay and draw only the face, clothing, hair, and paint-boundary lines you actually need.</span>
                       </div>
                       <button className="tool-button" onClick={switchToBlankTraceStudio}>
@@ -1700,7 +1702,7 @@ function App() {
                   <p className="editor-note">
                     {traceMode === "manual"
                       ? "Best results come from tracing clean, simple lines over the image underlay. Trace only the face, clothing, and feature lines you want on the final template."
-                      : "Starter lines are rough references. Hide suggestions or switch to blank Trace Studio when the auto lines are noisy."}
+                      : "Starter lines are rough references. Hide starter lines or switch to blank Trace Studio when they are noisy."}
                   </p>
                   {traceStudioOpen ? (
                     <section className="trace-guidance-panel" aria-label="What to trace">
@@ -2209,7 +2211,7 @@ function traceActionLabel({ image, analysis, busy, traceMode }: { image: File | 
   if (busy) return "Working...";
   if (!image) return "Upload an image to start";
   if (analysis) return "Regenerate Cutline";
-  if (traceMode === "paint" || traceMode === "marker" || traceMode === "extra") return "Start Trace Studio with Starter Lines";
+  if (traceMode === "paint" || traceMode === "marker" || traceMode === "extra") return "Start Trace Studio with Starter lines";
   if (traceMode === "outline") return "Generate Outside Cutline Only";
   return "Start Trace Studio";
 }
