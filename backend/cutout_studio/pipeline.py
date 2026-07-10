@@ -916,7 +916,8 @@ def _detail_line_mask(
     blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
     cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
     local_threshold = 6 + round((cleanup / 100) * 14)
-    smoothed = work_image.convert("RGB").filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    flattened = _flatten_shading(work_image, color_radius=18 + round((cleanup / 100) * 16))
+    smoothed = flattened.filter(ImageFilter.GaussianBlur(radius=blur_radius))
     rgb = np.asarray(smoothed, dtype=np.uint8)
     mask_arr = np.asarray(work_mask.convert("L")) > 0
     labels = _cluster_subject_colors(rgb, mask_arr, cluster_count)
@@ -955,7 +956,9 @@ def _detail_line_mask(
 def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     blur_radius, edge_threshold, min_area = _clean_feature_line_tuning(cleanup, print_scale)
-    gray = work_image.convert("L").filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    cleanup_ratio = (cleanup - 76) / 24
+    flattened = _flatten_shading(work_image, color_radius=16 + round(cleanup_ratio * 14))
+    gray = flattened.convert("L").filter(ImageFilter.GaussianBlur(radius=blur_radius))
     edge_arr = np.asarray(gray.filter(ImageFilter.FIND_EDGES), dtype=np.uint8) > edge_threshold
     mask_arr = np.asarray(work_mask.convert("L")) > 0
     interior_arr = np.asarray(_erode_mask(work_mask, 9)) > 0
@@ -965,8 +968,8 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
     detail = _remove_small_components(detail, min_area)
     detail = _filter_clean_detail_components(detail)
     detail_arr = np.asarray(detail.convert("L")) > 0
-    color_detail_arr = np.asarray(_clean_color_boundary_mask(work_image, work_mask, cleanup, print_scale).convert("L")) > 0
-    head_detail_arr = np.asarray(_head_feature_boost_mask(work_image, work_mask, cleanup).convert("L")) > 0
+    color_detail_arr = np.asarray(_clean_color_boundary_mask(flattened, work_mask, cleanup, print_scale).convert("L")) > 0
+    head_detail_arr = np.asarray(_head_feature_boost_mask(flattened, work_mask, cleanup).convert("L")) > 0
     detail = Image.fromarray(((detail_arr | color_detail_arr | head_detail_arr).astype(np.uint8) * 255), mode="L")
     detail = _remove_small_components(detail, max(24, min_area - 14))
     detail = _filter_clean_detail_components(detail)
@@ -1094,6 +1097,24 @@ def _detail_work_image(image: Image.Image, mask: Image.Image) -> tuple[Image.Ima
     scale = 1400 / max_edge
     size = (max(1, round(original_size[0] * scale)), max(1, round(original_size[1] * scale)))
     return image.resize(size, Image.Resampling.LANCZOS), mask.resize(size, Image.Resampling.NEAREST), original_size
+
+
+def _flatten_shading(image: Image.Image, spatial_radius: int = 10, color_radius: int = 22) -> Image.Image:
+    """Collapse soft gradients/airbrushed shading into flat, spatially-coherent regions.
+
+    Mean-shift segmentation is edge-aware: it merges nearby pixels that are
+    similar in both position and color while leaving genuinely strong color
+    boundaries alone. Photographic and 3D-rendered source images shade a
+    single surface (hair, a cheek, a jacket) with hundreds of gradual color
+    steps; running edge/boundary detection directly on that produces a
+    speckled noise of tiny "edges" wherever the gradient happens to cross a
+    cluster or contrast threshold. Flattening first turns each shaded surface
+    into one (or a few) flat colors, so only real feature/paint-region
+    boundaries remain for the detail-line detectors below.
+    """
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    flattened = cv2.pyrMeanShiftFiltering(rgb, sp=spatial_radius, sr=color_radius)
+    return Image.fromarray(flattened, mode="RGB")
 
 
 def _cluster_subject_colors(rgb: np.ndarray, mask_arr: np.ndarray, cluster_count: int) -> np.ndarray:

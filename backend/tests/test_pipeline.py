@@ -1,11 +1,14 @@
 import io
+import math
 import re
 import unittest
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw
 from pypdf import PdfReader
 
+import backend.cutout_studio.pipeline as pipeline
 from backend.cutout_studio.pipeline import (
     TemplateSettings,
     Paint,
@@ -19,6 +22,8 @@ from backend.cutout_studio.pipeline import (
     match_paints,
     tile_grid,
     _clean_feature_line_tuning,
+    _clean_feature_line_mask,
+    _connected_components,
     _detail_line_mask,
     _fill_small_holes,
     _line_art,
@@ -234,6 +239,28 @@ def same_luminance_color_regions_fixture() -> tuple[Image.Image, Image.Image]:
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle((35, 24, 145, 196), radius=28, fill=(200, 40, 40, 255))
     draw.rectangle((90, 24, 145, 196), fill=(42, 80, 250, 255))
+    return image, mask
+
+
+def soft_shaded_render_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGBA", (220, 260), (255, 255, 255, 0))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((34, 24, 186, 236), radius=34, fill=255)
+    pixels = image.load()
+    for y in range(24, 237):
+        for x in range(34, 187):
+            if mask.getpixel((x, y)) == 0:
+                continue
+            horizontal = (x - 34) / 152
+            vertical = (y - 24) / 212
+            wave = math.sin(x * 0.27) * 9 + math.cos(y * 0.23) * 7
+            shade = round(112 + horizontal * 72 + vertical * 26 + wave)
+            pixels[x, y] = (shade, shade - 10, shade + 14, 255)
+    draw = ImageDraw.Draw(image)
+    draw.arc((78, 74, 142, 132), start=200, end=340, fill=(22, 22, 26, 255), width=4)
+    draw.line((70, 158, 152, 158), fill=(45, 42, 80, 255), width=5)
+    draw.line((110, 126, 110, 204), fill=(48, 44, 82, 255), width=4)
     return image, mask
 
 
@@ -865,6 +892,24 @@ class PrintPipelineTest(unittest.TestCase):
 
         self.assertGreater(self._count_region_pixels(clean, (84, 34, 96, 186)), 100)
 
+    def test_shading_flattening_suppresses_soft_render_detail_noise(self) -> None:
+        image, mask = soft_shaded_render_fixture()
+        original_flatten = pipeline._flatten_shading
+        try:
+            pipeline._flatten_shading = lambda source, spatial_radius=10, color_radius=22: source.convert("RGB")
+            raw_detailed = _detail_line_mask(image, mask, cleanup=72, print_scale=False, template_style="detailed")
+            raw_clean = _clean_feature_line_mask(image, mask, cleanup=92, print_scale=False)
+        finally:
+            pipeline._flatten_shading = original_flatten
+
+        flattened_detailed = _detail_line_mask(image, mask, cleanup=72, print_scale=False, template_style="detailed")
+        flattened_clean = _clean_feature_line_mask(image, mask, cleanup=92, print_scale=False)
+
+        self.assertLess(self._count_components(flattened_detailed), self._count_components(raw_detailed) * 0.7)
+        self.assertLess(self._count_mask_pixels(flattened_clean), self._count_mask_pixels(raw_clean) * 0.9)
+        self.assertLess(self._count_components(flattened_clean), self._count_components(raw_clean) * 0.7)
+        self.assertGreater(self._count_region_pixels(flattened_clean, (72, 70, 148, 170)), 70)
+
     def test_clean_template_style_drops_lower_body_texture_fragments(self) -> None:
         image, mask = simple_character_with_lower_texture_fixture()
 
@@ -936,6 +981,11 @@ class PrintPipelineTest(unittest.TestCase):
 
     def _count_region_pixels(self, image: Image.Image, box: tuple[int, int, int, int]) -> int:
         return self._count_mask_pixels(image.crop(box))
+
+    def _count_components(self, image: Image.Image) -> int:
+        arr = np.asarray(image.convert("L")) > 0
+        _labels, stats = _connected_components(arr)
+        return max(0, len(stats) - 1)
 
     def _svg_path_bounds(self, path_data: str) -> tuple[float, float, float, float]:
         values = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", path_data)]
