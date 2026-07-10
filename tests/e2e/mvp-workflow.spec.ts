@@ -22,8 +22,14 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByText("Line smoothness")).toBeHidden();
   const traceStyleChoices = page.getByLabel("Trace style");
   await expect(traceStyleChoices.getByRole("button", { name: /Trace Studio/ })).toContainText("Draw clean template lines");
-  await traceStyleChoices.getByRole("button", { name: /Trace Studio/ }).click();
-  await page.getByRole("button", { name: "Start Trace Studio" }).click();
+  await traceStyleChoices.getByText("Optional helpers").click();
+  await traceStyleChoices.getByRole("button", { name: /Starter Detail Lines/ }).click();
+  await page.getByRole("button", { name: "Start Trace Studio with Starter Lines" }).click();
+  const starterGuidance = page.getByLabel("Starter detail line guidance");
+  await expect(starterGuidance).toBeVisible({ timeout: 60_000 });
+  await expect(starterGuidance).toContainText("Auto starter lines are only a rough reference");
+  await expect(starterGuidance).toContainText("Rendered or shaded characters can create messy extra lines");
+  await starterGuidance.getByRole("button", { name: "Use blank Trace Studio" }).click();
   await expect(page.getByText(/Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
   await expect(page.locator(".outer-line-layer")).toHaveCSS("mix-blend-mode", "multiply");

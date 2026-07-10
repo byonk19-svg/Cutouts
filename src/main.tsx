@@ -347,6 +347,9 @@ function App() {
       setSelectedPaintColorIds([]);
       setEditorOpen(openEditor || preservedManualStrokes.length > 0);
       setShowReference(openEditor);
+      setShowSuggestions(false);
+      setShowCutline(true);
+      setShowManualLines(true);
       pendingContentFitRef.current = openEditor || preservedManualStrokes.length > 0;
       resetCleanupChecks();
     } catch (err) {
@@ -642,6 +645,25 @@ function App() {
     const next = traceModeSettings(mode, settings);
     setSettings(next);
     setAnalysis(null);
+  }
+
+  function switchToBlankTraceStudio() {
+    setTraceMode("manual");
+    setAutoStarterOpen(false);
+    setSettings((current) => traceModeSettings("manual", current));
+    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
+    setManualRedoHistory([]);
+    setManualStrokes([]);
+    setSelectedStrokeId(null);
+    setSelectionFeedback("Switched to blank Trace Studio");
+    setEditorOpen(true);
+    setEditorTool("draw");
+    setShowReference(true);
+    setShowSuggestions(false);
+    setShowCutline(true);
+    setShowManualLines(true);
+    setPrintPreview(false);
+    pendingContentFitRef.current = true;
   }
 
   function updateInteriorDetail(value: number) {
@@ -1596,6 +1618,17 @@ function App() {
                       </div>
                     </div>
                   ) : null}
+                  {!traceStudioOpen ? (
+                    <section className="starter-lines-warning" aria-label="Starter detail line guidance">
+                      <div>
+                        <strong>Auto starter lines are only a rough reference</strong>
+                        <span>Rendered or shaded characters can create messy extra lines. For a cleaner wood template, use the original image as the underlay and draw only the face, clothing, hair, and paint-boundary lines you actually need.</span>
+                      </div>
+                      <button className="tool-button" onClick={switchToBlankTraceStudio}>
+                        Use blank Trace Studio
+                      </button>
+                    </section>
+                  ) : null}
                   {traceStudioOpen ? (
                     <section className="selection-inspector" aria-label="Selection Inspector">
                       <div className="selection-inspector-header">
@@ -1667,7 +1700,7 @@ function App() {
                   <p className="editor-note">
                     {traceMode === "manual"
                       ? "Best results come from tracing clean, simple lines over the image underlay. Trace only the face, clothing, and feature lines you want on the final template."
-                      : "Best results: erase extra marks, draw missing face/clothing lines, then export."}
+                      : "Starter lines are rough references. Hide suggestions or switch to blank Trace Studio when the auto lines are noisy."}
                   </p>
                   {traceStudioOpen ? (
                     <section className="trace-guidance-panel" aria-label="What to trace">

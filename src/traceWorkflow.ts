@@ -87,5 +87,5 @@ export function startsWithBlankManualLayer(mode: TraceMode) {
 }
 
 export function opensEditorWithReference(mode: TraceMode) {
-  return mode === "manual";
+  return mode !== "outline";
 }
