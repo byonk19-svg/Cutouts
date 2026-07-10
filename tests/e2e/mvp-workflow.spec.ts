@@ -26,6 +26,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await page.getByRole("button", { name: "Start Trace Studio" }).click();
   await expect(page.getByText(/Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
+  await expect(page.locator(".outer-line-layer")).toHaveCSS("mix-blend-mode", "multiply");
   const underlayGuide = page.getByLabel("Original underlay guide");
   await expect(underlayGuide).toBeVisible();
   await expect(underlayGuide).toContainText("Original underlay is visible");

@@ -955,6 +955,7 @@ button:disabled {
 .outer-line-layer {
   z-index: 3;
   object-fit: contain;
+  mix-blend-mode: multiply;
   pointer-events: none;
 }
 
