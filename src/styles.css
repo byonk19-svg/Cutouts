@@ -357,6 +357,16 @@ button {
   gap: 9px;
 }
 
+.detail-preset-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.detail-preset-group .choice-label {
+  grid-column: 1 / -1;
+}
+
 .choice {
   display: grid;
   gap: 2px;
@@ -1744,6 +1754,10 @@ button:disabled {
   }
 
   .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-preset-group {
     grid-template-columns: 1fr;
   }
 

@@ -3,19 +3,26 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
+from PIL import ImageFilter
 
 from .pipeline import (
     PREVIEW_MAX_PX,
     TemplateSettings,
+    _clean_color_boundary_mask,
+    _clean_feature_line_tuning,
     _detail_line_mask,
+    _filter_clean_detail_components,
     _flatten_detail_work_image,
+    _head_feature_boost_mask,
     _initial_subject_mask,
     _load_image,
     _make_preview_layers,
     _mask_bounds,
     _mask_to_svg_path,
     _preview_mask,
+    _remove_small_components,
     _subject_mask,
 )
 
@@ -37,6 +44,11 @@ def export_trace_debug_layers(image_bytes: bytes, settings: TemplateSettings, ou
     preview_mask = cropped_mask.resize(preview_source.size, Image.Resampling.NEAREST)
     starter_template_style = settings.template_style if settings.template_style != "manual" else "paint"
     flattened_source = _flatten_detail_work_image(preview_source, settings.detail_cleanup, starter_template_style)
+    luminance_edges = _debug_luminance_edges(flattened_source, preview_mask, settings)
+    color_boundaries = _clean_color_boundary_mask(flattened_source, preview_mask, settings.detail_cleanup, print_scale=False)
+    dark_features = _head_feature_boost_mask(flattened_source, preview_mask, settings.detail_cleanup)
+    raw_detail_candidates = _combine_masks(luminance_edges, color_boundaries, dark_features)
+    cleaned_detail_components = _debug_clean_components(raw_detail_candidates, settings)
     starter_detail_mask = _detail_line_mask(
         preview_source,
         preview_mask,
@@ -51,13 +63,41 @@ def export_trace_debug_layers(image_bytes: bytes, settings: TemplateSettings, ou
         _write_image(output_path / "source.png", source),
         _write_image(output_path / "mask.png", initial_mask),
         _write_image(output_path / "filled-mask.png", subject_mask),
-        _write_image(output_path / "flattened-source.png", flattened_source),
-        _write_image(output_path / "starter-detail-mask.png", starter_detail_mask),
+        _write_image(output_path / "flattened.png", flattened_source),
+        _write_image(output_path / "luminance-edges.png", luminance_edges),
+        _write_image(output_path / "color-boundaries.png", color_boundaries),
+        _write_image(output_path / "dark-features.png", dark_features),
+        _write_image(output_path / "raw-detail-candidates.png", raw_detail_candidates),
+        _write_image(output_path / "cleaned-detail-components.png", cleaned_detail_components),
+        _write_image(output_path / "final-starter-details.png", starter_detail_mask),
         _write_bytes(output_path / "outer-line.png", outer_line_png),
         _write_text(output_path / "outer-cut-path.svg", _debug_svg(path_mask.width, path_mask.height, outer_cut_path)),
         _write_bytes(output_path / "final-preview.png", preview_png),
     ]
     return written
+
+
+def _debug_luminance_edges(image: Image.Image, mask: Image.Image, settings: TemplateSettings) -> Image.Image:
+    blur_radius, edge_threshold, _min_area = _clean_feature_line_tuning(settings.detail_cleanup, print_scale=False)
+    gray = image.convert("L").filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    edge_arr = np.asarray(gray.filter(ImageFilter.FIND_EDGES), dtype=np.uint8) > edge_threshold
+    mask_arr = np.asarray(mask.convert("L")) > 0
+    return Image.fromarray(((edge_arr & mask_arr).astype(np.uint8) * 255), mode="L")
+
+
+def _combine_masks(*masks: Image.Image) -> Image.Image:
+    if not masks:
+        return Image.new("L", (1, 1), 0)
+    combined = np.zeros((masks[0].height, masks[0].width), dtype=bool)
+    for mask in masks:
+        combined |= np.asarray(mask.convert("L")) > 0
+    return Image.fromarray((combined.astype(np.uint8) * 255), mode="L")
+
+
+def _debug_clean_components(mask: Image.Image, settings: TemplateSettings) -> Image.Image:
+    _blur_radius, _edge_threshold, min_area = _clean_feature_line_tuning(settings.detail_cleanup, print_scale=False)
+    cleaned = _remove_small_components(mask, max(8, min_area))
+    return _filter_clean_detail_components(cleaned)
 
 
 def _debug_svg(width: int, height: int, path_data: str) -> str:

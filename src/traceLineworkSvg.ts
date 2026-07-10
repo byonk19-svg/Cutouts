@@ -5,6 +5,7 @@ export type TraceLineworkSvgInput = {
   projectName: string;
   analysis: CutoutProjectAnalysis;
   manualStrokes: TraceStroke[];
+  acceptedDetailPngDataUrl?: string | null;
   includeCutline?: boolean;
   includeSuggestions?: boolean;
   includeWhiteBackground?: boolean;
@@ -15,6 +16,7 @@ export function buildTraceLineworkSvg({
   projectName,
   analysis,
   manualStrokes,
+  acceptedDetailPngDataUrl = null,
   includeCutline = true,
   includeSuggestions = false,
   includeWhiteBackground = true,
@@ -39,8 +41,11 @@ export function buildTraceLineworkSvg({
       parts.push("<!-- Missing vector cutline. Regenerate analysis to create outerCutPath. -->");
     }
   }
-  if (includeSuggestions) {
+  if (includeSuggestions && !acceptedDetailPngDataUrl) {
     parts.push(imageLayer("suggestion-layer", analysis.detailLinePngDataUrl, width, height, "0.35"));
+  }
+  if (acceptedDetailPngDataUrl) {
+    parts.push(imageLayer("accepted-detail-layer", acceptedDetailPngDataUrl, width, height, "1"));
   }
 
   parts.push('<g id="manual-strokes" fill="none" stroke="#000000" stroke-linecap="round" stroke-linejoin="round">');

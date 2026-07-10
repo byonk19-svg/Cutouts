@@ -18,10 +18,21 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByRole("button", { name: /Start New/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start Trace Studio with Starter lines" })).toBeVisible();
   await expect(page.getByLabel("What to trace")).toHaveCount(0);
-  await expect(page.getByLabel("Trace style")).toContainText("Other trace options");
-  await expect(page.getByText("Line smoothness")).toBeHidden();
   const traceStyleChoices = page.getByLabel("Trace style");
-  await traceStyleChoices.getByRole("button", { name: /Starter lines/ }).click();
+  await expect(traceStyleChoices).toContainText("Other trace options");
+  await expect(page.getByLabel("Detail strength")).toContainText("Simple");
+  await expect(page.getByLabel("Detail strength")).toContainText("Balanced");
+  await expect(page.getByLabel("Detail strength")).toContainText("Detailed");
+  await expect(traceStyleChoices.getByRole("button", { name: /Balanced Auto Starter/ })).toHaveClass(/selected/);
+  const detailStrength = page.getByLabel("Detail strength");
+  await expect(detailStrength.getByRole("button", { name: /Balanced/ })).toHaveClass(/selected/);
+  await detailStrength.getByRole("button", { name: /Simple/ }).click();
+  await expect(detailStrength.getByRole("button", { name: /Simple/ })).toHaveClass(/selected/);
+  await detailStrength.getByRole("button", { name: /Detailed/ }).click();
+  await expect(detailStrength.getByRole("button", { name: /Detailed/ })).toHaveClass(/selected/);
+  await detailStrength.getByRole("button", { name: /Balanced/ }).click();
+  await expect(detailStrength.getByRole("button", { name: /Balanced/ })).toHaveClass(/selected/);
+  await expect(page.getByText("Line smoothness")).toBeHidden();
   await page.getByRole("button", { name: "Start Trace Studio with Starter lines" }).click();
   const starterGuidance = page.getByLabel("Starter detail line guidance");
   await expect(starterGuidance).toBeVisible({ timeout: 60_000 });
@@ -70,7 +81,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByText(/Stroke 1 of 1/)).toBeVisible();
   await page.locator('select[aria-label="Selected stroke width"]').selectOption("bold");
   await expect(page.getByText(/Bold \/ 34px/)).toBeVisible();
-  await page.getByRole("button", { name: /Show advanced starter-line settings/ }).click();
+  await page.getByRole("button", { name: /Fine-tune starter settings/ }).click();
   await page.getByRole("button", { name: /Reset tracing settings/ }).click();
   await expect(page.getByText(/Stroke 1 of 1/)).toBeVisible();
 

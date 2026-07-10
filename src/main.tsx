@@ -67,10 +67,15 @@ import {
   type TraceViewport
 } from "./traceViewport";
 import {
+  detailPresetFromTraceMode,
+  detailPresetHelp,
+  detailPresetLabel,
+  detailPresetSettings,
   opensEditorWithReference,
   traceModeHelp,
   traceModeLabel,
   traceModeSettings,
+  type DetailPreset,
   type Settings,
   type TraceMode
 } from "./traceWorkflow";
@@ -181,7 +186,7 @@ function App() {
   const canExport = image !== null && analysis !== null && !busy;
   const canSaveProject = image !== null && sourceImageDataUrl !== null && analysis !== null && !busy;
   const canExportSvg = analysis !== null && analysis.outerCutPath.trim().length > 0 && !busy;
-  const advancedTraceModeSelected = traceMode === "marker" || traceMode === "extra";
+  const selectedDetailPreset = detailPresetFromTraceMode(traceMode);
   const traceStudioOpen = traceMode === "manual";
   const selectedStroke = selectedStrokeId ? manualStrokes.find((stroke) => stroke.id === selectedStrokeId) ?? null : null;
   const selectedStrokeSummary = selectedTraceStrokeSummary(manualStrokes, selectedStrokeId);
@@ -422,6 +427,7 @@ function App() {
         projectName,
         analysis,
         manualStrokes,
+        acceptedDetailPngDataUrl: traceStudioOpen ? null : currentDetailDataUrl(),
         includeCutline: true,
         includeSuggestions: showSuggestions,
         includeWhiteBackground: true,
@@ -646,6 +652,13 @@ function App() {
   function applyTraceMode(mode: TraceMode) {
     applyTraceModeUiState(mode);
     const next = traceModeSettings(mode, settings);
+    setSettings(next);
+    setAnalysis(null);
+  }
+
+  function applyDetailPreset(preset: DetailPreset) {
+    const next = detailPresetSettings(preset, settings);
+    applyTraceModeUiState(next.templateStyle);
     setSettings(next);
     setAnalysis(null);
   }
@@ -1354,9 +1367,22 @@ function App() {
               <span className="choice-label">Tracing method</span>
               <button className={traceMode === "paint" ? "choice selected recommended-choice" : "choice recommended-choice"} onClick={() => applyTraceMode("paint")}>
                 <span className="choice-kicker">Recommended</span>
-                <strong>{traceModeLabel("paint")}</strong>
+                <strong>Balanced Auto Starter</strong>
                 <small>Generate editable starter details first, then delete bad lines and add only missing important features.</small>
               </button>
+              <div className="detail-preset-group" aria-label="Detail strength">
+                <span className="choice-label">Detail strength</span>
+                {(["simple", "balanced", "detailed"] as DetailPreset[]).map((preset) => (
+                  <button
+                    key={preset}
+                    className={selectedDetailPreset === preset ? "choice selected" : "choice"}
+                    onClick={() => applyDetailPreset(preset)}
+                  >
+                    <strong>{detailPresetLabel(preset)}</strong>
+                    <small>{detailPresetHelp(preset)}</small>
+                  </button>
+                ))}
+              </div>
               <details className="auto-starter-card" open={autoStarterOpen} onToggle={(event) => setAutoStarterOpen(event.currentTarget.open)}>
                 <summary>
                   <span>
@@ -1406,14 +1432,12 @@ function App() {
 
           <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
             {advancedOpen
-              ? "Hide advanced starter-line settings"
-              : advancedTraceModeSelected
-                ? `Show advanced starter-line settings (${traceModeLabel(traceMode)} selected)`
-                : "Show advanced starter-line settings"}
+              ? "Hide fine-tune starter settings"
+              : `Fine-tune starter settings (${detailPresetLabel(selectedDetailPreset)} selected)`}
           </button>
           {advancedOpen ? (
             <div className="advanced-panel">
-              <p className="helper-note">These settings only affect starter lines, not your manual Trace Studio strokes.</p>
+              <p className="helper-note">These settings only affect starter lines, not your manual Trace Studio strokes. Most projects should use the Detail strength presets above.</p>
               <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
               <p className="helper-note">Higher values round out jagged edges in the cut line.</p>
               {settings.detailLines ? (
@@ -1442,17 +1466,6 @@ function App() {
                   Reset tracing settings
                 </button>
                 <p className="helper-note">Restores the recommended starter settings. Your current editor cleanup is not changed.</p>
-              </div>
-              <div className="choice-group" aria-label="Advanced trace styles">
-                <span className="choice-label">Experimental detail sources</span>
-                <button className={traceMode === "marker" ? "choice selected" : "choice"} onClick={() => applyTraceMode("marker")}>
-                  <strong>{traceModeLabel("marker")}</strong>
-                  <small>{traceModeHelp("marker")}</small>
-                </button>
-                <button className={traceMode === "extra" ? "choice selected" : "choice"} onClick={() => applyTraceMode("extra")}>
-                  <strong>{traceModeLabel("extra")}</strong>
-                  <small>{traceModeHelp("extra")}</small>
-                </button>
               </div>
             </div>
           ) : null}

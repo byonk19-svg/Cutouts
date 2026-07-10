@@ -139,6 +139,22 @@ const analysis = {
 
 {
   const svg = buildTraceLineworkSvg({
+    projectName: "Accepted starter details",
+    analysis,
+    manualStrokes: [],
+    acceptedDetailPngDataUrl: "data:image/png;base64,accepted-detail-lines",
+    includeCutline: true,
+    includeSuggestions: true
+  });
+
+  assert(svg.includes('id="accepted-detail-layer"'), "SVG export should include accepted edited starter detail layer");
+  assert(svg.includes("data:image/png;base64,accepted-detail-lines"), "SVG export should use the accepted edited starter detail data");
+  assert(!svg.includes('id="suggestion-layer"'), "SVG export should suppress raw suggestions when accepted details are provided");
+  assert(!svg.includes("data:image/png;base64,suggestion-lines"), "SVG export should not reintroduce deleted raw suggestions when accepted details are provided");
+}
+
+{
+  const svg = buildTraceLineworkSvg({
     projectName: "Old Project",
     analysis: { ...analysis, outerCutPath: "" },
     manualStrokes: [],

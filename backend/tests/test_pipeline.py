@@ -359,8 +359,13 @@ class PrintPipelineTest(unittest.TestCase):
             "source.png",
             "mask.png",
             "filled-mask.png",
-            "flattened-source.png",
-            "starter-detail-mask.png",
+            "flattened.png",
+            "luminance-edges.png",
+            "color-boundaries.png",
+            "dark-features.png",
+            "raw-detail-candidates.png",
+            "cleaned-detail-components.png",
+            "final-starter-details.png",
             "outer-line.png",
             "outer-cut-path.svg",
             "final-preview.png",
@@ -371,9 +376,9 @@ class PrintPipelineTest(unittest.TestCase):
             self.assertGreater(path.stat().st_size, 0)
         with Image.open(output_dir / "final-preview.png") as final_preview:
             self.assertEqual(final_preview.size, (analysis.preview_width_px, analysis.preview_height_px))
-        with Image.open(output_dir / "flattened-source.png") as flattened:
+        with Image.open(output_dir / "flattened.png") as flattened:
             self.assertEqual(flattened.size, (analysis.preview_width_px, analysis.preview_height_px))
-        with Image.open(output_dir / "starter-detail-mask.png") as starter_detail:
+        with Image.open(output_dir / "final-starter-details.png") as starter_detail:
             self.assertEqual(starter_detail.size, (analysis.preview_width_px, analysis.preview_height_px))
 
     def test_pdf_contains_polished_cover_paint_guide_and_all_tile_pages(self) -> None:
