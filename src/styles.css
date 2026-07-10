@@ -809,6 +809,40 @@ button:disabled {
   accent-color: #1d7a70;
 }
 
+.underlay-explainer {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+  margin: 8px 0 10px;
+  padding: 9px 11px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #31413b;
+  font-size: 12px;
+}
+
+.underlay-explainer svg {
+  margin-top: 1px;
+  color: #1d7a70;
+}
+
+.underlay-explainer div {
+  display: grid;
+  gap: 2px;
+}
+
+.underlay-explainer strong {
+  color: #17201d;
+  font-size: 12px;
+}
+
+.underlay-explainer span {
+  color: #65736c;
+  line-height: 1.35;
+}
+
 .trace-guidance-panel {
   display: grid;
   gap: 8px;

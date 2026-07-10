@@ -1582,6 +1582,21 @@ function App() {
                     </label>
                   </div>
                   {traceStudioOpen ? (
+                    <div className="underlay-explainer" aria-label="Original underlay guide">
+                      <Eye size={16} />
+                      <div>
+                        <strong>
+                          Original underlay is {showReference && !printPreview ? "visible" : "hidden"}
+                        </strong>
+                        <span>
+                          {showReference && !printPreview
+                            ? "It is the faint source image inside the canvas below, behind the black cutline. Raise opacity if you need more color while drawing."
+                            : "Turn on Original underlay to show the source image behind the black cutline while you draw manual detail lines."}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+                  {traceStudioOpen ? (
                     <section className="selection-inspector" aria-label="Selection Inspector">
                       <div className="selection-inspector-header">
                         <div>
@@ -1658,7 +1673,7 @@ function App() {
                     <section className="trace-guidance-panel" aria-label="What to trace">
                       <div>
                         <strong>Trace only transfer-worthy lines</strong>
-                        <span>Use the underlay as a guide for the lines you need on wood.</span>
+                        <span>Look at the faint original image in the canvas below and draw only the lines you need to transfer onto wood.</span>
                       </div>
                       <ul>
                         <li>Face features</li>

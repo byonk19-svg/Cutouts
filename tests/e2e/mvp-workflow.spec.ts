@@ -26,6 +26,10 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await page.getByRole("button", { name: "Start Trace Studio" }).click();
   await expect(page.getByText(/Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
+  const underlayGuide = page.getByLabel("Original underlay guide");
+  await expect(underlayGuide).toBeVisible();
+  await expect(underlayGuide).toContainText("Original underlay is visible");
+  await expect(underlayGuide).toContainText("faint source image inside the canvas below");
   const traceQuality = page.getByLabel("Trace Quality Review");
   await expect(traceQuality).toBeVisible();
   await expect(traceQuality).toContainText("Cutline");
@@ -35,6 +39,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(traceQuality).toContainText("Manual tracing recommended");
   const traceGuidance = page.getByLabel("What to trace");
   await expect(traceGuidance).toBeVisible();
+  await expect(traceGuidance).toContainText("Look at the faint original image in the canvas below");
   await expect(traceGuidance).toContainText("Face features");
   await expect(traceGuidance).toContainText("Clothing borders");
   await expect(traceGuidance).toContainText("Hair shape");
