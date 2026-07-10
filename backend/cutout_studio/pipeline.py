@@ -916,7 +916,7 @@ def _detail_line_mask(
     blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
     cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
     local_threshold = 6 + round((cleanup / 100) * 14)
-    flattened = _flatten_shading(work_image, color_radius=18 + round((cleanup / 100) * 16))
+    flattened = _flatten_detail_work_image(work_image, cleanup, template_style)
     smoothed = flattened.filter(ImageFilter.GaussianBlur(radius=blur_radius))
     rgb = np.asarray(smoothed, dtype=np.uint8)
     mask_arr = np.asarray(work_mask.convert("L")) > 0
@@ -956,8 +956,7 @@ def _detail_line_mask(
 def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     blur_radius, edge_threshold, min_area = _clean_feature_line_tuning(cleanup, print_scale)
-    cleanup_ratio = (cleanup - 76) / 24
-    flattened = _flatten_shading(work_image, color_radius=16 + round(cleanup_ratio * 14))
+    flattened = _flatten_detail_work_image(work_image, cleanup, "clean")
     gray = flattened.convert("L").filter(ImageFilter.GaussianBlur(radius=blur_radius))
     edge_arr = np.asarray(gray.filter(ImageFilter.FIND_EDGES), dtype=np.uint8) > edge_threshold
     mask_arr = np.asarray(work_mask.convert("L")) > 0
@@ -1115,6 +1114,14 @@ def _flatten_shading(image: Image.Image, spatial_radius: int = 10, color_radius:
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
     flattened = cv2.pyrMeanShiftFiltering(rgb, sp=spatial_radius, sr=color_radius)
     return Image.fromarray(flattened, mode="RGB")
+
+
+def _flatten_detail_work_image(image: Image.Image, cleanup: int, template_style: str) -> Image.Image:
+    if template_style in {"clean", "marker"}:
+        adjusted_cleanup = max(cleanup, 90 if template_style == "marker" else 76)
+        cleanup_ratio = (adjusted_cleanup - 76) / 24
+        return _flatten_shading(image, color_radius=16 + round(cleanup_ratio * 14))
+    return _flatten_shading(image, color_radius=18 + round((cleanup / 100) * 16))
 
 
 def _cluster_subject_colors(rgb: np.ndarray, mask_arr: np.ndarray, cluster_count: int) -> np.ndarray:

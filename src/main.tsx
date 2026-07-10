@@ -98,9 +98,9 @@ const defaultSettings: Settings = {
   smoothing: 4,
   speckArea: 60,
   holeArea: 220,
-  detailLines: false,
-  detailCleanup: 100,
-  templateStyle: "manual",
+  detailLines: true,
+  detailCleanup: 88,
+  templateStyle: "paint",
   paletteSize: 6,
   includeInstructionCoverPage: true,
   includePaintGuidePage: true
@@ -121,12 +121,12 @@ function App() {
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>("No saved project");
   const [autosavePaused, setAutosavePaused] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
-  const [traceMode, setTraceMode] = useState<TraceMode>("manual");
-  const [autoStarterOpen, setAutoStarterOpen] = useState(false);
+  const [traceMode, setTraceMode] = useState<TraceMode>("paint");
+  const [autoStarterOpen, setAutoStarterOpen] = useState(true);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editorTool, setEditorTool] = useState<EditorTool>("erase");
+  const [editorTool, setEditorTool] = useState<EditorTool>("remove");
   const [brushSize, setBrushSize] = useState<BrushSize>("normal");
   const [showReference, setShowReference] = useState(false);
   const [referenceOpacity, setReferenceOpacity] = useState(35);
@@ -134,6 +134,7 @@ function App() {
   const [showManualLines, setShowManualLines] = useState(true);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [printPreview, setPrintPreview] = useState(false);
+  const [editableDetailLinesPresent, setEditableDetailLinesPresent] = useState(false);
   const [traceViewport, setTraceViewport] = useState<TraceViewport>(DEFAULT_TRACE_VIEWPORT);
   const [cutlineBounds, setCutlineBounds] = useState<TraceBounds | null>(null);
   const [selectedStrokeId, setSelectedStrokeId] = useState<string | null>(null);
@@ -196,6 +197,7 @@ function App() {
     ? buildTraceQualityReview({
       analysis,
       manualStrokeCount: manualStrokes.length,
+      starterDetailLinesPresent: !traceStudioOpen && editableDetailLinesPresent,
       showReference,
       printPreview
     })
@@ -226,6 +228,7 @@ function App() {
     setTraceViewport(DEFAULT_TRACE_VIEWPORT);
     setCutlineBounds(null);
     setPrintPreview(false);
+    setEditableDetailLinesPresent(false);
   }
 
   useEffect(() => {
@@ -271,6 +274,7 @@ function App() {
     showManualLines,
     showSuggestions,
     printPreview,
+    editedDetailDataUrl,
     traceViewport,
     autosavePaused
   ]);
@@ -278,6 +282,7 @@ function App() {
   useEffect(() => {
     if (!analysis || !editorOpen) return;
     if (traceStudioOpen) {
+      setEditableDetailLinesPresent(false);
       renderManualTraceLayer(manualStrokes);
       return;
     }
@@ -350,6 +355,7 @@ function App() {
       setShowSuggestions(false);
       setShowCutline(true);
       setShowManualLines(true);
+      setEditorTool(defaultEditorToolForTraceMode(nextSettings.templateStyle));
       pendingContentFitRef.current = openEditor || preservedManualStrokes.length > 0;
       resetCleanupChecks();
     } catch (err) {
@@ -475,12 +481,10 @@ function App() {
     setProjectCreatedAt(null);
     setProjectStatus("No saved project");
     setSettings(defaultSettings);
-    setTraceMode("manual");
-    setAutoStarterOpen(false);
+    applyTraceModeUiState("paint");
     setAdvancedOpen(false);
     setAnalysis(null);
     setEditorOpen(false);
-    setEditorTool("erase");
     setBrushSize("normal");
     setShowReference(false);
     setReferenceOpacity(35);
@@ -525,6 +529,7 @@ function App() {
       settings,
       traceMode,
       analysis,
+      editedDetailPngDataUrl: traceStudioOpen ? null : editedDetailDataUrl,
       manualStrokes,
       projectPalette,
       paintGuideEdits: paintGuideEditsFromProjectPalette(projectPalette),
@@ -579,8 +584,7 @@ function App() {
     setProjectName(project.projectName);
     setProjectCreatedAt(project.createdAt);
     setSettings(project.settings);
-    setTraceMode(project.traceMode);
-    setAutoStarterOpen(project.traceMode !== "manual");
+    applyTraceModeUiState(project.traceMode);
     setManualStrokes(project.manualStrokes);
     setProjectPalette(project.projectPalette);
     setSelectedPaintColorIds([]);
@@ -609,7 +613,7 @@ function App() {
     setManualRedoHistory([]);
     setHistory([]);
     setRedoHistory([]);
-    setEditedDetailDataUrl(null);
+    setEditedDetailDataUrl(project.editedDetailPngDataUrl);
     setError(null);
     setProjectStatus(status);
     strokeIdRef.current = highestStrokeNumber(project.manualStrokes);
@@ -623,33 +627,31 @@ function App() {
   }
 
   function resetTracingSettings() {
+    const nextMode = traceMode === "manual" ? "manual" : "paint";
     setSettings((current) => ({
-      ...current,
+      ...traceModeSettings(nextMode, current),
       threshold: defaultSettings.threshold,
       smoothing: defaultSettings.smoothing,
       speckArea: defaultSettings.speckArea,
       holeArea: defaultSettings.holeArea,
-      detailLines: defaultSettings.detailLines,
-      detailCleanup: defaultSettings.detailCleanup,
-      templateStyle: defaultSettings.templateStyle
+      detailLines: nextMode === "manual" ? false : defaultSettings.detailLines,
+      detailCleanup: nextMode === "manual" ? 100 : defaultSettings.detailCleanup,
+      templateStyle: nextMode
     }));
-    setTraceMode("manual");
-    setAutoStarterOpen(false);
+    applyTraceModeUiState(nextMode);
     setAdvancedOpen(false);
     setProjectStatus(image ? "Unsaved changes" : "No saved project");
   }
 
   function applyTraceMode(mode: TraceMode) {
-    setTraceMode(mode);
-    setAutoStarterOpen(mode !== "manual");
+    applyTraceModeUiState(mode);
     const next = traceModeSettings(mode, settings);
     setSettings(next);
     setAnalysis(null);
   }
 
   function switchToBlankTraceStudio() {
-    setTraceMode("manual");
-    setAutoStarterOpen(false);
+    applyTraceModeUiState("manual");
     setSettings((current) => traceModeSettings("manual", current));
     setManualHistory((items) => [...items.slice(-19), manualStrokes]);
     setManualRedoHistory([]);
@@ -657,7 +659,6 @@ function App() {
     setSelectedStrokeId(null);
     setSelectionFeedback("Switched to blank Trace Studio");
     setEditorOpen(true);
-    setEditorTool("draw");
     setShowReference(true);
     setShowSuggestions(false);
     setShowCutline(true);
@@ -669,6 +670,12 @@ function App() {
   function updateInteriorDetail(value: number) {
     setSettings((current) => ({ ...current, detailCleanup: value, detailLines: true, templateStyle: traceMode }));
     setAnalysis(null);
+  }
+
+  function applyTraceModeUiState(mode: TraceMode) {
+    setTraceMode(mode);
+    setAutoStarterOpen(mode !== "manual");
+    setEditorTool(defaultEditorToolForTraceMode(mode));
   }
 
   function updatePaintGuideEntry(id: string, patch: Partial<Omit<ProjectPaintColor, "id" | "source">>) {
@@ -765,6 +772,7 @@ function App() {
       if (!context) return;
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(image, 0, 0);
+      setEditableDetailLinesPresent(canvasHasVisibleInk(canvas));
     };
     image.src = src;
   }
@@ -1005,6 +1013,7 @@ function App() {
       }
       safelyReleasePointerCapture(event.currentTarget, event.pointerId);
       setEditedDetailDataUrl(event.currentTarget.toDataURL("image/png"));
+      setEditableDetailLinesPresent(canvasHasVisibleInk(event.currentTarget));
     }
     drawingRef.current = false;
     lastPointRef.current = null;
@@ -1081,6 +1090,7 @@ function App() {
     saveHistorySnapshot();
     context.putImageData(imageData, 0, 0);
     setEditedDetailDataUrl(canvas.toDataURL("image/png"));
+    setEditableDetailLinesPresent(canvasHasVisibleInk(canvas));
   }
 
   function renderManualTraceLayer(strokes: TraceStroke[], draftStroke?: TraceStroke, showSelection = !printPreview) {
@@ -1342,22 +1352,22 @@ function App() {
 
             <div className="choice-group trace-method-picker" aria-label="Trace style">
               <span className="choice-label">Tracing method</span>
-              <button className={traceMode === "manual" ? "choice selected recommended-choice" : "choice recommended-choice"} onClick={() => applyTraceMode("manual")}>
+              <button className={traceMode === "paint" ? "choice selected recommended-choice" : "choice recommended-choice"} onClick={() => applyTraceMode("paint")}>
                 <span className="choice-kicker">Recommended</span>
-                <strong>{traceModeLabel("manual")}</strong>
-                <small>Draw clean template lines over the image underlay. Best for printable wood cutouts.</small>
+                <strong>{traceModeLabel("paint")}</strong>
+                <small>Generate editable starter details first, then delete bad lines and add only missing important features.</small>
               </button>
               <details className="auto-starter-card" open={autoStarterOpen} onToggle={(event) => setAutoStarterOpen(event.currentTarget.open)}>
                 <summary>
                   <span>
-                    <strong>Optional helpers</strong>
-                    <small>Need help getting started? Add rough starter lines or generate only the outside shape.</small>
+                    <strong>Other trace options</strong>
+                    <small>Use a blank layer or generate only the outside shape when starter lines are not useful.</small>
                   </span>
                 </summary>
                 <div className="auto-starter-options">
-                  <button className={traceMode === "paint" ? "choice selected" : "choice"} onClick={() => applyTraceMode("paint")}>
-                    <strong>{traceModeLabel("paint")}</strong>
-                    <small>{traceModeHelp("paint")}</small>
+                  <button className={traceMode === "manual" ? "choice selected" : "choice"} onClick={() => applyTraceMode("manual")}>
+                    <strong>{traceModeLabel("manual")}</strong>
+                    <small>{traceModeHelp("manual")}</small>
                   </button>
                   <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
                     <strong>{traceModeLabel("outline")}</strong>
@@ -1365,7 +1375,7 @@ function App() {
                   </button>
                 </div>
               </details>
-              <p className="helper-note">Best results come from tracing clean, simple lines over the image underlay. Starter lines are optional and usually need cleanup.</p>
+              <p className="helper-note">Starter lines are generated automatically. Delete bad lines and add only missing important features.</p>
             </div>
           </div>
 
@@ -1431,7 +1441,7 @@ function App() {
                   <RotateCcw size={15} />
                   Reset tracing settings
                 </button>
-                <p className="helper-note">Restores the recommended starter settings. Your manual Trace Studio lines are not changed.</p>
+                <p className="helper-note">Restores the recommended starter settings. Your current editor cleanup is not changed.</p>
               </div>
               <div className="choice-group" aria-label="Advanced trace styles">
                 <span className="choice-label">Experimental detail sources</span>
@@ -1598,14 +1608,16 @@ function App() {
                     </label>
                     <label>
                       <input type="checkbox" checked={showManualLines} onChange={() => setShowManualLines((shown) => !shown)} />
-                      Manual lines
+                      {traceStudioOpen ? "Manual lines" : "Editable starter lines"}
                     </label>
-                    <label>
-                      <input type="checkbox" checked={showSuggestions} onChange={() => setShowSuggestions((shown) => !shown)} />
-                      Starter lines
-                    </label>
+                    {traceStudioOpen ? (
+                      <label>
+                        <input type="checkbox" checked={showSuggestions} onChange={() => setShowSuggestions((shown) => !shown)} />
+                        Starter lines
+                      </label>
+                    ) : null}
                   </div>
-                  {traceStudioOpen ? (
+                  {editorOpen ? (
                     <div className="underlay-explainer" aria-label="Original underlay guide">
                       <Eye size={16} />
                       <div>
@@ -1614,8 +1626,8 @@ function App() {
                         </strong>
                         <span>
                           {showReference && !printPreview
-                            ? "It is the faint source image inside the canvas below, behind the black cutline. Raise opacity if you need more color while drawing."
-                            : "Turn on Original underlay to show the source image behind the black cutline while you draw manual detail lines."}
+                            ? "It is the faint source image inside the canvas below, behind the black cutline and detail lines. Raise opacity if you need more color while drawing."
+                            : "Turn on Show original to show the source image behind the black cutline and detail lines."}
                         </span>
                       </div>
                     </div>
@@ -1623,8 +1635,8 @@ function App() {
                   {!traceStudioOpen ? (
                     <section className="starter-lines-warning" aria-label="Starter detail line guidance">
                       <div>
-                        <strong>Starter lines are only a rough reference</strong>
-                        <span>Rendered or shaded characters can create messy extra lines. For a cleaner wood template, use the original image as the underlay and draw only the face, clothing, hair, and paint-boundary lines you actually need.</span>
+                        <strong>Starter lines are generated automatically</strong>
+                        <span>Delete bad lines first, then add only missing face, clothing, hair, accessory, and paint-boundary lines you need on wood.</span>
                       </div>
                       <button className="tool-button" onClick={switchToBlankTraceStudio}>
                         Use blank Trace Studio
@@ -1702,13 +1714,13 @@ function App() {
                   <p className="editor-note">
                     {traceMode === "manual"
                       ? "Best results come from tracing clean, simple lines over the image underlay. Trace only the face, clothing, and feature lines you want on the final template."
-                      : "Starter lines are rough references. Hide starter lines or switch to blank Trace Studio when they are noisy."}
+                      : "Starter lines are generated automatically. Delete bad lines and add only missing important features."}
                   </p>
-                  {traceStudioOpen ? (
+                  {editorOpen ? (
                     <section className="trace-guidance-panel" aria-label="What to trace">
                       <div>
                         <strong>Trace only transfer-worthy lines</strong>
-                        <span>Look at the faint original image in the canvas below and draw only the lines you need to transfer onto wood.</span>
+                        <span>Use the faint original image in the canvas below and keep only the lines you need to transfer onto wood.</span>
                       </div>
                       <ul>
                         <li>Face features</li>
@@ -1824,8 +1836,8 @@ function App() {
                       <dd>{traceQualityReview.originalUnderlayStatus}</dd>
                     </div>
                     <div>
-                      <dt>Manual detail lines</dt>
-                      <dd>{traceQualityReview.manualDetailLineCount}</dd>
+                      <dt>Detail lines</dt>
+                      <dd>{traceQualityReview.detailLineStatus}</dd>
                     </div>
                     <div>
                       <dt>Export readiness</dt>
@@ -2214,6 +2226,23 @@ function traceActionLabel({ image, analysis, busy, traceMode }: { image: File | 
   if (traceMode === "paint" || traceMode === "marker" || traceMode === "extra") return "Start Trace Studio with Starter lines";
   if (traceMode === "outline") return "Generate Outside Cutline Only";
   return "Start Trace Studio";
+}
+
+function defaultEditorToolForTraceMode(mode: TraceMode): EditorTool {
+  return mode === "manual" ? "draw" : "remove";
+}
+
+function canvasHasVisibleInk(canvas: HTMLCanvasElement) {
+  const context = canvas.getContext("2d");
+  if (!context) return false;
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  for (let index = 0; index < pixels.length; index += 4) {
+    const alpha = pixels[index + 3];
+    if (alpha > 8 && (pixels[index] < 245 || pixels[index + 1] < 245 || pixels[index + 2] < 245)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function workflowStep(label: string, target: WorkflowTarget, complete: boolean, available: boolean) {

@@ -359,6 +359,8 @@ class PrintPipelineTest(unittest.TestCase):
             "source.png",
             "mask.png",
             "filled-mask.png",
+            "flattened-source.png",
+            "starter-detail-mask.png",
             "outer-line.png",
             "outer-cut-path.svg",
             "final-preview.png",
@@ -369,6 +371,10 @@ class PrintPipelineTest(unittest.TestCase):
             self.assertGreater(path.stat().st_size, 0)
         with Image.open(output_dir / "final-preview.png") as final_preview:
             self.assertEqual(final_preview.size, (analysis.preview_width_px, analysis.preview_height_px))
+        with Image.open(output_dir / "flattened-source.png") as flattened:
+            self.assertEqual(flattened.size, (analysis.preview_width_px, analysis.preview_height_px))
+        with Image.open(output_dir / "starter-detail-mask.png") as starter_detail:
+            self.assertEqual(starter_detail.size, (analysis.preview_width_px, analysis.preview_height_px))
 
     def test_pdf_contains_polished_cover_paint_guide_and_all_tile_pages(self) -> None:
         settings = TemplateSettings(finished_height_in=30, threshold=40, palette_size=3, project_name="Coraline Packet")

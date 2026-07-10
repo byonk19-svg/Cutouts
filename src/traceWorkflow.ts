@@ -68,7 +68,7 @@ export function traceModeSettings(mode: TraceMode, current: Settings): Settings 
 
 export function traceModeLabel(mode: TraceMode) {
   if (mode === "outline") return "Outside Shape Only Export";
-  if (mode === "manual") return "Trace Studio";
+  if (mode === "manual") return "Blank Trace Studio";
   if (mode === "marker") return "Experimental Starter lines";
   if (mode === "extra") return "Detailed Paint Map";
   return "Starter lines";
@@ -76,10 +76,10 @@ export function traceModeLabel(mode: TraceMode) {
 
 export function traceModeHelp(mode: TraceMode) {
   if (mode === "outline") return "Generate outside cutline only.";
-  if (mode === "manual") return "Best for printable wood templates.";
+  if (mode === "manual") return "Start with a blank layer when generated starter lines are not useful.";
   if (mode === "marker") return "Rough starter lines. Usually needs cleanup.";
   if (mode === "extra") return "More color boundaries for paint planning.";
-  return "Optional starter lines you can edit or erase.";
+  return "Auto-generated first draft you can delete from and add to.";
 }
 
 export function startsWithBlankManualLayer(mode: TraceMode) {

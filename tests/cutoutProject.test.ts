@@ -87,6 +87,7 @@ const analysis = {
     settings,
     traceMode: "manual",
     analysis,
+    editedDetailPngDataUrl: null,
     manualStrokes: strokes,
     paintGuideEdits: [
       { hex: "#f1ce2d", label: "Coat", note: "main raincoat body", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" },
@@ -112,6 +113,7 @@ const analysis = {
   assertEqual(project.paintGuideEdits.length, 3, "project serialization should include paint guide edits");
   assertEqual(project.analysis.outerLinePngDataUrl, analysis.outerLinePngDataUrl, "project should keep the cutline image");
   assertEqual(project.analysis.detailLinePngDataUrl, analysis.detailLinePngDataUrl, "project should keep the suggestion layer image");
+  assertEqual(project.editedDetailPngDataUrl, null, "manual projects should not store an edited raster detail layer");
 
   const serialized = serializeCutoutProject(project);
   assert(!serialized.includes("selectedStrokeId"), "project autosave should not include transient selected stroke state");
@@ -136,6 +138,40 @@ const analysis = {
   assertEqual(restored.traceViewport.panY, -8, "round trip should preserve viewport");
   assertEqual(restored.settings.includeInstructionCoverPage, true, "round trip should preserve instruction cover setting");
   assertEqual(restored.settings.includePaintGuidePage, true, "round trip should preserve paint guide setting");
+}
+
+{
+  const editedDetailPngDataUrl = "data:image/png;base64,edited-detail";
+  const project = createCutoutProjectSnapshot({
+    projectName: "Starter cleanup",
+    createdAt: "2026-07-07T10:00:00.000Z",
+    updatedAt: "2026-07-07T10:05:00.000Z",
+    sourceImage: {
+      name: "starter.png",
+      type: "image/png",
+      dataUrl: "data:image/png;base64,source"
+    },
+    settings: { ...settings, detailLines: true, detailCleanup: 88, templateStyle: "paint" },
+    traceMode: "paint",
+    analysis,
+    editedDetailPngDataUrl,
+    manualStrokes: [],
+    paintGuideEdits: [],
+    referenceOpacity: 42,
+    layerVisibility: {
+      showReference: true,
+      showCutline: true,
+      showManualLines: true,
+      showSuggestions: false,
+      printPreview: false
+    },
+    traceViewport: { zoom: 1.1, panX: 3, panY: 4 }
+  });
+
+  const restored = restoreCutoutProject(serializeCutoutProject(project));
+
+  assertEqual(project.editedDetailPngDataUrl, editedDetailPngDataUrl, "starter project should store edited detail layer");
+  assertEqual(restored.editedDetailPngDataUrl, editedDetailPngDataUrl, "round trip should preserve edited starter detail layer");
 }
 
 {
@@ -168,6 +204,7 @@ const analysis = {
   assertEqual(restored.settings.includePaintGuidePage, true, "legacy project import should default paint guide on");
   assertEqual(restored.paintGuideEdits.length, 0, "legacy project import should default paint guide edits to empty");
   assertEqual(restored.projectPalette.length, 1, "legacy project import should seed project palette from detected colors");
+  assertEqual(restored.editedDetailPngDataUrl, null, "legacy project import should default edited starter detail layer to null");
 }
 
 {

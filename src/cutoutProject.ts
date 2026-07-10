@@ -67,6 +67,7 @@ export type CutoutProject = {
   settings: Settings;
   traceMode: TraceMode;
   analysis: CutoutProjectAnalysis;
+  editedDetailPngDataUrl: string | null;
   manualStrokes: TraceStroke[];
   projectPalette: ProjectPaintColor[];
   paintGuideEdits: PaintGuideEdit[];
@@ -75,7 +76,8 @@ export type CutoutProject = {
   traceViewport: TraceViewport;
 };
 
-export type CutoutProjectSnapshotInput = Omit<CutoutProject, "schemaVersion" | "projectPalette" | "paintGuideEdits"> & {
+export type CutoutProjectSnapshotInput = Omit<CutoutProject, "schemaVersion" | "editedDetailPngDataUrl" | "projectPalette" | "paintGuideEdits"> & {
+  editedDetailPngDataUrl?: string | null;
   projectPalette?: ProjectPaintColor[];
   paintGuideEdits?: PaintGuideEdit[];
 };
@@ -97,6 +99,7 @@ export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): 
         matches: color.matches.map((match) => ({ ...match }))
       }))
     },
+    editedDetailPngDataUrl: input.editedDetailPngDataUrl ?? null,
     manualStrokes: input.manualStrokes.map((stroke) => ({
       ...stroke,
       points: stroke.points.map((point) => ({ ...point }))
@@ -125,7 +128,7 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
     throw new Error("This project file uses an unsupported Cutout Studio version.");
   }
 
-  const project = parsed as CutoutProject & { paintGuideEdits?: unknown; projectPalette?: unknown };
+  const project = parsed as CutoutProject & { editedDetailPngDataUrl?: unknown; paintGuideEdits?: unknown; projectPalette?: unknown };
   assertString(project.createdAt, "createdAt");
   assertString(project.updatedAt, "updatedAt");
   assertSourceImage(project.sourceImage);
@@ -136,6 +139,10 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
   assertSettings(project.settings);
   assertTraceMode(project.traceMode);
   assertAnalysis(project.analysis);
+  if (project.editedDetailPngDataUrl === undefined) project.editedDetailPngDataUrl = null;
+  if (project.editedDetailPngDataUrl !== null && typeof project.editedDetailPngDataUrl !== "string") {
+    throw new Error("Project editedDetailPngDataUrl is invalid.");
+  }
   assertManualStrokes(project.manualStrokes);
   if (!Array.isArray(project.paintGuideEdits)) project.paintGuideEdits = [];
   assertPaintGuideEdits(project.paintGuideEdits);

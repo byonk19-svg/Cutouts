@@ -50,9 +50,24 @@ const analysis: CutoutProjectAnalysis = {
   assertEqual(review.tileCountText, "4 x 4 pages (16 total)", "review should format tile layout");
   assertEqual(review.originalUnderlayStatus, "Visible", "review should report visible underlay");
   assertEqual(review.manualDetailLineCount, 0, "review should include manual stroke count");
+  assertEqual(review.detailLineStatus, "None", "review should report missing detail lines");
   assert(review.warnings.some((warning) => warning.includes("checkerboard background")), "review should keep backend checkerboard warning");
   assert(review.warnings.some((warning) => warning.includes("Manual tracing recommended")), "review should warn when no manual detail lines exist");
   assertEqual(review.exportReadiness, "Good for outside cutline, incomplete for paint/details", "review should summarize export readiness");
+}
+
+{
+  const review = buildTraceQualityReview({
+    analysis,
+    manualStrokeCount: 0,
+    starterDetailLinesPresent: true,
+    showReference: true,
+    printPreview: false
+  });
+
+  assertEqual(review.detailLineStatus, "Editable starter lines present", "starter workflow should count the accepted editable detail layer");
+  assert(!review.warnings.some((warning) => warning.includes("Manual tracing recommended")), "starter workflow should not demand manual tracing when editable detail lines exist");
+  assertEqual(review.exportReadiness, "Ready", "starter detail layer should make the packet export-ready");
 }
 
 {

@@ -16,21 +16,22 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByLabel("Guided workflow")).toContainText("Generate cutline");
   await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Generate cutline/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Start New/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start Trace Studio" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start Trace Studio with Starter lines" })).toBeVisible();
   await expect(page.getByLabel("What to trace")).toHaveCount(0);
-  await expect(page.getByLabel("Trace style")).toContainText("Optional helpers");
+  await expect(page.getByLabel("Trace style")).toContainText("Other trace options");
   await expect(page.getByText("Line smoothness")).toBeHidden();
   const traceStyleChoices = page.getByLabel("Trace style");
-  await expect(traceStyleChoices.getByRole("button", { name: /Trace Studio/ })).toContainText("Draw clean template lines");
-  await traceStyleChoices.getByText("Optional helpers").click();
   await traceStyleChoices.getByRole("button", { name: /Starter lines/ }).click();
   await page.getByRole("button", { name: "Start Trace Studio with Starter lines" }).click();
   const starterGuidance = page.getByLabel("Starter detail line guidance");
   await expect(starterGuidance).toBeVisible({ timeout: 60_000 });
-  await expect(starterGuidance).toContainText("Starter lines are only a rough reference");
-  await expect(starterGuidance).toContainText("Rendered or shaded characters can create messy extra lines");
+  await expect(starterGuidance).toContainText("Starter lines are generated automatically");
+  await expect(starterGuidance).toContainText("Delete bad lines first");
+  await expect(page.getByLabel("Template editor tools").getByRole("button", { name: /Click to remove line/ })).toHaveClass(/selected/);
+  await expect(page.getByLabel("Trace Studio layer visibility")).toContainText("Editable starter lines");
+  await expect(page.getByLabel("What to trace")).toContainText("keep only the lines you need to transfer onto wood");
   await starterGuidance.getByRole("button", { name: "Use blank Trace Studio" }).click();
-  await expect(page.getByText(/Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/Blank Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
   await expect(page.locator(".outer-line-layer")).toHaveCSS("mix-blend-mode", "multiply");
   const underlayGuide = page.getByLabel("Original underlay guide");
@@ -46,7 +47,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(traceQuality).toContainText("Manual tracing recommended");
   const traceGuidance = page.getByLabel("What to trace");
   await expect(traceGuidance).toBeVisible();
-  await expect(traceGuidance).toContainText("Look at the faint original image in the canvas below");
+  await expect(traceGuidance).toContainText("Use the faint original image in the canvas below");
   await expect(traceGuidance).toContainText("Face features");
   await expect(traceGuidance).toContainText("Clothing borders");
   await expect(traceGuidance).toContainText("Hair shape");
@@ -82,7 +83,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
 
   await expect(page.getByText("Auto-saved")).toBeVisible({ timeout: 15_000 });
   await page.reload();
-  await expect(page.getByText(/Trace Studio Editor/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Blank Trace Studio Editor/)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
 
   const paintRows = page.locator(".palette-row");

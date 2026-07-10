@@ -6,7 +6,10 @@ from pathlib import Path
 from PIL import Image
 
 from .pipeline import (
+    PREVIEW_MAX_PX,
     TemplateSettings,
+    _detail_line_mask,
+    _flatten_detail_work_image,
     _initial_subject_mask,
     _load_image,
     _make_preview_layers,
@@ -29,6 +32,18 @@ def export_trace_debug_layers(image_bytes: bytes, settings: TemplateSettings, ou
     cropped_source = source.crop(bounds)
     cropped_mask = subject_mask.crop(bounds)
     preview_png, outer_line_png, _detail_line_png, _paint_guide_png = _make_preview_layers(cropped_source, cropped_mask, settings)
+    preview_source = cropped_source.copy()
+    preview_source.thumbnail((PREVIEW_MAX_PX, PREVIEW_MAX_PX), Image.Resampling.LANCZOS)
+    preview_mask = cropped_mask.resize(preview_source.size, Image.Resampling.NEAREST)
+    starter_template_style = settings.template_style if settings.template_style != "manual" else "paint"
+    flattened_source = _flatten_detail_work_image(preview_source, settings.detail_cleanup, starter_template_style)
+    starter_detail_mask = _detail_line_mask(
+        preview_source,
+        preview_mask,
+        cleanup=settings.detail_cleanup,
+        print_scale=False,
+        template_style=starter_template_style,
+    )
     path_mask = _preview_mask(cropped_source, cropped_mask)
     outer_cut_path = _mask_to_svg_path(path_mask, simplify_px=max(1.2, settings.smoothing))
 
@@ -36,6 +51,8 @@ def export_trace_debug_layers(image_bytes: bytes, settings: TemplateSettings, ou
         _write_image(output_path / "source.png", source),
         _write_image(output_path / "mask.png", initial_mask),
         _write_image(output_path / "filled-mask.png", subject_mask),
+        _write_image(output_path / "flattened-source.png", flattened_source),
+        _write_image(output_path / "starter-detail-mask.png", starter_detail_mask),
         _write_bytes(output_path / "outer-line.png", outer_line_png),
         _write_text(output_path / "outer-cut-path.svg", _debug_svg(path_mask.width, path_mask.height, outer_cut_path)),
         _write_bytes(output_path / "final-preview.png", preview_png),

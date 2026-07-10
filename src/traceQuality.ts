@@ -3,6 +3,7 @@ import type { CutoutProjectAnalysis } from "./cutoutProject.ts";
 export type TraceQualityReviewInput = {
   analysis: CutoutProjectAnalysis;
   manualStrokeCount: number;
+  starterDetailLinesPresent?: boolean;
   showReference: boolean;
   printPreview: boolean;
 };
@@ -17,6 +18,7 @@ export type TraceQualityReview = {
   tileCountText: string;
   originalUnderlayStatus: "Visible" | "Hidden" | "Hidden in print preview";
   manualDetailLineCount: number;
+  detailLineStatus: string;
   exportReadiness: "Ready" | "Good for outside cutline, incomplete for paint/details" | "Regenerate cutline first";
   warnings: string[];
 };
@@ -24,6 +26,7 @@ export type TraceQualityReview = {
 export function buildTraceQualityReview({
   analysis,
   manualStrokeCount,
+  starterDetailLinesPresent = false,
   showReference,
   printPreview
 }: TraceQualityReviewInput): TraceQualityReview {
@@ -45,7 +48,8 @@ export function buildTraceQualityReview({
   if ((analysis.traceQuality?.subjectCoverage ?? 1) < 0.05) {
     warnings.push("The trace has a small detected subject. Check that the source image contains one complete cutout subject.");
   }
-  if (manualStrokeCount === 0) {
+  const hasDetailLines = manualStrokeCount > 0 || starterDetailLinesPresent;
+  if (!hasDetailLines) {
     warnings.push("Manual tracing recommended: no interior detail lines have been drawn yet.");
   }
 
@@ -59,14 +63,21 @@ export function buildTraceQualityReview({
     tileCountText: `${analysis.tileCols} x ${analysis.tileRows} pages (${analysis.tileCount} total)`,
     originalUnderlayStatus: printPreview ? "Hidden in print preview" : showReference ? "Visible" : "Hidden",
     manualDetailLineCount: manualStrokeCount,
-    exportReadiness: exportReadiness(vectorCutlinePresent, manualStrokeCount),
+    detailLineStatus: detailLineStatus(manualStrokeCount, starterDetailLinesPresent),
+    exportReadiness: exportReadiness(vectorCutlinePresent, hasDetailLines),
     warnings: uniqueWarnings(warnings)
   };
 }
 
-function exportReadiness(vectorCutlinePresent: boolean, manualStrokeCount: number): TraceQualityReview["exportReadiness"] {
+function detailLineStatus(manualStrokeCount: number, starterDetailLinesPresent: boolean) {
+  if (manualStrokeCount > 0) return `${manualStrokeCount} manual stroke${manualStrokeCount === 1 ? "" : "s"}`;
+  if (starterDetailLinesPresent) return "Editable starter lines present";
+  return "None";
+}
+
+function exportReadiness(vectorCutlinePresent: boolean, hasDetailLines: boolean): TraceQualityReview["exportReadiness"] {
   if (!vectorCutlinePresent) return "Regenerate cutline first";
-  if (manualStrokeCount === 0) return "Good for outside cutline, incomplete for paint/details";
+  if (!hasDetailLines) return "Good for outside cutline, incomplete for paint/details";
   return "Ready";
 }
 

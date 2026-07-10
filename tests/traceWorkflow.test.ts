@@ -32,8 +32,8 @@ const baseSettings: Settings = {
 {
   const settings = traceModeSettings("manual", baseSettings);
 
-  assertEqual(traceModeLabel("manual"), "Trace Studio", "manual mode should be labeled as the Trace Studio workflow");
-  assertEqual(traceModeHelp("manual"), "Best for printable wood templates.", "manual mode should be presented as the recommended workflow");
+  assertEqual(traceModeLabel("manual"), "Blank Trace Studio", "manual mode should be labeled as the blank fallback workflow");
+  assert(traceModeHelp("manual").includes("blank layer"), "manual mode copy should present it as a blank fallback");
   assert(startsWithBlankManualLayer("manual"), "manual mode should start with a blank detail layer");
   assert(opensEditorWithReference("manual"), "manual mode should open the editor with the reference visible");
   assertEqual(settings.detailLines, false, "manual mode should not import generated detail suggestions into the editable layer");
@@ -44,7 +44,7 @@ const baseSettings: Settings = {
 {
   assertEqual(traceModeLabel("outline"), "Outside Shape Only Export", "outline mode should be described as a secondary outside shape path");
   assertEqual(traceModeLabel("paint"), "Starter lines", "paint mode should be described as editable starter lines");
-  assert(traceModeHelp("paint").includes("Optional starter lines"), "paint mode copy should set expectation that starter lines are optional and editable");
+  assert(traceModeHelp("paint").includes("first draft"), "paint mode copy should set expectation that starter lines are the editable first draft");
   assert(opensEditorWithReference("paint"), "starter detail mode should open the editor so rough-line guidance is visible");
   assert(!opensEditorWithReference("outline"), "outside-shape-only mode should stay in preview instead of opening the detail editor");
   assertEqual(traceModeLabel("marker"), "Experimental Starter lines", "marker mode should no longer promise final marker template art");
