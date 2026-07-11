@@ -41,6 +41,10 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByLabel("Template editor tools").getByRole("button", { name: /Click to remove line/ })).toHaveClass(/selected/);
   await expect(page.getByLabel("Trace Studio layer visibility")).toContainText("Editable starter lines");
   await expect(page.getByLabel("What to trace")).toContainText("keep only the lines you need to transfer onto wood");
+  await expectTraceFit(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectTraceFit(page);
+  await page.setViewportSize({ width: 1440, height: 1100 });
   await starterGuidance.getByRole("button", { name: "Use blank Trace Studio" }).click();
   await expect(page.getByText(/Blank Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
@@ -73,6 +77,13 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await page.getByLabel("Review cutline").check();
   await page.getByLabel("Remove extra marks").check();
   await page.getByLabel("Draw missing details").check();
+  await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
+  await expect(paintReview).toBeVisible();
+  const paintGuideSummary = paintGuide.locator(".paint-guide-disclosure-summary");
+  await paintGuideSummary.click();
+  await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(false);
+  await expect(paintReview).toBeHidden();
+  await paintGuideSummary.click();
   await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
   await expect(paintReview).toBeVisible();
 
@@ -226,6 +237,61 @@ async function canvasLocalPoint(canvas: Locator, xFraction: number, yFraction: n
     x: box.width * xFraction,
     y: box.height * yFraction
   };
+}
+
+async function expectTraceFit(page: Page) {
+  const viewport = page.locator(".template-editor");
+  const cutline = viewport.locator(".outer-line-layer");
+  const measure = async () => {
+    const [viewportBox, cutlineBox, pixelBounds] = await Promise.all([
+      viewport.boundingBox(),
+      cutline.boundingBox(),
+      cutline.evaluate((element) => {
+        const image = element as HTMLImageElement;
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d");
+        if (!context || !canvas.width || !canvas.height) return null;
+        context.drawImage(image, 0, 0);
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        let left = canvas.width;
+        let top = canvas.height;
+        let right = -1;
+        let bottom = -1;
+        for (let y = 0; y < canvas.height; y += 1) {
+          for (let x = 0; x < canvas.width; x += 1) {
+            if (pixels[(y * canvas.width + x) * 4 + 3] < 16) continue;
+            left = Math.min(left, x);
+            top = Math.min(top, y);
+            right = Math.max(right, x);
+            bottom = Math.max(bottom, y);
+          }
+        }
+        if (right < left || bottom < top) return null;
+        return { left, top, right: right + 1, bottom: bottom + 1, width: canvas.width, height: canvas.height };
+      })
+    ]);
+    if (!viewportBox || !cutlineBox || !pixelBounds) return null;
+
+    const subjectBox = {
+      x: cutlineBox.x + (pixelBounds.left / pixelBounds.width) * cutlineBox.width,
+      y: cutlineBox.y + (pixelBounds.top / pixelBounds.height) * cutlineBox.height,
+      width: ((pixelBounds.right - pixelBounds.left) / pixelBounds.width) * cutlineBox.width,
+      height: ((pixelBounds.bottom - pixelBounds.top) / pixelBounds.height) * cutlineBox.height
+    };
+
+    return {
+      heightRatio: subjectBox.height / viewportBox.height,
+      xCenterOffset: Math.abs(subjectBox.x + subjectBox.width / 2 - (viewportBox.x + viewportBox.width / 2)) / viewportBox.width,
+      yCenterOffset: Math.abs(subjectBox.y + subjectBox.height / 2 - (viewportBox.y + viewportBox.height / 2)) / viewportBox.height
+    };
+  };
+
+  await expect.poll(async () => (await measure())?.heightRatio ?? 0).toBeGreaterThanOrEqual(0.7);
+  await expect.poll(async () => (await measure())?.heightRatio ?? 1).toBeLessThanOrEqual(0.85);
+  await expect.poll(async () => (await measure())?.xCenterOffset ?? 1).toBeLessThanOrEqual(0.1);
+  await expect.poll(async () => (await measure())?.yCenterOffset ?? 1).toBeLessThanOrEqual(0.1);
 }
 
 async function updatePaintRow(row: Locator, label: string, note: string) {
