@@ -1277,6 +1277,79 @@ button:disabled {
   line-height: 1.45;
 }
 
+.paint-guide-disclosure {
+  border: 1px solid #dce4df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.paint-guide-disclosure-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.paint-guide-disclosure-summary::-webkit-details-marker {
+  display: none;
+}
+
+.paint-guide-disclosure-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: #1d5d55;
+}
+
+.paint-guide-disclosure-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.paint-guide-disclosure-copy strong {
+  color: #17201d;
+  font-size: 14px;
+}
+
+.paint-guide-disclosure-copy span,
+.paint-guide-disclosure-state {
+  color: #65736c;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.paint-guide-disclosure-state {
+  flex-shrink: 0;
+}
+
+.paint-guide-disclosure[open] .paint-guide-disclosure-summary {
+  border-bottom: 1px solid #e3eae6;
+}
+
+.paint-guide-disclosure-content {
+  display: grid;
+  gap: 14px;
+  padding: 12px;
+}
+
+.paint-guide-disclosure-content .summary-grid {
+  margin: 0;
+}
+
+.paint-guide-disclosure-content .paint-review-header,
+.paint-guide-disclosure-content .paint-sanity-card,
+.paint-guide-disclosure-content .palette-summary-card,
+.paint-guide-disclosure-content .shopping-list-card {
+  margin: 0;
+}
+
 .paint-review-header {
   display: grid;
   gap: 10px;

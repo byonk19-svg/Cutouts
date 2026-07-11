@@ -157,6 +157,7 @@ function App() {
   const [newPaintLabel, setNewPaintLabel] = useState("Skin tone");
   const [selectedPaintColorIds, setSelectedPaintColorIds] = useState<string[]>([]);
   const [paintReviewFilter, setPaintReviewFilter] = useState<PaintReviewFilter>("all");
+  const [paintGuideOpen, setPaintGuideOpen] = useState(false);
   const [shoppingListStatus, setShoppingListStatus] = useState("");
   const [manualHistory, setManualHistory] = useState<TraceStroke[][]>([]);
   const [manualRedoHistory, setManualRedoHistory] = useState<TraceStroke[][]>([]);
@@ -168,7 +169,7 @@ function App() {
   const projectFileInputRef = useRef<HTMLInputElement | null>(null);
   const setupSectionRef = useRef<HTMLDivElement | null>(null);
   const traceEditorSectionRef = useRef<HTMLDivElement | null>(null);
-  const paintReviewSectionRef = useRef<HTMLElement | null>(null);
+  const paintReviewSectionRef = useRef<HTMLDetailsElement | null>(null);
   const exportSectionRef = useRef<HTMLDivElement | null>(null);
   const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
@@ -181,6 +182,7 @@ function App() {
   const strokeDragRef = useRef<StrokeDragState | null>(null);
   const strokeIdRef = useRef(0);
   const pendingContentFitRef = useRef(false);
+  const previousDetailCleanupAcceptedRef = useRef(false);
 
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
@@ -197,6 +199,7 @@ function App() {
   const paintWarnings = paintSanityWarnings(paintGuideEntries);
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
   const paintShoppingList = shoppingListText(paintGuideEntries);
+  const paintGuideColorCountLabel = `${paintGuideEntries.length} ${paintGuideEntries.length === 1 ? "color" : "colors"}`;
   const canIncludePaintGuide = paintGuideEntries.length > 0;
   const detailCleanupAccepted = cleanupChecks.cutline && cleanupChecks.remove && cleanupChecks.draw;
   const traceQualityReview = analysis
@@ -222,6 +225,13 @@ function App() {
     resetEditorState();
   }, [analysis]);
 
+  useEffect(() => {
+    if (!previousDetailCleanupAcceptedRef.current && detailCleanupAccepted) {
+      setPaintGuideOpen(true);
+    }
+    previousDetailCleanupAcceptedRef.current = detailCleanupAccepted;
+  }, [analysis, detailCleanupAccepted]);
+
   function resetEditorState() {
     setHistory([]);
     setRedoHistory([]);
@@ -236,6 +246,11 @@ function App() {
     setCutlineBounds(null);
     setPrintPreview(false);
     setEditableDetailLinesPresent(false);
+  }
+
+  function resetPaintGuideDisclosure() {
+    previousDetailCleanupAcceptedRef.current = false;
+    setPaintGuideOpen(false);
   }
 
   useEffect(() => {
@@ -354,6 +369,7 @@ function App() {
       if (!response.ok) throw new Error(body.error || "Unable to analyze image.");
       const openEditor = opensEditorWithReference(nextSettings.templateStyle);
       resetEditorState();
+      resetPaintGuideDisclosure();
       setAnalysis(body);
       if (preservedManualStrokes.length > 0) setManualStrokes(preservedManualStrokes);
       setProjectPalette(seedProjectPaletteFromDetected(body.palette, []));
@@ -449,6 +465,7 @@ function App() {
   }
 
   async function handleImageUpload(file: File | null) {
+    resetPaintGuideDisclosure();
     setImage(file);
     setAnalysis(null);
     setError(null);
@@ -503,6 +520,7 @@ function App() {
     setProjectPalette([]);
     setSelectedPaintColorIds([]);
     setPaintReviewFilter("all");
+    resetPaintGuideDisclosure();
     setShoppingListStatus("");
     resetCleanupChecks();
     resetEditorState();
@@ -589,6 +607,7 @@ function App() {
   async function applyProject(project: CutoutProject, status: ProjectStatus) {
     const restoredFile = await fileFromDataUrl(project.sourceImage.dataUrl, project.sourceImage.name, project.sourceImage.type);
     setAutosavePaused(true);
+    resetPaintGuideDisclosure();
     setImage(restoredFile);
     setSourceImageDataUrl(project.sourceImage.dataUrl);
     setProjectName(project.projectName);
@@ -1798,24 +1817,9 @@ function App() {
           )}
         </section>
 
-        <aside className="right-panel" aria-label="Paint guide and export summary" ref={paintReviewSectionRef}>
-          <PanelTitle icon={<SwatchBook size={18} />} title="Paint Guide" />
+        <aside className="right-panel" aria-label="Paint guide and export summary">
           {analysis ? (
             <>
-              <dl className="summary-grid">
-                <div>
-                  <dt>Finished size</dt>
-                  <dd>{analysis.finishedWidthIn} x {analysis.finishedHeightIn} in</dd>
-                </div>
-                <div>
-                  <dt>Trace pages</dt>
-                  <dd>{analysis.tileCount}</dd>
-                </div>
-                <div>
-                  <dt>Paper</dt>
-                  <dd>US letter, 100%</dd>
-                </div>
-              </dl>
               {traceQualityReview ? (
                 <section className="trace-quality-card" aria-label="Trace Quality Review">
                   <div className="trace-quality-title">
@@ -1889,338 +1893,375 @@ function App() {
                   ))}
                 </div>
               </div>
-              <section className="paint-review-header" aria-label="Paint Match Review">
-                <div>
-                  <h3>Paint Match Review</h3>
-                  <p>Detected colors are only a starting point. Add skin, hair, trim, or other paint colors manually when the extractor misses them.</p>
-                </div>
-                <div className="palette-editor-actions" aria-label="Paint Palette Editor">
-                  <div className="palette-presets" aria-label="Common missing colors">
-                    {([
-                      ["Skin tone", "#f1c7a5"],
-                      ["Hair", "#0c143a"],
-                      ["Main clothing", "#e4cc24"],
-                      ["Boots/shoes", "#6a5424"],
-                      ["Accent/trim", "#8f2d56"],
-                      ["Custom", newPaintHex]
-                    ] as const).map(([label, hex]) => (
-                      <button
-                        key={label}
-                        className="filter-button"
-                        onClick={() => {
-                          setNewPaintLabel(label);
-                          setNewPaintHex(hex);
-                        }}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  <label>
-                    <span>New color</span>
-                    <input
-                      type="color"
-                      value={isValidHexColor(newPaintHex) ? newPaintHex : "#f1c7a5"}
-                      onChange={(event) => setNewPaintHex(event.target.value)}
-                      aria-label="New paint color"
-                    />
-                  </label>
-                  <label>
-                    <span>Hex</span>
-                    <input
-                      type="text"
-                      value={newPaintHex}
-                      onChange={(event) => setNewPaintHex(event.target.value)}
-                      aria-label="New paint hex"
-                    />
-                  </label>
-                  <label>
-                    <span>Label</span>
-                    <input
-                      type="text"
-                      value={newPaintLabel}
-                      onChange={(event) => setNewPaintLabel(event.target.value)}
-                      aria-label="New paint label"
-                    />
-                  </label>
-                  <button className="tool-button" onClick={addManualPaintColor}>
-                    <SwatchBook size={15} />
-                    Add color
-                  </button>
-                  <button className="tool-button" onClick={mergeSelectedPaintColors} disabled={selectedPaintColorIds.length < 2}>
-                    <RefreshCw size={15} />
-                    Merge selected
-                  </button>
-                  <button className="tool-button" onClick={resetProjectPaletteFromDetected}>
-                    <RotateCcw size={15} />
-                    Reset palette
-                  </button>
-                </div>
-                <div className="paint-review-filters" aria-label="Paint review filter">
-                  {([
-                    ["all", "All"],
-                    ["missing", "Missing"],
-                    ["included", "Shopping list"]
-                  ] as const).map(([filter, label]) => (
-                    <button
-                      key={filter}
-                      className={paintReviewFilter === filter ? "filter-button selected" : "filter-button"}
-                      onClick={() => setPaintReviewFilter(filter)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </section>
-              {paintWarnings.length > 0 ? (
-                <section className="paint-sanity-card" aria-label="Paint Sanity Check">
-                  <div>
-                    <h3>Paint Sanity Check</h3>
-                    <p>Review these before exporting. They are warnings, not blockers.</p>
-                  </div>
-                  <ul>
-                    {paintWarnings.slice(0, 8).map((warning) => (
-                      <li key={warning.id}>
-                        <strong>Swatch {warning.swatchNumber}: {warning.label}</strong>
-                        <span>{warning.reason}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  {paintWarnings.length > 8 ? <p className="helper-note">+{paintWarnings.length - 8} more paint warnings</p> : null}
-                </section>
-              ) : null}
-              <section className="palette-summary-card" aria-label="Project Palette Summary">
-                <div className="palette-summary-heading">
-                  <div>
-                    <h3>Project Palette Summary</h3>
-                    <p>Clean this list into the paint bottles you actually plan to buy.</p>
-                  </div>
-                </div>
-                {duplicatePaintSuggestion ? (
-                  <div className="merge-suggestion" role="status">
-                    <strong>Duplicate paint cleanup</strong>
-                    <span>
-                      You have {duplicatePaintSuggestion.swatchNumbers.length} colors using {duplicatePaintSuggestion.purchaseLabel}. Merge them if they are one purchase.
+              <details
+                className="paint-guide-disclosure"
+                aria-label="Paint Guide"
+                open={paintGuideOpen}
+                onToggle={(event) => setPaintGuideOpen(event.currentTarget.open)}
+                ref={paintReviewSectionRef}
+              >
+                <summary className="paint-guide-disclosure-summary">
+                  <span className="paint-guide-disclosure-heading">
+                    <SwatchBook size={18} />
+                    <span className="paint-guide-disclosure-copy">
+                      <strong>Paint Guide</strong>
+                      <span>{paintGuideColorCountLabel}</span>
                     </span>
-                    <button className="tool-button" onClick={() => mergeProjectPaintColorsBySwatches(duplicatePaintSuggestion.swatchNumbers)}>
-                      <RefreshCw size={15} />
-                      Merge these
-                    </button>
-                  </div>
-                ) : null}
-                <div className="palette-summary-list">
-                  {paintGuideEntries.map((entry) => (
-                    <article className="palette-summary-item" key={`summary-${entry.id}`}>
-                      <span className="mini-swatch" style={{ backgroundColor: entry.hex }} />
-                      <div>
-                        <strong>{entry.label}</strong>
-                        <span>{entry.note || "Add use note"} / {entry.included ? "Shopping list" : "Excluded"}</span>
-                        <em>
-                          {entry.manualOverride
-                            ? entry.manualOverride
-                            : entry.selectedMatch
-                              ? matchDisplayName(entry.selectedMatch)
-                              : "Choose a paint match below or choose in store."}
-                        </em>
+                  </span>
+                  <span className="paint-guide-disclosure-state">{paintGuideOpen ? "Hide" : "Show"}</span>
+                </summary>
+                <div className="paint-guide-disclosure-content">
+                  <dl className="summary-grid">
+                    <div>
+                      <dt>Finished size</dt>
+                      <dd>{analysis.finishedWidthIn} x {analysis.finishedHeightIn} in</dd>
+                    </div>
+                    <div>
+                      <dt>Trace pages</dt>
+                      <dd>{analysis.tileCount}</dd>
+                    </div>
+                    <div>
+                      <dt>Paper</dt>
+                      <dd>US letter, 100%</dd>
+                    </div>
+                  </dl>
+                  <section className="paint-review-header" aria-label="Paint Match Review">
+                    <div>
+                      <h3>Paint Match Review</h3>
+                      <p>Detected colors are only a starting point. Add skin, hair, trim, or other paint colors manually when the extractor misses them.</p>
+                    </div>
+                    <div className="palette-editor-actions" aria-label="Paint Palette Editor">
+                      <div className="palette-presets" aria-label="Common missing colors">
+                        {([
+                          ["Skin tone", "#f1c7a5"],
+                          ["Hair", "#0c143a"],
+                          ["Main clothing", "#e4cc24"],
+                          ["Boots/shoes", "#6a5424"],
+                          ["Accent/trim", "#8f2d56"],
+                          ["Custom", newPaintHex]
+                        ] as const).map(([label, hex]) => (
+                          <button
+                            key={label}
+                            className="filter-button"
+                            onClick={() => {
+                              setNewPaintLabel(label);
+                              setNewPaintHex(hex);
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
                       </div>
-                      {isGenericPaintLabel(entry) ? <b>Needs label</b> : null}
-                    </article>
-                  ))}
-                </div>
-              </section>
-              <div className="palette-list">
-                {visiblePaintGuideEntries.map((entry) => (
-                  <details className={entry.included ? "palette-row" : "palette-row muted-paint"} key={entry.id}>
-                    <summary className="palette-row-summary">
-                      <span className="swatch" style={{ backgroundColor: entry.hex }} />
-                      <span className="palette-row-compact-copy">
-                        <strong>{entry.index}. {entry.label}</strong>
-                        <span>{entry.note || "Add use note"} / {entry.included ? "Shopping list" : "Excluded"}</span>
-                        <em>
-                          {entry.manualOverride
-                            ? entry.manualOverride
-                            : entry.selectedMatch
-                              ? matchDisplayName(entry.selectedMatch)
-                              : "Choose in store"}
-                        </em>
-                      </span>
-                      {isGenericPaintLabel(entry) ? <span className="needs-label-badge">Needs label</span> : null}
-                    </summary>
-                    <div className="palette-row-body">
-                      <div className="swatch" style={{ backgroundColor: entry.hex }} />
-                      <div className="paint-guide-fields">
-                      <div className="palette-row-header">
-                        <strong>{entry.index}. {entry.label}</strong>
-                        <span>{entry.hex.toUpperCase()} / {entry.source === "manual" ? "manual" : `${Math.round(entry.coverage * 100)}%`}{entry.locked ? " / locked" : ""}</span>
-                      </div>
-                      {isGenericPaintLabel(entry) ? <span className="needs-label-badge">Needs label</span> : null}
-                      <div className="palette-row-tools">
-                        <label className="toggle-row compact-toggle">
-                          <input
-                            type="checkbox"
-                            checked={selectedPaintColorIds.includes(entry.id)}
-                            onChange={() => togglePaintMergeSelection(entry.id)}
-                          />
-                          Merge
-                        </label>
-                        <label className="toggle-row compact-toggle">
-                          <input
-                            type="checkbox"
-                            checked={entry.locked}
-                            onChange={() => updatePaintGuideEntry(entry.id, { locked: !entry.locked })}
-                          />
-                          Lock
-                        </label>
-                        <button className="tool-button" onClick={() => removePaintColor(entry.id)} disabled={entry.locked}>
-                          <Trash2 size={15} />
-                          Delete
-                        </button>
-                      </div>
-                      <div className="selected-paint-summary">
-                        <span className="source-swatch" style={{ backgroundColor: entry.hex }} />
-                        <strong>
-                          {entry.manualOverride
-                            ? entry.manualOverride
-                            : entry.selectedMatch
-                              ? matchDisplayName(entry.selectedMatch)
-                              : "Choose a paint match below or choose in store."}
-                        </strong>
-                        {entry.selectedMatch ? (
-                          <em>{matchConfidenceLabel(entry.selectedMatch)}</em>
-                        ) : null}
-                      </div>
+                      <label>
+                        <span>New color</span>
+                        <input
+                          type="color"
+                          value={isValidHexColor(newPaintHex) ? newPaintHex : "#f1c7a5"}
+                          onChange={(event) => setNewPaintHex(event.target.value)}
+                          aria-label="New paint color"
+                        />
+                      </label>
+                      <label>
+                        <span>Hex</span>
+                        <input
+                          type="text"
+                          value={newPaintHex}
+                          onChange={(event) => setNewPaintHex(event.target.value)}
+                          aria-label="New paint hex"
+                        />
+                      </label>
                       <label>
                         <span>Label</span>
                         <input
                           type="text"
-                          value={entry.label}
-                          onChange={(event) => updatePaintGuideEntry(entry.id, { label: event.target.value })}
+                          value={newPaintLabel}
+                          onChange={(event) => setNewPaintLabel(event.target.value)}
+                          aria-label="New paint label"
                         />
                       </label>
-                      <div className="paint-color-editors">
-                        <label>
-                          <span>Color</span>
-                          <input
-                            type="color"
-                            value={isValidHexColor(entry.hex) ? entry.hex : "#000000"}
-                            onChange={(event) => updatePaintGuideEntry(entry.id, { hex: event.target.value })}
-                            aria-label={`Color picker for ${entry.label}`}
-                          />
-                        </label>
-                        <label>
-                          <span>Hex</span>
-                          <input
-                            type="text"
-                            value={entry.hex}
-                            onChange={(event) => updatePaintGuideEntry(entry.id, { hex: event.target.value })}
-                            onBlur={(event) => {
-                              if (isValidHexColor(event.target.value)) void refreshPaintMatchesForColor(entry.id, event.target.value);
-                            }}
-                          />
-                        </label>
-                      </div>
-                      <label>
-                        <span>Notes/use</span>
-                        <input
-                          type="text"
-                          placeholder="hair, coat, boots, trim"
-                          value={entry.note}
-                          onChange={(event) => updatePaintGuideEntry(entry.id, { note: event.target.value })}
-                        />
-                      </label>
-                      <label>
-                        <span>Craft paint match</span>
-                        <select
-                          value={entry.manualOverride ? "__manual__" : entry.selectedMatchId ?? ""}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            if (value === "__manual__") {
-                              updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: entry.manualOverride || "Choose in store" });
-                              return;
-                            }
-                            if (value === "") {
-                              updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: "" });
-                              return;
-                            }
-                            updatePaintGuideEntry(entry.id, { selectedMatchId: value, manualOverride: "" });
-                          }}
+                      <button className="tool-button" onClick={addManualPaintColor}>
+                        <SwatchBook size={15} />
+                        Add color
+                      </button>
+                      <button className="tool-button" onClick={mergeSelectedPaintColors} disabled={selectedPaintColorIds.length < 2}>
+                        <RefreshCw size={15} />
+                        Merge selected
+                      </button>
+                      <button className="tool-button" onClick={resetProjectPaletteFromDetected}>
+                        <RotateCcw size={15} />
+                        Reset palette
+                      </button>
+                    </div>
+                    <div className="paint-review-filters" aria-label="Paint review filter">
+                      {([
+                        ["all", "All"],
+                        ["missing", "Missing"],
+                        ["included", "Shopping list"]
+                      ] as const).map(([filter, label]) => (
+                        <button
+                          key={filter}
+                          className={paintReviewFilter === filter ? "filter-button selected" : "filter-button"}
+                          onClick={() => setPaintReviewFilter(filter)}
                         >
-                          <option value="">No match / choose in store</option>
-                          {entry.matches.map((match) => (
-                            <option key={match.id} value={match.id}>
-                              {matchDisplayName(match)}
-                            </option>
-                          ))}
-                          <option value="__manual__">Manual override</option>
-                        </select>
-                      </label>
-                      <div className="paint-match-actions">
-                        <button className="tool-button" onClick={() => updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: "" })}>
-                          Choose in store
+                          {label}
                         </button>
-                        <button className="tool-button" onClick={() => updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: entry.manualOverride || "Choose in store" })}>
-                          Manual override
-                        </button>
+                      ))}
+                    </div>
+                  </section>
+                  {paintWarnings.length > 0 ? (
+                    <section className="paint-sanity-card" aria-label="Paint Sanity Check">
+                      <div>
+                        <h3>Paint Sanity Check</h3>
+                        <p>Review these before exporting. They are warnings, not blockers.</p>
                       </div>
-                      {entry.matches.length > 0 ? (
-                        <div className="paint-match-suggestions" aria-label={`Suggested paints for ${entry.label}`}>
-                          {entry.matches.map((match) => (
-                            <button
-                              key={match.id}
-                              className={entry.selectedMatchId === match.id ? "paint-match-chip selected" : "paint-match-chip"}
-                              onClick={() => updatePaintGuideEntry(entry.id, { selectedMatchId: match.id, manualOverride: "" })}
-                            >
-                              <span className="swatch-pair" aria-hidden="true">
-                                <span className="mini-swatch" style={{ backgroundColor: entry.hex }} />
-                                <span className="mini-swatch" style={{ backgroundColor: match.hex }} />
-                              </span>
-                              <span>{matchDisplayName(match)}</span>
-                              <em>Use this paint / {matchConfidenceLabel(match)}{match.outdoorRecommended ? " / Outdoor" : ""}</em>
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                      {entry.manualOverride ? (
-                        <label>
-                          <span>Manual override</span>
-                          <input
-                            type="text"
-                            placeholder="brand, line, color name, or choose in store"
-                            value={entry.manualOverride}
-                            onChange={(event) => updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: event.target.value })}
-                          />
-                        </label>
-                      ) : null}
-                      <label className="toggle-row compact-toggle">
-                        <input
-                          type="checkbox"
-                          checked={entry.included}
-                          onChange={() => updatePaintGuideEntry(entry.id, { included: !entry.included })}
-                        />
-                        Include in shopping list
-                      </label>
+                      <ul>
+                        {paintWarnings.slice(0, 8).map((warning) => (
+                          <li key={warning.id}>
+                            <strong>Swatch {warning.swatchNumber}: {warning.label}</strong>
+                            <span>{warning.reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {paintWarnings.length > 8 ? <p className="helper-note">+{paintWarnings.length - 8} more paint warnings</p> : null}
+                    </section>
+                  ) : null}
+                  <section className="palette-summary-card" aria-label="Project Palette Summary">
+                    <div className="palette-summary-heading">
+                      <div>
+                        <h3>Project Palette Summary</h3>
+                        <p>Clean this list into the paint bottles you actually plan to buy.</p>
                       </div>
                     </div>
-                  </details>
-                ))}
-              </div>
-              {visiblePaintGuideEntries.length === 0 ? (
-                <p className="muted">No paint colors match this filter.</p>
-              ) : null}
-              <div className="shopping-list-card">
-                <div className="shopping-list-header">
-                  <strong>Shopping list</strong>
-                  <button className="tool-button" onClick={copyPaintShoppingList}>
-                    <Copy size={15} />
-                    Copy list
-                  </button>
+                    {duplicatePaintSuggestion ? (
+                      <div className="merge-suggestion" role="status">
+                        <strong>Duplicate paint cleanup</strong>
+                        <span>
+                          You have {duplicatePaintSuggestion.swatchNumbers.length} colors using {duplicatePaintSuggestion.purchaseLabel}. Merge them if they are one purchase.
+                        </span>
+                        <button className="tool-button" onClick={() => mergeProjectPaintColorsBySwatches(duplicatePaintSuggestion.swatchNumbers)}>
+                          <RefreshCw size={15} />
+                          Merge these
+                        </button>
+                      </div>
+                    ) : null}
+                    <div className="palette-summary-list">
+                      {paintGuideEntries.map((entry) => (
+                        <article className="palette-summary-item" key={`summary-${entry.id}`}>
+                          <span className="mini-swatch" style={{ backgroundColor: entry.hex }} />
+                          <div>
+                            <strong>{entry.label}</strong>
+                            <span>{entry.note || "Add use note"} / {entry.included ? "Shopping list" : "Excluded"}</span>
+                            <em>
+                              {entry.manualOverride
+                                ? entry.manualOverride
+                                : entry.selectedMatch
+                                  ? matchDisplayName(entry.selectedMatch)
+                                  : "Choose a paint match below or choose in store."}
+                            </em>
+                          </div>
+                          {isGenericPaintLabel(entry) ? <b>Needs label</b> : null}
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                  <div className="palette-list">
+                    {visiblePaintGuideEntries.map((entry) => (
+                      <details className={entry.included ? "palette-row" : "palette-row muted-paint"} key={entry.id}>
+                        <summary className="palette-row-summary">
+                          <span className="swatch" style={{ backgroundColor: entry.hex }} />
+                          <span className="palette-row-compact-copy">
+                            <strong>{entry.index}. {entry.label}</strong>
+                            <span>{entry.note || "Add use note"} / {entry.included ? "Shopping list" : "Excluded"}</span>
+                            <em>
+                              {entry.manualOverride
+                                ? entry.manualOverride
+                                : entry.selectedMatch
+                                  ? matchDisplayName(entry.selectedMatch)
+                                  : "Choose in store"}
+                            </em>
+                          </span>
+                          {isGenericPaintLabel(entry) ? <span className="needs-label-badge">Needs label</span> : null}
+                        </summary>
+                        <div className="palette-row-body">
+                          <div className="swatch" style={{ backgroundColor: entry.hex }} />
+                          <div className="paint-guide-fields">
+                            <div className="palette-row-header">
+                              <strong>{entry.index}. {entry.label}</strong>
+                              <span>{entry.hex.toUpperCase()} / {entry.source === "manual" ? "manual" : `${Math.round(entry.coverage * 100)}%`}{entry.locked ? " / locked" : ""}</span>
+                            </div>
+                            {isGenericPaintLabel(entry) ? <span className="needs-label-badge">Needs label</span> : null}
+                            <div className="palette-row-tools">
+                              <label className="toggle-row compact-toggle">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedPaintColorIds.includes(entry.id)}
+                                  onChange={() => togglePaintMergeSelection(entry.id)}
+                                />
+                                Merge
+                              </label>
+                              <label className="toggle-row compact-toggle">
+                                <input
+                                  type="checkbox"
+                                  checked={entry.locked}
+                                  onChange={() => updatePaintGuideEntry(entry.id, { locked: !entry.locked })}
+                                />
+                                Lock
+                              </label>
+                              <button className="tool-button" onClick={() => removePaintColor(entry.id)} disabled={entry.locked}>
+                                <Trash2 size={15} />
+                                Delete
+                              </button>
+                            </div>
+                            <div className="selected-paint-summary">
+                              <span className="source-swatch" style={{ backgroundColor: entry.hex }} />
+                              <strong>
+                                {entry.manualOverride
+                                  ? entry.manualOverride
+                                  : entry.selectedMatch
+                                    ? matchDisplayName(entry.selectedMatch)
+                                    : "Choose a paint match below or choose in store."}
+                              </strong>
+                              {entry.selectedMatch ? (
+                                <em>{matchConfidenceLabel(entry.selectedMatch)}</em>
+                              ) : null}
+                            </div>
+                            <label>
+                              <span>Label</span>
+                              <input
+                                type="text"
+                                value={entry.label}
+                                onChange={(event) => updatePaintGuideEntry(entry.id, { label: event.target.value })}
+                              />
+                            </label>
+                            <div className="paint-color-editors">
+                              <label>
+                                <span>Color</span>
+                                <input
+                                  type="color"
+                                  value={isValidHexColor(entry.hex) ? entry.hex : "#000000"}
+                                  onChange={(event) => updatePaintGuideEntry(entry.id, { hex: event.target.value })}
+                                  aria-label={`Color picker for ${entry.label}`}
+                                />
+                              </label>
+                              <label>
+                                <span>Hex</span>
+                                <input
+                                  type="text"
+                                  value={entry.hex}
+                                  onChange={(event) => updatePaintGuideEntry(entry.id, { hex: event.target.value })}
+                                  onBlur={(event) => {
+                                    if (isValidHexColor(event.target.value)) void refreshPaintMatchesForColor(entry.id, event.target.value);
+                                  }}
+                                />
+                              </label>
+                            </div>
+                            <label>
+                              <span>Notes/use</span>
+                              <input
+                                type="text"
+                                placeholder="hair, coat, boots, trim"
+                                value={entry.note}
+                                onChange={(event) => updatePaintGuideEntry(entry.id, { note: event.target.value })}
+                              />
+                            </label>
+                            <label>
+                              <span>Craft paint match</span>
+                              <select
+                                value={entry.manualOverride ? "__manual__" : entry.selectedMatchId ?? ""}
+                                onChange={(event) => {
+                                  const value = event.target.value;
+                                  if (value === "__manual__") {
+                                    updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: entry.manualOverride || "Choose in store" });
+                                    return;
+                                  }
+                                  if (value === "") {
+                                    updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: "" });
+                                    return;
+                                  }
+                                  updatePaintGuideEntry(entry.id, { selectedMatchId: value, manualOverride: "" });
+                                }}
+                              >
+                                <option value="">No match / choose in store</option>
+                                {entry.matches.map((match) => (
+                                  <option key={match.id} value={match.id}>
+                                    {matchDisplayName(match)}
+                                  </option>
+                                ))}
+                                <option value="__manual__">Manual override</option>
+                              </select>
+                            </label>
+                            <div className="paint-match-actions">
+                              <button className="tool-button" onClick={() => updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: "" })}>
+                                Choose in store
+                              </button>
+                              <button className="tool-button" onClick={() => updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: entry.manualOverride || "Choose in store" })}>
+                                Manual override
+                              </button>
+                            </div>
+                            {entry.matches.length > 0 ? (
+                              <div className="paint-match-suggestions" aria-label={`Suggested paints for ${entry.label}`}>
+                                {entry.matches.map((match) => (
+                                  <button
+                                    key={match.id}
+                                    className={entry.selectedMatchId === match.id ? "paint-match-chip selected" : "paint-match-chip"}
+                                    onClick={() => updatePaintGuideEntry(entry.id, { selectedMatchId: match.id, manualOverride: "" })}
+                                  >
+                                    <span className="swatch-pair" aria-hidden="true">
+                                      <span className="mini-swatch" style={{ backgroundColor: entry.hex }} />
+                                      <span className="mini-swatch" style={{ backgroundColor: match.hex }} />
+                                    </span>
+                                    <span>{matchDisplayName(match)}</span>
+                                    <em>Use this paint / {matchConfidenceLabel(match)}{match.outdoorRecommended ? " / Outdoor" : ""}</em>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                            {entry.manualOverride ? (
+                              <label>
+                                <span>Manual override</span>
+                                <input
+                                  type="text"
+                                  placeholder="brand, line, color name, or choose in store"
+                                  value={entry.manualOverride}
+                                  onChange={(event) => updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: event.target.value })}
+                                />
+                              </label>
+                            ) : null}
+                            <label className="toggle-row compact-toggle">
+                              <input
+                                type="checkbox"
+                                checked={entry.included}
+                                onChange={() => updatePaintGuideEntry(entry.id, { included: !entry.included })}
+                              />
+                              Include in shopping list
+                            </label>
+                          </div>
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                  {visiblePaintGuideEntries.length === 0 ? (
+                    <p className="muted">No paint colors match this filter.</p>
+                  ) : null}
+                  <div className="shopping-list-card">
+                    <div className="shopping-list-header">
+                      <strong>Shopping list</strong>
+                      <button className="tool-button" onClick={copyPaintShoppingList}>
+                        <Copy size={15} />
+                        Copy list
+                      </button>
+                    </div>
+                    <pre className="shopping-list-preview">{paintShoppingList}</pre>
+                    {shoppingListStatus ? <span className="copy-status">{shoppingListStatus}</span> : null}
+                  </div>
                 </div>
-                <pre className="shopping-list-preview">{paintShoppingList}</pre>
-                {shoppingListStatus ? <span className="copy-status">{shoppingListStatus}</span> : null}
-              </div>
+              </details>
             </>
           ) : (
-            <p className="muted">Paint planning appears after preview generation.</p>
+            <>
+              <PanelTitle icon={<SwatchBook size={18} />} title="Paint Guide" />
+              <p className="muted">Paint planning appears after preview generation.</p>
+            </>
           )}
           {error ? <div className="error-box">{error}</div> : null}
         </aside>

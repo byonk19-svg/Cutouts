@@ -66,6 +66,15 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(traceGuidance).toContainText("Accessories");
   await expect(traceGuidance).toContainText("Major folds/details");
   await expect(traceGuidance).toContainText("Skip shadows, texture, tiny highlights, and photo noise.");
+  const paintGuide = page.locator('details[aria-label="Paint Guide"]');
+  const paintReview = page.getByLabel("Paint Match Review");
+  expect(await paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(false);
+  await expect(paintReview).toBeHidden();
+  await page.getByLabel("Review cutline").check();
+  await page.getByLabel("Remove extra marks").check();
+  await page.getByLabel("Draw missing details").check();
+  await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
+  await expect(paintReview).toBeVisible();
 
   const canvas = page.getByLabel("Editable interior detail lines");
   await page.getByRole("button", { name: /Draw details/ }).click();
@@ -96,11 +105,12 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await page.reload();
   await expect(page.getByText(/Blank Trace Studio Editor/)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
+  await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
 
   const paintRows = page.locator(".palette-row");
   await expect(paintRows.nth(3)).toBeVisible({ timeout: 30_000 });
   expect(await paintRows.nth(0).evaluate((element) => element instanceof HTMLDetailsElement)).toBe(true);
-  await expect(page.getByLabel("Paint Match Review")).toBeVisible();
+  await expect(paintReview).toBeVisible();
   await expect(page.getByLabel("Project Palette Summary")).toBeVisible();
   await expect(page.getByText("Needs label").first()).toBeVisible();
 
