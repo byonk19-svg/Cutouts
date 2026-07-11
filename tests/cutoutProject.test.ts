@@ -102,7 +102,13 @@ const analysis = {
       showSuggestions: false,
       printPreview: false
     },
-    traceViewport: { zoom: 1.35, panX: 12, panY: -8 }
+    traceViewport: { zoom: 1.35, panX: 12, panY: -8 },
+    cleanupChecks: {
+      cutline: true,
+      remove: false,
+      draw: true,
+      export: false
+    }
   });
 
   assertEqual(project.schemaVersion, CUTOUT_PROJECT_SCHEMA_VERSION, "project should be versioned");
@@ -136,6 +142,10 @@ const analysis = {
   assertEqual(restored.referenceOpacity, 42, "round trip should preserve underlay opacity");
   assertEqual(restored.layerVisibility.showReference, true, "round trip should preserve underlay visibility");
   assertEqual(restored.traceViewport.panY, -8, "round trip should preserve viewport");
+  assertEqual(restored.cleanupChecks.cutline, true, "round trip should preserve cleanup cutline progress");
+  assertEqual(restored.cleanupChecks.remove, false, "round trip should preserve cleanup remove progress");
+  assertEqual(restored.cleanupChecks.draw, true, "round trip should preserve cleanup draw progress");
+  assertEqual(restored.cleanupChecks.export, false, "round trip should preserve cleanup export progress");
   assertEqual(restored.settings.includeInstructionCoverPage, true, "round trip should preserve instruction cover setting");
   assertEqual(restored.settings.includePaintGuidePage, true, "round trip should preserve paint guide setting");
 }
@@ -205,6 +215,10 @@ const analysis = {
   assertEqual(restored.paintGuideEdits.length, 0, "legacy project import should default paint guide edits to empty");
   assertEqual(restored.projectPalette.length, 1, "legacy project import should seed project palette from detected colors");
   assertEqual(restored.editedDetailPngDataUrl, null, "legacy project import should default edited starter detail layer to null");
+  assertEqual(restored.cleanupChecks.cutline, false, "legacy project import should default cleanup cutline progress off");
+  assertEqual(restored.cleanupChecks.remove, false, "legacy project import should default cleanup remove progress off");
+  assertEqual(restored.cleanupChecks.draw, false, "legacy project import should default cleanup draw progress off");
+  assertEqual(restored.cleanupChecks.export, false, "legacy project import should default cleanup export progress off");
 }
 
 {

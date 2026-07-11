@@ -283,6 +283,7 @@ function App() {
     printPreview,
     editedDetailDataUrl,
     traceViewport,
+    cleanupChecks,
     autosavePaused
   ]);
 
@@ -549,7 +550,8 @@ function App() {
         showSuggestions,
         printPreview
       },
-      traceViewport
+      traceViewport,
+      cleanupChecks
     });
   }
 
@@ -611,12 +613,7 @@ function App() {
     setSelectedStrokeId(null);
     setDimUnselectedStrokes(false);
     setSelectionFeedback("");
-    setCleanupChecks({
-      cutline: false,
-      remove: false,
-      draw: false,
-      export: false
-    });
+    setCleanupChecks(project.cleanupChecks);
     setManualHistory([]);
     setManualRedoHistory([]);
     setHistory([]);

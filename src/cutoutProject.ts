@@ -58,6 +58,13 @@ export type ProjectLayerVisibility = {
   printPreview: boolean;
 };
 
+export type ProjectCleanupChecks = {
+  cutline: boolean;
+  remove: boolean;
+  draw: boolean;
+  export: boolean;
+};
+
 export type CutoutProject = {
   schemaVersion: typeof CUTOUT_PROJECT_SCHEMA_VERSION;
   projectName: string;
@@ -74,12 +81,14 @@ export type CutoutProject = {
   referenceOpacity: number;
   layerVisibility: ProjectLayerVisibility;
   traceViewport: TraceViewport;
+  cleanupChecks: ProjectCleanupChecks;
 };
 
-export type CutoutProjectSnapshotInput = Omit<CutoutProject, "schemaVersion" | "editedDetailPngDataUrl" | "projectPalette" | "paintGuideEdits"> & {
+export type CutoutProjectSnapshotInput = Omit<CutoutProject, "schemaVersion" | "editedDetailPngDataUrl" | "projectPalette" | "paintGuideEdits" | "cleanupChecks"> & {
   editedDetailPngDataUrl?: string | null;
   projectPalette?: ProjectPaintColor[];
   paintGuideEdits?: PaintGuideEdit[];
+  cleanupChecks?: ProjectCleanupChecks;
 };
 
 export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): CutoutProject {
@@ -113,7 +122,8 @@ export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): 
       ...input.layerVisibility,
       printPreview: false
     },
-    traceViewport: { ...input.traceViewport }
+    traceViewport: { ...input.traceViewport },
+    cleanupChecks: { ...(input.cleanupChecks ?? defaultCleanupChecks()) }
   };
 }
 
@@ -128,7 +138,7 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
     throw new Error("This project file uses an unsupported Cutout Studio version.");
   }
 
-  const project = parsed as CutoutProject & { editedDetailPngDataUrl?: unknown; paintGuideEdits?: unknown; projectPalette?: unknown };
+  const project = parsed as CutoutProject & { editedDetailPngDataUrl?: unknown; paintGuideEdits?: unknown; projectPalette?: unknown; cleanupChecks?: unknown };
   assertString(project.createdAt, "createdAt");
   assertString(project.updatedAt, "updatedAt");
   assertSourceImage(project.sourceImage);
@@ -155,6 +165,10 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
     project.traceViewport = DEFAULT_TRACE_VIEWPORT;
   }
   assertTraceViewport(project.traceViewport);
+  if (!isRecord(project.cleanupChecks)) {
+    project.cleanupChecks = defaultCleanupChecks();
+  }
+  assertCleanupChecks(project.cleanupChecks);
   assertNumber(project.referenceOpacity, "referenceOpacity");
 
   return createCutoutProjectSnapshot({
@@ -337,6 +351,13 @@ function assertTraceViewport(value: unknown): asserts value is TraceViewport {
   assertNumber(value.panY, "traceViewport.panY");
 }
 
+function assertCleanupChecks(value: unknown): asserts value is ProjectCleanupChecks {
+  if (!isRecord(value)) throw new Error("Project cleanup checks are invalid.");
+  for (const key of ["cutline", "remove", "draw", "export"] as const) {
+    if (typeof value[key] !== "boolean") throw new Error(`Project cleanupChecks.${key} is invalid.`);
+  }
+}
+
 function isValidTraceViewport(value: unknown): value is TraceViewport {
   return isRecord(value)
     && typeof value.zoom === "number"
@@ -364,4 +385,13 @@ function cloneProjectPalette(palette: ProjectPaintColor[]): ProjectPaintColor[] 
     ...color,
     matches: color.matches.map((match) => ({ ...match }))
   }));
+}
+
+function defaultCleanupChecks(): ProjectCleanupChecks {
+  return {
+    cutline: false,
+    remove: false,
+    draw: false,
+    export: false
+  };
 }
