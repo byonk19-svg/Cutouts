@@ -973,25 +973,45 @@ class PrintPipelineTest(unittest.TestCase):
         colors = {pixel for pixel in line_art.get_flattened_data()}
         self.assertLessEqual(colors, {(0, 0, 0), (255, 255, 255)})
 
-    def test_pdf_accepts_edited_detail_layer(self) -> None:
-        settings = TemplateSettings(finished_height_in=18, threshold=40, palette_size=3)
+    def test_pdf_tile_pages_include_accepted_starter_detail_layer(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=40, palette_size=3, detail_lines=False)
         edited = Image.new("RGBA", (120, 160), (255, 255, 255, 0))
         draw = ImageDraw.Draw(edited)
         draw.line((20, 80, 100, 80), fill=(0, 0, 0, 255), width=8)
         out = io.BytesIO()
         edited.save(out, format="PNG")
 
-        pdf_bytes = build_template_pdf(transparent_fixture(), settings, edited_detail_png=out.getvalue())
-        reader = PdfReader(io.BytesIO(pdf_bytes))
+        baseline_pdf = build_template_pdf(transparent_fixture(), settings)
+        accepted_detail_pdf = build_template_pdf(transparent_fixture(), settings, edited_detail_png=out.getvalue())
+        baseline_reader = PdfReader(io.BytesIO(baseline_pdf))
+        accepted_detail_reader = PdfReader(io.BytesIO(accepted_detail_pdf))
+        first_tile_page = int(settings.include_instruction_cover_page) + int(settings.include_paint_guide_page)
+        baseline_tile = baseline_reader.pages[first_tile_page].images[0].image.convert("L")
+        accepted_detail_tile = accepted_detail_reader.pages[first_tile_page].images[0].image.convert("L")
+        width, height = accepted_detail_tile.size
+        expected_line_region = (
+            round(width * 0.30),
+            round(height * 0.93),
+            round(width * 0.80),
+            round(height * 0.98),
+        )
 
-        self.assertGreater(len(pdf_bytes), 10_000)
-        self.assertGreaterEqual(len(reader.pages), 3)
+        baseline_dark_pixels = self._count_dark_pixels(baseline_tile.crop(expected_line_region))
+        accepted_detail_dark_pixels = self._count_dark_pixels(accepted_detail_tile.crop(expected_line_region))
+
+        self.assertGreater(len(accepted_detail_pdf), 10_000)
+        self.assertGreaterEqual(len(accepted_detail_reader.pages), 3)
+        self.assertEqual(baseline_dark_pixels, 0)
+        self.assertGreater(accepted_detail_dark_pixels, 1_000)
 
     def _count_mask_pixels(self, image: Image.Image) -> int:
         return sum(1 for pixel in list(image.convert("L").get_flattened_data()) if pixel > 0)
 
     def _count_region_pixels(self, image: Image.Image, box: tuple[int, int, int, int]) -> int:
         return self._count_mask_pixels(image.crop(box))
+
+    def _count_dark_pixels(self, image: Image.Image) -> int:
+        return sum(1 for pixel in image.convert("L").get_flattened_data() if pixel < 128)
 
     def _count_components(self, image: Image.Image) -> int:
         arr = np.asarray(image.convert("L")) > 0
