@@ -56,7 +56,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string) {
     { left: 200, top: 200, right: 400, bottom: 400 },
     { width: 1000, height: 1000 },
     { width: 500, height: 500 },
-    50
+    { paddingPx: 50 }
   );
   const center = screenToTracePoint({ x: 250, y: 250 }, viewport, { width: 1000, height: 1000 }, { width: 500, height: 500 });
 
@@ -69,13 +69,13 @@ function assertEqual(actual: unknown, expected: unknown, message: string) {
     { left: 200, top: 200, right: 400, bottom: 400 },
     { width: 1000, height: 1000 },
     { width: 500, height: 500 },
-    50
+    { paddingPx: 50 }
   );
   const padded = fitBoundsToViewport(
     { left: 200, top: 200, right: 400, bottom: 400 },
     { width: 1000, height: 1000 },
     { width: 500, height: 500 },
-    100
+    { paddingPx: 100 }
   );
 
   assert(padded.zoom < loose.zoom, "larger padding should reduce fit zoom");
@@ -86,7 +86,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string) {
     { left: 250, top: 60, right: 430, bottom: 1140 },
     { width: 800, height: 1200 },
     { width: 620, height: 520 },
-    56
+    { paddingPx: 56 }
   );
   const center = screenToTracePoint({ x: 310, y: 260 }, viewport, { width: 800, height: 1200 }, { width: 620, height: 520 });
 
@@ -96,17 +96,36 @@ function assertEqual(actual: unknown, expected: unknown, message: string) {
 }
 
 {
+  const bounds = { left: 250, top: 60, right: 430, bottom: 1140 };
+  const canvasSize = { width: 800, height: 1200 };
+  const viewportSize = { width: 620, height: 520 };
+  const viewport = fitBoundsToViewport(bounds, canvasSize, viewportSize, { targetFill: 0.8 });
+  const fitted = fittedTraceSize(canvasSize, viewportSize);
+  const screenTop = (viewportSize.height - fitted.height * viewport.zoom) / 2
+    + viewport.panY
+    + (bounds.top / canvasSize.height) * fitted.height * viewport.zoom;
+  const screenBottom = (viewportSize.height - fitted.height * viewport.zoom) / 2
+    + viewport.panY
+    + (bounds.bottom / canvasSize.height) * fitted.height * viewport.zoom;
+  const occupiedHeightRatio = (screenBottom - screenTop) / viewportSize.height;
+  const contentCenterY = (screenTop + screenBottom) / 2;
+
+  assert(occupiedHeightRatio >= 0.7 && occupiedHeightRatio <= 0.85, "targetFill should keep tall content within the editor height band");
+  assert(Math.abs(contentCenterY - viewportSize.height / 2) < 1, "targetFill fit should center tall content vertically");
+}
+
+{
   const fullCanvasFit = fitBoundsToViewport(
     { left: 0, top: 0, right: 1000, bottom: 1000 },
     { width: 1000, height: 1000 },
     { width: 500, height: 500 },
-    56
+    { paddingPx: 56 }
   );
   const cutlineFit = fitBoundsToViewport(
     { left: 250, top: 250, right: 750, bottom: 750 },
     { width: 1000, height: 1000 },
     { width: 500, height: 500 },
-    56
+    { paddingPx: 56 }
   );
 
   assert(cutlineFit.zoom > fullCanvasFit.zoom, "fit should use content bounds instead of full canvas bounds");

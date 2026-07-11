@@ -312,11 +312,11 @@ function App() {
   }, [analysis]);
 
   useEffect(() => {
-    if (!pendingContentFitRef.current || !analysis || !editorOpen || !traceStudioOpen || !cutlineBounds) return;
+    if (!pendingContentFitRef.current || !analysis || !editorOpen || !cutlineBounds) return;
     if (fitTraceViewportToContent()) {
       pendingContentFitRef.current = false;
     }
-  }, [analysis, editorOpen, traceStudioOpen, cutlineBounds]);
+  }, [analysis, editorOpen, cutlineBounds]);
 
   useEffect(() => {
     if (selectedStrokeId && !manualStrokes.some((stroke) => stroke.id === selectedStrokeId)) {
@@ -1231,7 +1231,7 @@ function App() {
       traceContentBounds(),
       { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
       { width: viewport.clientWidth, height: viewport.clientHeight },
-      56
+      { paddingPx: 32, targetFill: 0.8 }
     ));
     return true;
   }

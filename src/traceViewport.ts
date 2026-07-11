@@ -13,6 +13,11 @@ export type TraceBounds = {
   bottom: number;
 };
 
+export type TraceFitOptions = {
+  paddingPx?: number;
+  targetFill?: number;
+};
+
 export const DEFAULT_TRACE_VIEWPORT: TraceViewport = {
   zoom: 1,
   panX: 0,
@@ -65,14 +70,16 @@ export function fitBoundsToViewport(
   bounds: TraceBounds,
   canvasSize: { width: number; height: number },
   viewportSize: { width: number; height: number },
-  paddingPx = 48
+  options: TraceFitOptions = {}
 ): TraceViewport {
+  const paddingPx = Math.max(0, options.paddingPx ?? 48);
+  const targetFill = clamp(options.targetFill ?? 0.8, 0.01, 1);
   const normalized = normalizeBounds(bounds, canvasSize);
   const fitted = fittedTraceSize(canvasSize, viewportSize);
   const displayWidth = Math.max(1, ((normalized.right - normalized.left) / canvasSize.width) * fitted.width);
   const displayHeight = Math.max(1, ((normalized.bottom - normalized.top) / canvasSize.height) * fitted.height);
-  const availableWidth = Math.max(1, viewportSize.width - paddingPx * 2);
-  const availableHeight = Math.max(1, viewportSize.height - paddingPx * 2);
+  const availableWidth = Math.max(1, Math.min(viewportSize.width - paddingPx * 2, viewportSize.width * targetFill));
+  const availableHeight = Math.max(1, Math.min(viewportSize.height - paddingPx * 2, viewportSize.height * targetFill));
   const zoom = clamp(Math.min(availableWidth / displayWidth, availableHeight / displayHeight), 0.35, 4);
   return centerBoundsInViewport(normalized, canvasSize, viewportSize, zoom);
 }
