@@ -198,11 +198,13 @@ function App() {
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
   const paintShoppingList = shoppingListText(paintGuideEntries);
   const canIncludePaintGuide = paintGuideEntries.length > 0;
+  const detailCleanupAccepted = cleanupChecks.cutline && cleanupChecks.remove && cleanupChecks.draw;
   const traceQualityReview = analysis
     ? buildTraceQualityReview({
       analysis,
       manualStrokeCount: manualStrokes.length,
       starterDetailLinesPresent: !traceStudioOpen && editableDetailLinesPresent,
+      detailCleanupAccepted,
       showReference,
       printPreview
     })
@@ -1855,6 +1857,10 @@ function App() {
                     <div>
                       <dt>Export readiness</dt>
                       <dd>{traceQualityReview.exportReadiness}</dd>
+                    </div>
+                    <div>
+                      <dt>Detail cleanup</dt>
+                      <dd>{traceQualityReview.detailCleanupStatus}</dd>
                     </div>
                   </dl>
                   {traceQualityReview.warnings.length > 0 ? (

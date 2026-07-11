@@ -4,6 +4,7 @@ export type TraceQualityReviewInput = {
   analysis: CutoutProjectAnalysis;
   manualStrokeCount: number;
   starterDetailLinesPresent?: boolean;
+  detailCleanupAccepted?: boolean;
   showReference: boolean;
   printPreview: boolean;
 };
@@ -19,7 +20,8 @@ export type TraceQualityReview = {
   originalUnderlayStatus: "Visible" | "Hidden" | "Hidden in print preview";
   manualDetailLineCount: number;
   detailLineStatus: string;
-  exportReadiness: "Ready" | "Good for outside cutline, incomplete for paint/details" | "Regenerate cutline first";
+  detailCleanupStatus: "Review recommended" | "Accepted";
+  exportReadiness: "Technically ready to export" | "Good for outside cutline, incomplete for paint/details" | "Regenerate cutline first";
   warnings: string[];
 };
 
@@ -27,6 +29,7 @@ export function buildTraceQualityReview({
   analysis,
   manualStrokeCount,
   starterDetailLinesPresent = false,
+  detailCleanupAccepted = false,
   showReference,
   printPreview
 }: TraceQualityReviewInput): TraceQualityReview {
@@ -64,6 +67,7 @@ export function buildTraceQualityReview({
     originalUnderlayStatus: printPreview ? "Hidden in print preview" : showReference ? "Visible" : "Hidden",
     manualDetailLineCount: manualStrokeCount,
     detailLineStatus: detailLineStatus(manualStrokeCount, starterDetailLinesPresent),
+    detailCleanupStatus: detailCleanupAccepted ? "Accepted" : "Review recommended",
     exportReadiness: exportReadiness(vectorCutlinePresent, hasDetailLines),
     warnings: uniqueWarnings(warnings)
   };
@@ -78,7 +82,7 @@ function detailLineStatus(manualStrokeCount: number, starterDetailLinesPresent: 
 function exportReadiness(vectorCutlinePresent: boolean, hasDetailLines: boolean): TraceQualityReview["exportReadiness"] {
   if (!vectorCutlinePresent) return "Regenerate cutline first";
   if (!hasDetailLines) return "Good for outside cutline, incomplete for paint/details";
-  return "Ready";
+  return "Technically ready to export";
 }
 
 function subjectBoundsText(analysis: CutoutProjectAnalysis) {

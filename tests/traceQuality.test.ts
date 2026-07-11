@@ -51,6 +51,7 @@ const analysis: CutoutProjectAnalysis = {
   assertEqual(review.originalUnderlayStatus, "Visible", "review should report visible underlay");
   assertEqual(review.manualDetailLineCount, 0, "review should include manual stroke count");
   assertEqual(review.detailLineStatus, "None", "review should report missing detail lines");
+  assertEqual(review.detailCleanupStatus, "Review recommended", "review should recommend cleanup review until the checklist is accepted");
   assert(review.warnings.some((warning) => warning.includes("checkerboard background")), "review should keep backend checkerboard warning");
   assert(review.warnings.some((warning) => warning.includes("Manual tracing recommended")), "review should warn when no manual detail lines exist");
   assertEqual(review.exportReadiness, "Good for outside cutline, incomplete for paint/details", "review should summarize export readiness");
@@ -61,13 +62,15 @@ const analysis: CutoutProjectAnalysis = {
     analysis,
     manualStrokeCount: 0,
     starterDetailLinesPresent: true,
+    detailCleanupAccepted: false,
     showReference: true,
     printPreview: false
   });
 
   assertEqual(review.detailLineStatus, "Editable starter lines present", "starter workflow should count the accepted editable detail layer");
+  assertEqual(review.detailCleanupStatus, "Review recommended", "starter detail lines should still require cleanup review until the checklist is accepted");
   assert(!review.warnings.some((warning) => warning.includes("Manual tracing recommended")), "starter workflow should not demand manual tracing when editable detail lines exist");
-  assertEqual(review.exportReadiness, "Ready", "starter detail layer should make the packet export-ready");
+  assertEqual(review.exportReadiness, "Technically ready to export", "starter detail layer should make the packet technically ready to export");
 }
 
 {
@@ -81,6 +84,22 @@ const analysis: CutoutProjectAnalysis = {
   assertEqual(review.cutlineStatus, "Needs regeneration", "missing vector path should require regeneration");
   assertEqual(review.vectorCutlinePresent, false, "missing vector path should be reported");
   assertEqual(review.originalUnderlayStatus, "Hidden", "hidden reference should be reported");
+  assertEqual(review.detailCleanupStatus, "Review recommended", "missing cutline should still default cleanup review to recommended");
   assert(review.warnings.some((warning) => warning.includes("Regenerate the cutline")), "review should warn about old analysis with missing vector path");
   assert(review.warnings.some((warning) => warning.includes("small detected subject")), "review should warn about low subject coverage");
+}
+
+{
+  const review = buildTraceQualityReview({
+    analysis,
+    manualStrokeCount: 1,
+    detailCleanupAccepted: true,
+    showReference: false,
+    printPreview: true
+  });
+
+  assertEqual(review.detailLineStatus, "1 manual stroke", "manual strokes should still be reported");
+  assertEqual(review.detailCleanupStatus, "Accepted", "accepted cleanup checklist should be reflected in the review");
+  assertEqual(review.originalUnderlayStatus, "Hidden in print preview", "print preview should still hide the underlay");
+  assertEqual(review.exportReadiness, "Technically ready to export", "manual detail lines plus cutline should be technically ready to export");
 }
