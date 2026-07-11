@@ -316,7 +316,7 @@ function App() {
     if (fitTraceViewportToContent()) {
       pendingContentFitRef.current = false;
     }
-  }, [analysis, editorOpen, cutlineBounds]);
+  }, [analysis, editorOpen, traceStudioOpen, cutlineBounds]);
 
   useEffect(() => {
     if (selectedStrokeId && !manualStrokes.some((stroke) => stroke.id === selectedStrokeId)) {
