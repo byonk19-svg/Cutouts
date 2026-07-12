@@ -2,6 +2,12 @@ import type { TraceStroke } from "./traceStrokes";
 import { DEFAULT_TRACE_VIEWPORT, type TraceViewport } from "./traceViewport.ts";
 import type { Settings, TraceMode } from "./traceWorkflow";
 import { paintGuideEditsFromProjectPalette, seedProjectPaletteFromDetected, type CraftPaintMatch, type PaintGuideEdit, type ProjectPaintColor } from "./paintGuide.ts";
+import {
+  deriveLegacyWorkflowProgress,
+  normalizeWorkflowProgress,
+  type CleanupChecks,
+  type WorkflowProgress
+} from "./guidedWorkflow.ts";
 
 export const CUTOUT_PROJECT_SCHEMA_VERSION = 1;
 export const CUTOUT_AUTOSAVE_KEY = "cutout-studio:auto-save:v1";
@@ -58,12 +64,7 @@ export type ProjectLayerVisibility = {
   printPreview: boolean;
 };
 
-export type ProjectCleanupChecks = {
-  cutline: boolean;
-  remove: boolean;
-  draw: boolean;
-  export: boolean;
-};
+export type ProjectCleanupChecks = CleanupChecks;
 
 export type CutoutProject = {
   schemaVersion: typeof CUTOUT_PROJECT_SCHEMA_VERSION;
@@ -82,14 +83,38 @@ export type CutoutProject = {
   layerVisibility: ProjectLayerVisibility;
   traceViewport: TraceViewport;
   cleanupChecks: ProjectCleanupChecks;
+  workflowProgress: WorkflowProgress;
 };
 
-export type CutoutProjectSnapshotInput = Omit<CutoutProject, "schemaVersion" | "editedDetailPngDataUrl" | "projectPalette" | "paintGuideEdits" | "cleanupChecks"> & {
+export type CutoutProjectSnapshotInput = Omit<CutoutProject, "schemaVersion" | "editedDetailPngDataUrl" | "projectPalette" | "paintGuideEdits" | "cleanupChecks" | "workflowProgress"> & {
   editedDetailPngDataUrl?: string | null;
   projectPalette?: ProjectPaintColor[];
   paintGuideEdits?: PaintGuideEdit[];
   cleanupChecks?: ProjectCleanupChecks;
+  workflowProgress?: WorkflowProgress;
 };
+
+export function resizeAnalysisForFinishedHeight(
+  analysis: CutoutProjectAnalysis,
+  finishedHeightIn: number
+): CutoutProjectAnalysis {
+  const finishedWidthIn = Number((finishedHeightIn * (analysis.finishedWidthIn / analysis.finishedHeightIn)).toFixed(2));
+  const tileWidthIn = 8.5 - (2 * 0.35);
+  const tileHeightIn = 11 - (2 * 0.35) - 0.42;
+  const tileStepWidthIn = tileWidthIn - 0.25;
+  const tileStepHeightIn = tileHeightIn - 0.25;
+  const tileCols = Math.max(1, Math.ceil(Math.max(0.01, finishedWidthIn - 0.25) / tileStepWidthIn));
+  const tileRows = Math.max(1, Math.ceil(Math.max(0.01, finishedHeightIn - 0.25) / tileStepHeightIn));
+
+  return {
+    ...analysis,
+    finishedWidthIn,
+    finishedHeightIn,
+    tileCols,
+    tileRows,
+    tileCount: tileCols * tileRows
+  };
+}
 
 export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): CutoutProject {
   const projectPalette = cloneProjectPalette(input.projectPalette ?? seedProjectPaletteFromDetected(input.analysis.palette, input.paintGuideEdits ?? []));
@@ -123,7 +148,15 @@ export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): 
       printPreview: false
     },
     traceViewport: { ...input.traceViewport },
-    cleanupChecks: { ...(input.cleanupChecks ?? defaultCleanupChecks()) }
+    cleanupChecks: { ...(input.cleanupChecks ?? defaultCleanupChecks()) },
+    workflowProgress: normalizeWorkflowProgress(
+      input.workflowProgress ?? deriveLegacyWorkflowProgress({
+        hasAnalysis: true,
+        cleanupChecks: input.cleanupChecks ?? defaultCleanupChecks(),
+        includePaintGuidePage: input.settings.includePaintGuidePage
+      }),
+      { hasAnalysis: true }
+    )
   };
 }
 
@@ -138,7 +171,7 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
     throw new Error("This project file uses an unsupported Cutout Studio version.");
   }
 
-  const project = parsed as CutoutProject & { editedDetailPngDataUrl?: unknown; paintGuideEdits?: unknown; projectPalette?: unknown; cleanupChecks?: unknown };
+  const project = parsed as CutoutProject & { editedDetailPngDataUrl?: unknown; paintGuideEdits?: unknown; projectPalette?: unknown; cleanupChecks?: unknown; workflowProgress?: unknown };
   assertString(project.createdAt, "createdAt");
   assertString(project.updatedAt, "updatedAt");
   assertSourceImage(project.sourceImage);
@@ -169,6 +202,15 @@ export function restoreCutoutProject(raw: unknown): CutoutProject {
     project.cleanupChecks = defaultCleanupChecks();
   }
   assertCleanupChecks(project.cleanupChecks);
+  if (!isRecord(project.workflowProgress)) {
+    project.workflowProgress = deriveLegacyWorkflowProgress({
+      hasAnalysis: true,
+      cleanupChecks: project.cleanupChecks,
+      includePaintGuidePage: project.settings.includePaintGuidePage
+    });
+  }
+  assertWorkflowProgress(project.workflowProgress);
+  project.workflowProgress = normalizeWorkflowProgress(project.workflowProgress, { hasAnalysis: true });
   assertNumber(project.referenceOpacity, "referenceOpacity");
 
   return createCutoutProjectSnapshot({
@@ -355,6 +397,19 @@ function assertCleanupChecks(value: unknown): asserts value is ProjectCleanupChe
   if (!isRecord(value)) throw new Error("Project cleanup checks are invalid.");
   for (const key of ["cutline", "remove", "draw", "export"] as const) {
     if (typeof value[key] !== "boolean") throw new Error(`Project cleanupChecks.${key} is invalid.`);
+  }
+}
+
+function assertWorkflowProgress(value: unknown): asserts value is WorkflowProgress {
+  if (!isRecord(value)) throw new Error("Project workflow progress is invalid.");
+  if (value.activeStep !== "upload" && value.activeStep !== "clean" && value.activeStep !== "colors" && value.activeStep !== "export") {
+    throw new Error("Project workflowProgress.activeStep is invalid.");
+  }
+  if (typeof value.lineworkReviewed !== "boolean") {
+    throw new Error("Project workflowProgress.lineworkReviewed is invalid.");
+  }
+  if (value.colorsOutcome !== "incomplete" && value.colorsOutcome !== "reviewed" && value.colorsOutcome !== "skipped") {
+    throw new Error("Project workflowProgress.colorsOutcome is invalid.");
   }
 }
 

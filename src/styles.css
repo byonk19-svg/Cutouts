@@ -303,6 +303,28 @@ button {
   color: #145f56;
 }
 
+.workflow-step.current button,
+.workflow-step.completed button {
+  border-color: #a9cbc3;
+  background: #eef8f5;
+}
+
+.workflow-step.current button > span,
+.workflow-step.completed button > span {
+  border-color: #1d7a70;
+  background: #ffffff;
+  color: #145f56;
+}
+
+.workflow-step.current strong {
+  color: #145f56;
+}
+
+.workflow-step.locked button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .workflow-anchor-section {
   display: grid;
   gap: 15px;

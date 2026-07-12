@@ -3,6 +3,7 @@ import {
   cleanedProjectNameFromFileName,
   createCutoutProjectSnapshot,
   projectFileName,
+  resizeAnalysisForFinishedHeight,
   restoreCutoutProject,
   serializeCutoutProject
 } from "../src/cutoutProject.ts";
@@ -70,6 +71,15 @@ const analysis = {
 };
 
 {
+  const resized = resizeAnalysisForFinishedHeight(analysis, 48);
+
+  assertEqual(resized.finishedHeightIn, 48, "finished height edits should update analysis geometry");
+  assertEqual(resized.finishedWidthIn, 19, "finished width should retain the analyzed aspect ratio");
+  assertEqual(resized.outerCutPath, analysis.outerCutPath, "finished size edits should preserve vector linework");
+  assertEqual(resized.detailLinePngDataUrl, analysis.detailLinePngDataUrl, "finished size edits should preserve detail linework");
+}
+
+{
   const strokes = [
     createTraceStroke("face-line", [{ x: 10, y: 12 }, { x: 40, y: 20 }], 12),
     createTraceStroke("coat-line", [{ x: 30, y: 90 }, { x: 60, y: 140 }], 20)
@@ -108,6 +118,11 @@ const analysis = {
       remove: false,
       draw: true,
       export: false
+    },
+    workflowProgress: {
+      activeStep: "export",
+      lineworkReviewed: true,
+      colorsOutcome: "reviewed"
     }
   });
 
@@ -121,12 +136,21 @@ const analysis = {
   assertEqual(project.analysis.detailLinePngDataUrl, analysis.detailLinePngDataUrl, "project should keep the suggestion layer image");
   assertEqual(project.editedDetailPngDataUrl, null, "manual projects should not store an edited raster detail layer");
 
+  project.projectName = "Coraline yard cutout";
+  project.settings.finishedHeightIn = 48;
+  project.analysis = resizeAnalysisForFinishedHeight(project.analysis, 48);
+  project.projectPalette[0].label = "Raincoat yellow";
+
   const serialized = serializeCutoutProject(project);
   assert(!serialized.includes("selectedStrokeId"), "project autosave should not include transient selected stroke state");
   assert(!serialized.includes("dimUnselectedStrokes"), "project autosave should not include transient dimming state");
   assert(!serialized.includes("selectionFeedback"), "project autosave should not include transient selection feedback");
 
   const restored = restoreCutoutProject(serialized);
+  assertEqual(restored.projectName, "Coraline yard cutout", "project name edits should preserve the saved workflow");
+  assertEqual(restored.settings.finishedHeightIn, 48, "finished size edits should preserve the saved workflow");
+  assertEqual(restored.analysis.outerCutPath, analysis.outerCutPath, "finished size edits should preserve reviewed linework");
+  assertEqual(restored.projectPalette[0].label, "Raincoat yellow", "color edits should round trip without revoking workflow progress");
   assertEqual(restored.manualStrokes[0].points[0].x, 10, "round trip should preserve stroke x coordinate");
   assertEqual(restored.manualStrokes[0].points[1].y, 20, "round trip should preserve stroke y coordinate");
   assertEqual(restored.manualStrokes[1].width, 20, "round trip should preserve stroke width");
@@ -146,6 +170,9 @@ const analysis = {
   assertEqual(restored.cleanupChecks.remove, false, "round trip should preserve cleanup remove progress");
   assertEqual(restored.cleanupChecks.draw, true, "round trip should preserve cleanup draw progress");
   assertEqual(restored.cleanupChecks.export, false, "round trip should preserve cleanup export progress");
+  assertEqual(restored.workflowProgress.activeStep, "export", "round trip should preserve active workflow step");
+  assertEqual(restored.workflowProgress.lineworkReviewed, true, "round trip should preserve linework review milestone");
+  assertEqual(restored.workflowProgress.colorsOutcome, "reviewed", "color edits should preserve the completed Colors milestone");
   assertEqual(restored.settings.includeInstructionCoverPage, true, "round trip should preserve instruction cover setting");
   assertEqual(restored.settings.includePaintGuidePage, true, "round trip should preserve paint guide setting");
 }
@@ -219,6 +246,47 @@ const analysis = {
   assertEqual(restored.cleanupChecks.remove, false, "legacy project import should default cleanup remove progress off");
   assertEqual(restored.cleanupChecks.draw, false, "legacy project import should default cleanup draw progress off");
   assertEqual(restored.cleanupChecks.export, false, "legacy project import should default cleanup export progress off");
+  assertEqual(restored.workflowProgress.activeStep, "clean", "legacy analyzed projects should derive Clean Lines as the active step");
+  assertEqual(restored.workflowProgress.lineworkReviewed, false, "legacy projects should derive incomplete linework review");
+  assertEqual(restored.workflowProgress.colorsOutcome, "incomplete", "legacy projects should derive an incomplete Colors outcome");
+}
+
+{
+  const project = createCutoutProjectSnapshot({
+    projectName: "Invalid saved progress",
+    createdAt: "2026-07-07T10:00:00.000Z",
+    updatedAt: "2026-07-07T10:05:00.000Z",
+    sourceImage: { name: "source.png", type: "image/png", dataUrl: "data:image/png;base64,source" },
+    settings,
+    traceMode: "paint",
+    analysis,
+    manualStrokes: [],
+    paintGuideEdits: [],
+    referenceOpacity: 42,
+    layerVisibility: {
+      showReference: true,
+      showCutline: true,
+      showManualLines: true,
+      showSuggestions: false,
+      printPreview: false
+    },
+    traceViewport: DEFAULT_TRACE_VIEWPORT,
+    workflowProgress: {
+      activeStep: "clean",
+      lineworkReviewed: false,
+      colorsOutcome: "incomplete"
+    }
+  });
+  const invalidSavedProject = JSON.parse(serializeCutoutProject(project));
+  invalidSavedProject.workflowProgress = {
+    activeStep: "export",
+    lineworkReviewed: false,
+    colorsOutcome: "reviewed"
+  };
+  const restored = restoreCutoutProject(invalidSavedProject);
+
+  assertEqual(restored.workflowProgress.activeStep, "clean", "restore should clamp unsupported Export progress to Clean Lines");
+  assertEqual(restored.workflowProgress.colorsOutcome, "incomplete", "restore should discard a Colors milestone unsupported by linework review");
 }
 
 {

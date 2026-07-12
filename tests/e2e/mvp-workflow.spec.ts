@@ -13,8 +13,15 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   });
   await expect(page.getByLabel("Project name")).toHaveValue("Mvp Smoke Character");
 
-  await expect(page.getByLabel("Guided workflow")).toContainText("Generate cutline");
-  await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Generate cutline/ })).toBeVisible();
+  const guidedWorkflow = page.getByLabel("Guided workflow");
+  await expect(guidedWorkflow).toContainText("Upload");
+  await expect(guidedWorkflow).toContainText("Clean Lines");
+  await expect(guidedWorkflow).toContainText("Colors");
+  await expect(guidedWorkflow).toContainText("Export");
+  await expect(guidedWorkflow.getByRole("button", { name: /Upload/ })).toHaveAttribute("aria-current", "step");
+  await expect(guidedWorkflow.getByRole("button", { name: /Clean Lines/ })).toBeDisabled();
+  await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toBeDisabled();
+  await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: /Start New/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start Trace Studio with Starter lines" })).toBeVisible();
   await expect(page.getByLabel("What to trace")).toHaveCount(0);
@@ -34,6 +41,9 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(detailStrength.getByRole("button", { name: /Balanced/ })).toHaveClass(/selected/);
   await expect(page.getByText("Line smoothness")).toBeHidden();
   await page.getByRole("button", { name: "Start Trace Studio with Starter lines" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
+  await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toBeDisabled();
+  await expect(guidedWorkflow.getByRole("button", { name: /Upload/ })).toBeEnabled();
   const starterGuidance = page.getByLabel("Starter detail line guidance");
   await expect(starterGuidance).toBeVisible({ timeout: 60_000 });
   await expect(starterGuidance).toContainText("Starter lines are generated automatically");
@@ -77,6 +87,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await page.getByLabel("Review cutline").check();
   await page.getByLabel("Remove extra marks").check();
   await page.getByLabel("Draw missing details").check();
+  await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toHaveAttribute("aria-current", "step");
   await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
   await expect(paintReview).toBeVisible();
   const paintGuideSummary = paintGuide.locator(".paint-guide-disclosure-summary");
@@ -116,6 +127,9 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await page.reload();
   await expect(page.getByText(/Blank Trace Studio Editor/)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
+  await expect(guidedWorkflow.getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
+  await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(false);
+  await paintGuideSummary.click();
   await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
 
   const paintRows = page.locator(".palette-row");

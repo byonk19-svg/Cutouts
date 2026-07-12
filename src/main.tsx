@@ -6,6 +6,7 @@ import {
   cleanedProjectNameFromFileName,
   createCutoutProjectSnapshot,
   projectFileName,
+  resizeAnalysisForFinishedHeight,
   restoreCutoutProject,
   serializeCutoutProject,
   type CutoutProject,
@@ -53,6 +54,17 @@ import {
 import { buildTraceLineworkSvg, svgLineworkFileName } from "./traceLineworkSvg";
 import { buildTraceQualityReview } from "./traceQuality";
 import {
+  DEFAULT_WORKFLOW_PROGRESS,
+  completeColorReview,
+  completeLineworkReview,
+  invalidateLineworkReview,
+  navigateWorkflow,
+  resetWorkflowForSource,
+  workflowStepItems,
+  type WorkflowProgress,
+  type WorkflowStep
+} from "./guidedWorkflow";
+import {
   DEFAULT_TRACE_VIEWPORT,
   boundsFromTraceStrokes,
   centerBoundsInViewport,
@@ -86,8 +98,6 @@ type BrushSize = "thin" | "normal" | "bold";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
 type Analysis = CutoutProjectAnalysis;
 type ProjectStatus = "No saved project" | "Unsaved changes" | "Auto-saved" | "Saved" | "Restored auto-save" | "Project opened" | "Project export failed" | "Project import failed" | "Auto-save failed";
-type WorkflowStatus = "Complete" | "Next" | "Needs attention";
-type WorkflowTarget = "setup" | "editor" | "paint" | "export";
 type StrokeDragState = {
   mode: "move" | "point";
   strokeId: string;
@@ -151,6 +161,7 @@ function App() {
     draw: false,
     export: false
   });
+  const [workflowProgress, setWorkflowProgress] = useState<WorkflowProgress>(DEFAULT_WORKFLOW_PROGRESS);
   const [manualStrokes, setManualStrokes] = useState<TraceStroke[]>([]);
   const [projectPalette, setProjectPalette] = useState<ProjectPaintColor[]>([]);
   const [newPaintHex, setNewPaintHex] = useState("#f1c7a5");
@@ -183,6 +194,11 @@ function App() {
   const strokeIdRef = useRef(0);
   const pendingContentFitRef = useRef(false);
   const previousDetailCleanupAcceptedRef = useRef(false);
+  const reviewedLineworkRef = useRef<{
+    manualStrokes: TraceStroke[];
+    editedDetailDataUrl: string | null;
+    traceMode: TraceMode;
+  } | null>(null);
 
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
@@ -212,12 +228,7 @@ function App() {
       printPreview
     })
     : null;
-  const workflowSteps = [
-    workflowStep("Generate cutline", "setup", analysis !== null, image !== null),
-    workflowStep("Edit template lines", "editor", manualStrokes.length > 0 || cleanupChecks.draw, analysis !== null),
-    workflowStep("Review paint palette", "paint", paintGuideEntries.length > 0 && paintWarnings.length === 0, analysis !== null),
-    workflowStep("Export packet", "export", cleanupChecks.export, canExport)
-  ];
+  const guidedWorkflowSteps = workflowStepItems(workflowProgress, { hasAnalysis: analysis !== null });
   const duplicatePaintSuggestion = groupDuplicatePaintPurchases(paintGuideEntries).find((group) => group.swatchNumbers.length > 1);
 
   useEffect(() => {
@@ -231,6 +242,40 @@ function App() {
     }
     previousDetailCleanupAcceptedRef.current = detailCleanupAccepted;
   }, [analysis, detailCleanupAccepted]);
+
+  useEffect(() => {
+    if (!detailCleanupAccepted || workflowProgress.lineworkReviewed) return;
+    setWorkflowProgress((current) => completeLineworkReview(current));
+  }, [detailCleanupAccepted, workflowProgress.lineworkReviewed]);
+
+  useEffect(() => {
+    if (!cleanupChecks.export || !workflowProgress.lineworkReviewed || workflowProgress.colorsOutcome !== "incomplete") return;
+    setWorkflowProgress((current) => completeColorReview(
+      current,
+      settings.includePaintGuidePage ? "reviewed" : "skipped"
+    ));
+  }, [cleanupChecks.export, settings.includePaintGuidePage, workflowProgress.colorsOutcome, workflowProgress.lineworkReviewed]);
+
+  useEffect(() => {
+    if (!workflowProgress.lineworkReviewed) {
+      reviewedLineworkRef.current = null;
+      return;
+    }
+    const reviewed = reviewedLineworkRef.current;
+    if (!reviewed) {
+      reviewedLineworkRef.current = { manualStrokes, editedDetailDataUrl, traceMode };
+      return;
+    }
+    if (
+      reviewed.manualStrokes === manualStrokes
+      && reviewed.editedDetailDataUrl === editedDetailDataUrl
+      && reviewed.traceMode === traceMode
+    ) return;
+
+    reviewedLineworkRef.current = null;
+    setWorkflowProgress((current) => invalidateLineworkReview(current));
+    setCleanupChecks({ cutline: false, remove: false, draw: false, export: false });
+  }, [editedDetailDataUrl, manualStrokes, traceMode, workflowProgress.lineworkReviewed]);
 
   function resetEditorState() {
     setHistory([]);
@@ -299,6 +344,7 @@ function App() {
     editedDetailDataUrl,
     traceViewport,
     cleanupChecks,
+    workflowProgress,
     autosavePaused
   ]);
 
@@ -371,6 +417,7 @@ function App() {
       resetEditorState();
       resetPaintGuideDisclosure();
       setAnalysis(body);
+      setWorkflowProgress({ activeStep: "clean", lineworkReviewed: false, colorsOutcome: "incomplete" });
       if (preservedManualStrokes.length > 0) setManualStrokes(preservedManualStrokes);
       setProjectPalette(seedProjectPaletteFromDetected(body.palette, []));
       setSelectedPaintColorIds([]);
@@ -475,6 +522,7 @@ function App() {
     setPaintReviewFilter("all");
     setShoppingListStatus("");
     setProjectCreatedAt(null);
+    setWorkflowProgress((current) => resetWorkflowForSource(current));
     setProjectStatus(file ? "Unsaved changes" : "No saved project");
     if (!file) return;
 
@@ -523,18 +571,22 @@ function App() {
     resetPaintGuideDisclosure();
     setShoppingListStatus("");
     resetCleanupChecks();
+    setWorkflowProgress(DEFAULT_WORKFLOW_PROGRESS);
     resetEditorState();
     setError(null);
     strokeIdRef.current = 0;
     window.setTimeout(() => setAutosavePaused(false), 100);
   }
 
-  function scrollToWorkflowTarget(target: WorkflowTarget) {
-    const targetElement = target === "setup"
+  function navigateToWorkflowStep(step: WorkflowStep) {
+    const next = navigateWorkflow(workflowProgress, step, { hasAnalysis: analysis !== null });
+    if (next.activeStep !== step) return;
+    setWorkflowProgress(next);
+    const targetElement = step === "upload"
       ? setupSectionRef.current
-      : target === "editor"
+      : step === "clean"
         ? traceEditorSectionRef.current
-        : target === "paint"
+        : step === "colors"
           ? paintReviewSectionRef.current
           : exportSectionRef.current;
 
@@ -569,7 +621,8 @@ function App() {
         printPreview
       },
       traceViewport,
-      cleanupChecks
+      cleanupChecks,
+      workflowProgress
     });
   }
 
@@ -632,7 +685,15 @@ function App() {
     setSelectedStrokeId(null);
     setDimUnselectedStrokes(false);
     setSelectionFeedback("");
+    reviewedLineworkRef.current = project.workflowProgress.lineworkReviewed
+      ? {
+          manualStrokes: project.manualStrokes,
+          editedDetailDataUrl: project.editedDetailPngDataUrl,
+          traceMode: project.traceMode
+        }
+      : null;
     setCleanupChecks(project.cleanupChecks);
+    setWorkflowProgress(project.workflowProgress);
     setManualHistory([]);
     setManualRedoHistory([]);
     setHistory([]);
@@ -647,6 +708,12 @@ function App() {
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
     const next = { ...settings, [key]: value };
     setSettings(next);
+    if (key === "finishedHeightIn") {
+      setAnalysis((current) => current
+        ? resizeAnalysisForFinishedHeight(current, value as Settings["finishedHeightIn"])
+        : current);
+      return;
+    }
     setAnalysis(null);
   }
 
@@ -1352,13 +1419,13 @@ function App() {
 
           <section className="workflow-card" aria-label="Guided workflow">
             <div className="workflow-card-title">
-              <strong>Workflow</strong>
-              <span>Start with Trace Studio, then clean up paint colors.</span>
+              <strong>Guided workflow</strong>
+              <span>Upload, clean the lines, review colors, then export.</span>
             </div>
             <ol className="workflow-steps">
-              {workflowSteps.map((step, index) => (
-                <li key={step.label} className={`workflow-step ${step.status === "Complete" ? "complete" : step.status === "Next" ? "next" : ""}`}>
-                  <button type="button" onClick={() => scrollToWorkflowTarget(step.target)}>
+              {guidedWorkflowSteps.map((step, index) => (
+                <li key={step.step} className={`workflow-step ${step.status}`}>
+                  <button type="button" onClick={() => navigateToWorkflowStep(step.step)} disabled={!step.clickable} aria-current={step.status === "current" ? "step" : undefined}>
                     <span>{index + 1}</span>
                     <div>
                       <strong>{step.label}</strong>
@@ -2300,11 +2367,6 @@ function canvasHasVisibleInk(canvas: HTMLCanvasElement) {
     }
   }
   return false;
-}
-
-function workflowStep(label: string, target: WorkflowTarget, complete: boolean, available: boolean) {
-  const status: WorkflowStatus = complete ? "Complete" : available ? "Next" : "Needs attention";
-  return { label, target, status };
 }
 
 function isGenericPaintLabel(entry: PaintGuideEntry) {
