@@ -122,13 +122,6 @@ const defaultSettings: Settings = {
   includePaintGuidePage: true
 };
 
-const cleanupStepLabels: Record<CleanupStep, string> = {
-  cutline: "Review cutline",
-  remove: "Remove extra marks",
-  draw: "Draw missing details",
-  export: "Export printable template"
-};
-
 function App() {
   const [image, setImage] = useState<File | null>(null);
   const [sourceImageDataUrl, setSourceImageDataUrl] = useState<string | null>(null);
@@ -232,6 +225,7 @@ function App() {
     : null;
   const guidedWorkflowSteps = workflowStepItems(workflowProgress, { hasAnalysis: analysis !== null });
   const uploadStepActive = workflowProgress.activeStep === "upload";
+  const cleanStepActive = workflowProgress.activeStep === "clean";
   const duplicatePaintSuggestion = groupDuplicatePaintPurchases(paintGuideEntries).find((group) => group.swatchNumbers.length > 1);
 
   useEffect(() => {
@@ -256,19 +250,6 @@ function App() {
     }
     previousDetailCleanupAcceptedRef.current = detailCleanupAccepted;
   }, [analysis, detailCleanupAccepted]);
-
-  useEffect(() => {
-    if (!detailCleanupAccepted || workflowProgress.lineworkReviewed) return;
-    setWorkflowProgress((current) => completeLineworkReview(current));
-  }, [detailCleanupAccepted, workflowProgress.lineworkReviewed]);
-
-  useEffect(() => {
-    if (!cleanupChecks.export || !workflowProgress.lineworkReviewed || workflowProgress.colorsOutcome !== "incomplete") return;
-    setWorkflowProgress((current) => completeColorReview(
-      current,
-      settings.includePaintGuidePage ? "reviewed" : "skipped"
-    ));
-  }, [cleanupChecks.export, settings.includePaintGuidePage, workflowProgress.colorsOutcome, workflowProgress.lineworkReviewed]);
 
   useEffect(() => {
     if (!workflowProgress.lineworkReviewed) {
@@ -740,6 +721,26 @@ function App() {
     if (fileMenuRef.current) fileMenuRef.current.open = false;
   }
 
+  function selectAddMissingLine() {
+    setBrushSize("normal");
+    setEditorTool("draw");
+  }
+
+  function acceptCleanLines() {
+    if (!analysis?.outerCutPath.trim()) {
+      setError("A valid cut line is required before continuing to Colors.");
+      return;
+    }
+    setCleanupChecks((current) => ({ ...current, cutline: true, remove: true, draw: true }));
+    setWorkflowProgress((current) => completeLineworkReview(current));
+    setPaintGuideOpen(true);
+  }
+
+  function finishColorReview(outcome: "reviewed" | "skipped") {
+    setSettings((current) => ({ ...current, includePaintGuidePage: outcome === "reviewed" }));
+    setWorkflowProgress((current) => completeColorReview(current, outcome));
+  }
+
   function resetTracingSettings() {
     const nextMode = traceMode === "manual" ? "manual" : "paint";
     setSettings((current) => ({
@@ -976,10 +977,6 @@ function App() {
       draw: false,
       export: false
     });
-  }
-
-  function toggleCleanupStep(step: CleanupStep) {
-    setCleanupChecks((current) => ({ ...current, [step]: !current[step] }));
   }
 
   function beginStroke(event: PointerEvent<HTMLCanvasElement>) {
@@ -1402,7 +1399,7 @@ function App() {
             }}
           />
         </div>
-        {!uploadStepActive ? <div className="topbar-actions" ref={exportSectionRef}>
+        {workflowProgress.activeStep === "export" ? <div className="topbar-actions" ref={exportSectionRef}>
           <button
             className="secondary-topbar-action"
             onClick={exportSvgLinework}
@@ -1419,7 +1416,7 @@ function App() {
         </div> : null}
       </header>
 
-      <section className={uploadStepActive ? "workspace upload-workspace" : "workspace"}>
+      <section className={uploadStepActive ? "workspace upload-workspace" : cleanStepActive ? "workspace clean-lines-workspace" : "workspace"}>
         {uploadStepActive ? (
         <aside className="left-panel" aria-label="Template settings">
           <PanelTitle icon={<FileImage size={18} />} title="Upload" />
@@ -1466,7 +1463,7 @@ function App() {
         </aside>
         ) : (
         <>
-        <aside className="left-panel" aria-label="Template settings">
+        {!cleanStepActive ? <aside className="left-panel" aria-label="Template settings">
           <PanelTitle icon={<SlidersHorizontal size={18} />} title="Template Setup" />
           <GuidedWorkflowCard steps={guidedWorkflowSteps} onNavigate={navigateToWorkflowStep} />
           <div className="workflow-anchor-section" ref={setupSectionRef}>
@@ -1593,9 +1590,14 @@ function App() {
               {primaryTraceActionLabel}
             </button>
           </div>
-        </aside>
+        </aside> : null}
 
-        <section className="preview-stage" aria-label="Trace preview">
+        <section className="preview-stage" aria-label={cleanStepActive ? "Clean Lines workspace" : "Trace preview"}>
+          {cleanStepActive ? (
+            <div className="clean-workflow-nav">
+              <GuidedWorkflowCard steps={guidedWorkflowSteps} onNavigate={navigateToWorkflowStep} />
+            </div>
+          ) : null}
           {analysis ? (
             <div className="page-preview">
               <div className="preview-strip">
@@ -1604,6 +1606,67 @@ function App() {
               </div>
               {editorOpen ? (
                 <div className="editor-wrap" ref={traceEditorSectionRef}>
+                  {cleanStepActive ? (
+                    <>
+                      <CleanLinesPrimaryControls
+                        editorTool={editorTool}
+                        brushSize={brushSize}
+                        undoDisabled={undoDisabled}
+                        showReference={showReference}
+                        cutlineValid={Boolean(analysis.outerCutPath.trim())}
+                        onRemove={() => setEditorTool("remove")}
+                        onAdd={selectAddMissingLine}
+                        onUndo={undoDetailEdit}
+                        onToggleOriginal={() => setShowReference((shown) => !shown)}
+                        onFit={resetZoom}
+                        onAccept={acceptCleanLines}
+                      />
+                      <CleanLinesStatus
+                        analysis={analysis}
+                        reviewed={workflowProgress.lineworkReviewed}
+                        review={traceQualityReview}
+                      />
+                    </>
+                  ) : null}
+                  <details className={cleanStepActive ? "clean-more-tools" : "clean-more-tools always-open"} aria-label="More Tools" open={cleanStepActive ? undefined : true}>
+                    <summary>{cleanStepActive ? "More Tools" : "Editor tools"}</summary>
+                    <div className="clean-more-tools-content">
+                  {cleanStepActive ? (
+                    <div className="choice-group clean-preset-tools" aria-label="Trace style">
+                      <span className="choice-label">Starter presets and alternate modes</span>
+                      <div className="detail-preset-group" aria-label="Detail strength">
+                        {(["simple", "balanced", "detailed"] as DetailPreset[]).map((preset) => (
+                          <button key={preset} className={selectedDetailPreset === preset ? "choice selected" : "choice"} onClick={() => applyDetailPreset(preset)}>
+                            <strong>{detailPresetLabel(preset)}</strong>
+                            <small>{detailPresetHelp(preset)}</small>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="auto-starter-options">
+                        <button className={traceMode === "manual" ? "choice selected" : "choice"} onClick={() => applyTraceMode("manual")}>
+                          <strong>{traceModeLabel("manual")}</strong>
+                        </button>
+                        <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
+                          <strong>{traceModeLabel("outline")}</strong>
+                        </button>
+                      </div>
+                      <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
+                        {advancedOpen ? "Hide fine-tune starter settings" : "Fine-tune starter settings"}
+                      </button>
+                      {advancedOpen ? (
+                        <div className="advanced-panel">
+                          <RangeField label="Line smoothness" min={0} max={8} value={settings.smoothing} onChange={(value) => updateSetting("smoothing", value)} />
+                          <RangeField label="Cleanup strength" min={traceMode === "marker" ? 85 : traceMode === "paint" ? 76 : 0} max={100} value={settings.detailCleanup} onChange={updateInteriorDetail} lowLabel="More lines" highLabel="Cleaner" />
+                          <RangeField label="Background sensitivity" min={0} max={180} value={settings.threshold} onChange={(value) => updateSetting("threshold", value)} />
+                          <RangeField label="Remove tiny marks" min={0} max={600} value={settings.speckArea} onChange={(value) => updateSetting("speckArea", value)} />
+                          <RangeField label="Close small gaps" min={0} max={1500} value={settings.holeArea} onChange={(value) => updateSetting("holeArea", value)} />
+                          <button className="tool-button" onClick={resetTracingSettings}>
+                            <RotateCcw size={15} /> Reset tracing settings
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="editor-tools" aria-label="Template editor tools">
                     <div className="tool-group primary-tool-group">
                       <span>Draw</span>
@@ -1863,6 +1926,8 @@ function App() {
                       <p>Skip shadows, texture, tiny highlights, and photo noise.</p>
                     </section>
                   ) : null}
+                    </div>
+                  </details>
                   <div className="template-editor" ref={editorViewportRef}>
                     <div
                       className="template-canvas-plane"
@@ -1916,7 +1981,7 @@ function App() {
           )}
         </section>
 
-        <aside className="right-panel" aria-label="Paint guide and export summary">
+        {!cleanStepActive ? <aside className="right-panel" aria-label="Paint guide and export summary">
           {analysis ? (
             <>
               {traceQualityReview ? (
@@ -1974,24 +2039,12 @@ function App() {
                   )}
                 </section>
               ) : null}
-              <div className="cleanup-card">
-                <div className="cleanup-title">
-                  <ListChecks size={17} />
-                  <h3>Template Cleanup</h3>
+              {workflowProgress.activeStep === "colors" ? (
+                <div className="colors-step-actions" aria-label="Colors step actions">
+                  <button className="primary-action" onClick={() => finishColorReview("reviewed")}>Colors Look Good - Continue to Export</button>
+                  <button className="tool-button" onClick={() => finishColorReview("skipped")}>Skip Color Guide</button>
                 </div>
-                <div className="cleanup-list">
-                  {(Object.keys(cleanupStepLabels) as CleanupStep[]).map((step) => (
-                    <label key={step} className="cleanup-step">
-                      <input
-                        type="checkbox"
-                        checked={cleanupChecks[step]}
-                        onChange={() => toggleCleanupStep(step)}
-                      />
-                      <span>{cleanupStepLabels[step]}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
+              ) : null}
               <details
                 className="paint-guide-disclosure"
                 aria-label="Paint Guide"
@@ -2363,7 +2416,7 @@ function App() {
             </>
           )}
           {error ? <div className="error-box">{error}</div> : null}
-        </aside>
+        </aside> : null}
         </>
         )}
       </section>
@@ -2398,6 +2451,88 @@ function GuidedWorkflowCard({
         ))}
       </ol>
     </section>
+  );
+}
+
+function CleanLinesPrimaryControls({
+  editorTool,
+  brushSize,
+  undoDisabled,
+  showReference,
+  cutlineValid,
+  onRemove,
+  onAdd,
+  onUndo,
+  onToggleOriginal,
+  onFit,
+  onAccept
+}: {
+  editorTool: EditorTool;
+  brushSize: BrushSize;
+  undoDisabled: boolean;
+  showReference: boolean;
+  cutlineValid: boolean;
+  onRemove: () => void;
+  onAdd: () => void;
+  onUndo: () => void;
+  onToggleOriginal: () => void;
+  onFit: () => void;
+  onAccept: () => void;
+}) {
+  return (
+    <>
+      <div className="clean-primary-controls" aria-label="Clean Lines primary controls">
+        <button className={editorTool === "remove" ? "tool-button selected" : "tool-button"} onClick={onRemove}><MousePointerClick size={16} /> Remove Line</button>
+        <button className={editorTool === "draw" && brushSize === "normal" ? "tool-button selected" : "tool-button"} onClick={onAdd}><Pencil size={16} /> Add Missing Line</button>
+        <button className="tool-button" onClick={onUndo} disabled={undoDisabled}><Undo2 size={16} /> Undo</button>
+        <button className={showReference ? "tool-button selected" : "tool-button"} onClick={onToggleOriginal}><Eye size={16} /> Show Original</button>
+        <button className="tool-button" onClick={onFit}><ZoomIn size={16} /> Fit</button>
+        <button className="primary-action" onClick={onAccept} disabled={!cutlineValid}><ChevronRight size={16} /> Looks Good - Continue to Colors</button>
+      </div>
+      <p className="clean-tool-instruction" aria-label="Clean Lines instruction">
+        {editorTool === "remove"
+          ? "Click a line to remove it."
+          : editorTool === "draw"
+            ? "Draw only the missing feature or paint-boundary line."
+            : "Use the selected tool, then return to Remove Line or Add Missing Line."}
+      </p>
+    </>
+  );
+}
+
+function CleanLinesStatus({
+  analysis,
+  reviewed,
+  review
+}: {
+  analysis: Analysis;
+  reviewed: boolean;
+  review: ReturnType<typeof buildTraceQualityReview> | null;
+}) {
+  return (
+    <details className="clean-status" aria-label="Clean Lines status">
+      <summary>
+        <span>Cutline {analysis.outerCutPath.trim() ? "OK" : "Needs attention"}</span>
+        <span>{analysis.tileCount} pages</span>
+        <span>{reviewed ? "Reviewed" : "Visual review needed"}</span>
+      </summary>
+      {review ? (
+        <section className="clean-status-details" aria-label="Trace Quality Review">
+          <h3>Trace Quality Review</h3>
+          <dl className="trace-quality-grid">
+            <div><dt>Cutline</dt><dd>{review.cutlineStatus}</dd></div>
+            <div><dt>Vector cutline</dt><dd>{review.vectorCutlinePresent ? `Present (${review.vectorPointCount} points)` : "Missing"}</dd></div>
+            <div><dt>Preview bounds</dt><dd>{review.previewBoundsText}</dd></div>
+            <div><dt>Subject bounds</dt><dd>{review.subjectBoundsText}</dd></div>
+            <div><dt>Tile layout</dt><dd>{review.tileCountText}</dd></div>
+            <div><dt>Original underlay</dt><dd>{review.originalUnderlayStatus}</dd></div>
+            <div><dt>Detail lines</dt><dd>{review.detailLineStatus}</dd></div>
+            <div><dt>Detail cleanup</dt><dd>{review.detailCleanupStatus}</dd></div>
+          </dl>
+          {review.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+        </section>
+      ) : null}
+    </details>
   );
 }
 

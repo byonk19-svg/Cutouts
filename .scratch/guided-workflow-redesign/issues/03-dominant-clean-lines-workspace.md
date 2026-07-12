@@ -4,17 +4,16 @@
 
 **Blocked by:** 01 — Introduce durable Guided Workflow state; 02 — Build the focused Upload step and File menu.
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] The canvas occupies at least 70% of main content width on a typical desktop and at least 65vh of usable height.
-- [ ] Permanent setup and paint/diagnostics rails are absent from Clean Lines.
-- [ ] Exactly six primary controls are visible: Remove Line, Add Missing Line, Undo, Show Original, Fit, and Looks Good — Continue to Colors.
-- [ ] Remove Line is selected by default and Add Missing Line creates normal-width freehand Feature Lines.
-- [ ] A single short instruction changes with the selected primary tool.
-- [ ] Looks Good records linework review and advances only when the Cut Line is valid.
-- [ ] Eraser, smooth curve, brush size, redo, reset, zoom, layers, presets, blank Trace Studio, and outside-only mode remain available under More Tools.
-- [ ] A compact status control summarizes cutline quality, page count, and visual-review state.
-- [ ] Full technical diagnostics are hidden until the status drawer is opened.
-- [ ] Paint and export controls do not render in Clean Lines.
-- [ ] Desktop and mobile browser tests verify canvas dominance, primary-control count, progressive disclosure, and review advancement.
-
+- [x] The canvas occupies at least 70% of main content width on a typical desktop and at least 65vh of usable height.
+- [x] Permanent setup and paint/diagnostics rails are absent from Clean Lines.
+- [x] Exactly six primary controls are visible: Remove Line, Add Missing Line, Undo, Show Original, Fit, and Looks Good — Continue to Colors.
+- [x] Remove Line is selected by default and Add Missing Line creates normal-width freehand Feature Lines.
+- [x] A single short instruction changes with the selected primary tool.
+- [x] Looks Good records linework review and advances only when the Cut Line is valid.
+- [x] Eraser, smooth curve, brush size, redo, reset, zoom, layers, presets, blank Trace Studio, and outside-only mode remain available under More Tools.
+- [x] A compact status control summarizes cutline quality, page count, and visual-review state.
+- [x] Full technical diagnostics are hidden until the status drawer is opened.
+- [x] Paint and export controls do not render in Clean Lines.
+- [x] Desktop and mobile browser tests verify canvas dominance, primary-control count, progressive disclosure, and review advancement.

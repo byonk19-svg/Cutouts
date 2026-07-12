@@ -54,8 +54,47 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(guidedWorkflow.getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toBeDisabled();
   await expect(guidedWorkflow.getByRole("button", { name: /Upload/ })).toBeEnabled();
+  const cleanWorkspace = page.getByLabel("Clean Lines workspace");
+  const primaryControls = page.getByLabel("Clean Lines primary controls");
+  await expect(primaryControls.getByRole("button")).toHaveCount(6);
+  for (const name of ["Remove Line", "Add Missing Line", "Undo", "Show Original", "Fit", "Looks Good - Continue to Colors"]) {
+    await expect(primaryControls.getByRole("button", { name })).toBeVisible();
+  }
+  await expect(primaryControls.getByRole("button", { name: "Remove Line" })).toHaveClass(/selected/);
+  await expect(page.getByLabel("Clean Lines instruction")).toContainText("Click a line to remove it");
+  await expect(page.getByLabel("Paint guide and export summary")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export SVG Linework" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export Template Packet PDF" })).toHaveCount(0);
+
+  const moreTools = page.getByLabel("More Tools");
+  const traceStatus = page.getByLabel("Clean Lines status");
+  await expect(moreTools.getByRole("button", { name: /Erase details/ })).toBeHidden();
+  await expect(traceStatus.getByText("Trace Quality Review")).toBeHidden();
+  await expect(traceStatus).toContainText(/Cutline (OK|Needs attention)/);
+  await expect(traceStatus).toContainText(/pages/);
+  await traceStatus.locator("summary").click();
+  await expect(traceStatus.getByText("Trace Quality Review")).toBeVisible();
+  await traceStatus.locator("summary").click();
+
+  await expectCleanCanvasDominance(page, cleanWorkspace);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectCleanCanvasDominance(page, cleanWorkspace);
+  await expect(primaryControls.getByRole("button")).toHaveCount(6);
+  await expect(moreTools.getByRole("button", { name: /Erase details/ })).toBeHidden();
+  await expect(traceStatus.getByText("Trace Quality Review")).toBeHidden();
+  await primaryControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toHaveAttribute("aria-current", "step");
+  await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
+  await expect(primaryControls.getByRole("button")).toHaveCount(6);
+  await page.setViewportSize({ width: 1440, height: 1100 });
+
+  await moreTools.locator("summary").click();
   const traceStyleChoices = page.getByLabel("Trace style");
-  await expect(traceStyleChoices.getByRole("button", { name: /Balanced Auto Starter/ })).toHaveClass(/selected/);
+  await expect(traceStyleChoices.getByRole("button", { name: /Balanced/ })).toHaveClass(/selected/);
+  await primaryControls.getByRole("button", { name: "Add Missing Line" }).click();
+  await expect(page.getByLabel("Clean Lines instruction")).toContainText("Draw only the missing feature");
+  await expect(page.getByLabel("Brush size")).toHaveValue("normal");
+  await primaryControls.getByRole("button", { name: "Remove Line" }).click();
   await fileMenu.getByText("File", { exact: true }).click();
   await expect(fileMenu.getByRole("button", { name: "Save Project" })).toBeEnabled();
   const projectDownloadPromise = page.waitForEvent("download");
@@ -71,9 +110,6 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByLabel("Trace Studio layer visibility")).toContainText("Editable starter lines");
   await expect(page.getByLabel("What to trace")).toContainText("keep only the lines you need to transfer onto wood");
   await expectTraceFit(page);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expectTraceFit(page);
-  await page.setViewportSize({ width: 1440, height: 1100 });
   await starterGuidance.getByRole("button", { name: "Use blank Trace Studio" }).click();
   await expect(page.getByText(/Blank Trace Studio Editor/)).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
@@ -82,6 +118,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(underlayGuide).toBeVisible();
   await expect(underlayGuide).toContainText("Original underlay is visible");
   await expect(underlayGuide).toContainText("faint source image inside the canvas below");
+  await traceStatus.locator("summary").click();
   const traceQuality = page.getByLabel("Trace Quality Review");
   await expect(traceQuality).toBeVisible();
   await expect(traceQuality).toContainText("Cutline");
@@ -101,12 +138,11 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(traceGuidance).toContainText("Skip shadows, texture, tiny highlights, and photo noise.");
   const paintGuide = page.locator('details[aria-label="Paint Guide"]');
   const paintReview = page.getByLabel("Paint Match Review");
-  expect(await paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(false);
+  await expect(paintGuide).toHaveCount(0);
   await expect(paintReview).toBeHidden();
-  await page.getByLabel("Review cutline").check();
-  await page.getByLabel("Remove extra marks").check();
-  await page.getByLabel("Draw missing details").check();
+  await primaryControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toHaveAttribute("aria-current", "step");
+  await expect(paintGuide).toBeVisible();
   await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
   await expect(paintReview).toBeVisible();
   const paintGuideSummary = paintGuide.locator(".paint-guide-disclosure-summary");
@@ -117,8 +153,10 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
   await expect(paintReview).toBeVisible();
 
+  await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
+  await moreTools.locator("summary").click();
   const canvas = page.getByLabel("Editable interior detail lines");
-  await page.getByRole("button", { name: /Draw details/ }).click();
+  await primaryControls.getByRole("button", { name: "Add Missing Line" }).click();
   await drawStroke(canvas, [
     [0.36, 0.34],
     [0.45, 0.39],
@@ -148,8 +186,9 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(page.getByText(/Blank Trace Studio Editor/)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
   await expect(guidedWorkflow.getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
-  await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(false);
-  await paintGuideSummary.click();
+  await primaryControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toHaveAttribute("aria-current", "step");
+  await expect(paintGuide).toBeVisible();
   await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
 
   const paintRows = page.locator(".palette-row");
@@ -199,6 +238,8 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   expect(JSON.stringify(projectJson)).not.toContain("selectedStrokeId");
   expect(JSON.stringify(projectJson)).not.toContain("dimUnselected");
 
+  await page.getByRole("button", { name: "Colors Look Good - Continue to Export" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
   await page.getByRole("button", { name: /Preview Printable Template/ }).click();
 
   const svgDownload = await downloadFrom(page, "Export SVG Linework");
@@ -329,6 +370,22 @@ async function expectTraceFit(page: Page) {
   await expect.poll(async () => (await measure())?.heightRatio ?? 1).toBeLessThanOrEqual(0.85);
   await expect.poll(async () => (await measure())?.xCenterOffset ?? 1).toBeLessThanOrEqual(0.1);
   await expect.poll(async () => (await measure())?.yCenterOffset ?? 1).toBeLessThanOrEqual(0.1);
+}
+
+async function expectCleanCanvasDominance(page: Page, workspace: Locator) {
+  const measurements = await workspace.evaluate((element) => {
+    const workspaceRect = element.getBoundingClientRect();
+    const canvas = element.querySelector<HTMLElement>(".template-editor");
+    if (!canvas) throw new Error("Clean Lines canvas was not rendered.");
+    const canvasRect = canvas.getBoundingClientRect();
+    return {
+      widthRatio: canvasRect.width / workspaceRect.width,
+      height: canvasRect.height,
+      viewportHeight: window.innerHeight
+    };
+  });
+  expect(measurements.widthRatio).toBeGreaterThanOrEqual(0.7);
+  expect(measurements.height).toBeGreaterThanOrEqual(measurements.viewportHeight * 0.65);
 }
 
 async function updatePaintRow(row: Locator, label: string, note: string) {

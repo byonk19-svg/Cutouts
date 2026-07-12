@@ -1878,6 +1878,122 @@ button:disabled {
   padding-top: 40px;
 }
 
+.workspace.clean-lines-workspace {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 12px;
+}
+
+.clean-lines-workspace .preview-stage {
+  width: 100%;
+  padding: 10px;
+}
+
+.clean-workflow-nav .workflow-card {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+}
+
+.clean-workflow-nav .workflow-card-title {
+  display: none;
+}
+
+.clean-workflow-nav .workflow-steps {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.clean-lines-workspace .editor-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 66vh;
+}
+
+.clean-lines-workspace .template-editor {
+  flex: 1 1 auto;
+  height: 66vh;
+  min-height: 66vh;
+}
+
+.clean-primary-controls {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(112px, auto)) minmax(220px, 1fr);
+  gap: 7px;
+}
+
+.clean-primary-controls button {
+  min-height: 40px;
+  justify-content: center;
+}
+
+.clean-tool-instruction {
+  margin: 0;
+  padding: 7px 10px;
+  color: #43524c;
+  font-size: 13px;
+}
+
+.clean-status,
+.clean-more-tools {
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #fbfdfc;
+}
+
+.clean-status > summary,
+.clean-more-tools > summary {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 11px;
+  color: #31413b;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.clean-status > summary span:last-child {
+  margin-left: auto;
+}
+
+.clean-status-details,
+.clean-more-tools-content {
+  padding: 10px;
+  border-top: 1px solid #dce4df;
+}
+
+.clean-status-details h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.clean-more-tools.always-open {
+  border: 0;
+  background: transparent;
+}
+
+.clean-more-tools.always-open > summary {
+  display: none;
+}
+
+.clean-more-tools.always-open .clean-more-tools-content {
+  padding: 0;
+  border: 0;
+}
+
+.clean-preset-tools {
+  margin-bottom: 9px;
+}
+
+.colors-step-actions {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.colors-step-actions .primary-action {
+  width: 100%;
+}
+
 .upload-step {
   display: grid;
   gap: 16px;
@@ -1906,6 +2022,31 @@ button:disabled {
 
   .workspace.upload-workspace {
     padding-top: 16px;
+  }
+
+  .workspace.clean-lines-workspace {
+    padding: 6px;
+  }
+
+  .clean-workflow-nav .workflow-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .clean-primary-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .clean-primary-controls .primary-action {
+    grid-column: 1 / -1;
+  }
+
+  .clean-status > summary {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+
+  .clean-status > summary span:last-child {
+    margin-left: 0;
   }
 
   .workspace {
