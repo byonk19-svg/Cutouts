@@ -1,5 +1,5 @@
 import { expect, test, type Download, type Locator, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
 test("maker can complete the MVP trace, restore, paint review, and export workflow", async ({ page, request }) => {
@@ -393,6 +393,93 @@ test("Coraline head-area removal shows the complete connected scope before delet
     contentType: "image/png"
   });
 });
+
+test("guided workflow remains focused and responsive through Coraline acceptance", async ({ page }) => {
+  const evidenceDir = "output/screenshots/latest/guided-workflow";
+  mkdirSync(evidenceDir, { recursive: true });
+  await page.addInitScript(() => localStorage.clear());
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+
+  const guidedWorkflow = page.getByLabel("Guided workflow");
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "coraline-best-clean-outline.png",
+    mimeType: "image/png",
+    buffer: readFileSync("backend/tests/fixtures/coraline/coraline-best-clean-outline.png")
+  });
+  await expectSinglePrimaryAction(uploadStep, "Generate Template");
+  await expectFutureStepsLocked(guidedWorkflow, ["Clean Lines", "Colors", "Export"]);
+  await captureResponsiveStep(page, evidenceDir, "upload", uploadStep);
+
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+  const cleanWorkspace = page.getByLabel("Clean Lines workspace");
+  const primaryControls = page.getByLabel("Clean Lines primary controls");
+  await expectSinglePrimaryAction(cleanWorkspace, "Looks Good - Continue to Colors");
+  await expectFutureStepsLocked(guidedWorkflow, ["Colors", "Export"]);
+  await expect(page.getByLabel("More Tools")).not.toHaveAttribute("open", "");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectCleanCanvasDominance(page, cleanWorkspace);
+
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  const fixtureDataUrl = `data:image/png;base64,${readFileSync("backend/tests/fixtures/coraline/coraline-detail-layer.png").toString("base64")}`;
+  await detailCanvas.evaluate(async (element, dataUrl) => {
+    const canvas = element as HTMLCanvasElement;
+    const image = new Image();
+    image.src = dataUrl;
+    await image.decode();
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    canvas.getContext("2d")?.drawImage(image, 0, 0);
+  }, fixtureDataUrl);
+  await detailCanvas.hover({ position: await canvasLocalPoint(detailCanvas, 180 / 359, 67 / 900) });
+  await expect(page.getByLabel("Clean Lines instruction")).toContainText("Connected line preview: 1323 pixels");
+  await expect.poll(() => canvasVisiblePixelCount(page.locator(".removal-preview-layer"))).toBe(1323);
+  await captureResponsiveStep(page, evidenceDir, "clean-lines", cleanWorkspace);
+
+  await primaryControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  const colorsWorkspace = page.getByLabel("Colors workspace");
+  await expectSinglePrimaryAction(colorsWorkspace, "Continue to Export");
+  await expectFutureStepsLocked(guidedWorkflow, ["Export"]);
+  await expect(colorsWorkspace.getByLabel("Edit Color Details")).not.toHaveAttribute("open", "");
+  await captureResponsiveStep(page, evidenceDir, "colors", colorsWorkspace);
+
+  await colorsWorkspace.getByRole("button", { name: "Continue to Export" }).click();
+  const exportWorkspace = page.getByLabel("Export workspace");
+  await expectSinglePrimaryAction(exportWorkspace, "Download Printable PDF");
+  await expect(exportWorkspace.getByLabel("More Export Options")).not.toHaveAttribute("open", "");
+  await captureResponsiveStep(page, evidenceDir, "export", exportWorkspace);
+});
+
+async function captureResponsiveStep(page: Page, evidenceDir: string, step: string, workspace: Locator) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(workspace).toBeVisible();
+  await page.screenshot({ path: `${evidenceDir}/${step}-desktop.png` });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(workspace).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: `${evidenceDir}/${step}-mobile.png` });
+}
+
+async function expectSinglePrimaryAction(workspace: Locator, name: string) {
+  await expect(workspace.locator("button.primary-action")).toHaveCount(1);
+  await expect(workspace.getByRole("button", { name })).toBeVisible();
+}
+
+async function expectFutureStepsLocked(workflow: Locator, stepNames: string[]) {
+  for (const name of stepNames) {
+    await expect(workflow.getByRole("button", { name: new RegExp(name) })).toBeDisabled();
+  }
+}
+
+async function expectNoHorizontalOverflow(page: Page) {
+  const dimensions = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth
+  }));
+  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
+}
 
 async function downloadFrom(page: Page, buttonName: string) {
   const downloadPromise = page.waitForEvent("download");
