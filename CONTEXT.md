@@ -18,6 +18,8 @@ The first implementation milestone for turning one source image into printable t
 
 The full-size outer silhouette that the maker traces onto wood and cuts with a jigsaw. The cut line is the highest-priority artifact because it determines whether the physical cutout works.
 
+A missing or geometrically invalid Cut Line is the only trace-quality condition that blocks the maker from completing Clean Lines. Other diagnostic warnings inform visual review but do not prevent the maker from accepting manually corrected linework.
+
 ### Paint Region
 
 An interior area of the cutout that receives a specific paint color. Paint regions are useful for guidance, but they are secondary to producing a reliable cut line in the first version.
@@ -32,7 +34,7 @@ A ranked recommendation that maps an extracted image color to budget craft paint
 
 ### Reduced Palette
 
-The small set of representative colors extracted from a source image for painting. The first version should default to about six colors and allow the maker to adjust the count.
+The small set of representative colors extracted from a source image for painting. Extraction defaults to six colors, while the Colors step displays the project's actual current color count. Palette-size adjustment is an advanced color-detail control.
 
 ### Detail Line
 
@@ -46,9 +48,17 @@ The manual cleanup step after automatic tracing. The editor locks the outer cut 
 
 A deliberate interior line that helps the maker transfer important character features such as eyes, mouth, clothing seams, hands, boots, hair outline, or accessories. Feature lines are separate from paint-region boundaries and should remain black-and-white on trace pages.
 
+The primary Add Missing Line action creates a normal-width freehand Feature Line. Smoothing and thickness are optional modifiers exposed through More Tools rather than separate primary workflow modes.
+
+### Connected Line Segment
+
+The complete contiguous group of detail-line pixels affected by the Remove Line tool. Before deletion, the editor highlights the entire Connected Line Segment under the pointer so the maker can see the full removal scope. Removal is one click and remains reversible through Undo.
+
 ### Source Image
 
 The image provided by the maker as the basis for a cutout template. In the first version, a source image is expected to contain one clear subject on a simple background.
+
+Replacing the Source Image resets generated analysis and every downstream Review Milestone. Changing project name or Finished Size does not change image geometry, so it preserves cleaned linework, paint selections, and completed milestones.
 
 ### Removable Background
 
@@ -96,4 +106,24 @@ A first-version app that is started with local development commands by the maker
 
 ### Single-Session Workflow
 
-A workflow where the maker imports one source image, adjusts template settings, exports a PDF, and does not save an editable project file for later sessions.
+A legacy workflow assumption where the maker imports one source image, adjusts template settings, and exports a PDF in one sitting. Cutout Studio now supports autosave and editable project files, so new workflow design must preserve progress across sessions.
+
+### Guided Workflow
+
+The primary four-step product journey: Upload, Clean Lines, Colors, and Export. Only the active step exposes its working controls. Earlier steps remain available for backward navigation, while later steps remain gated by durable review milestones.
+
+The Guided Workflow is a single-page state machine, not a set of routes. Image data, editor history, paint selections, autosave, and project restoration remain inside one project state boundary while the active step determines which workspace is visible.
+
+Its step header allows navigation to the current step and previously unlocked steps. Locked future steps remain visible but disabled. Advancement to the next step happens through the active screen's primary action after its Review Milestone is satisfied.
+
+### Workflow Progress
+
+The durable project state that records the maker's last active guided-workflow step and completed review milestones. When a project is restored, Cutout Studio resumes at the saved step unless required project data only supports an earlier step. Legacy projects derive the furthest valid step from their existing analysis, linework-review, and color-review data.
+
+### Review Milestone
+
+A durable decision that allows the maker to advance in the Guided Workflow. Reviewing linework unlocks Colors; reviewing or explicitly skipping Colors unlocks Export. Editing linework revokes the linework and color review milestones and returns the project to Clean Lines, while preserving existing paint selections for later reuse.
+
+Color edits made after the Colors milestone update the project and exported paint guide without revoking that milestone. The maker may explicitly restart color review when they want the workflow to require another color decision.
+
+Skipping Colors records an explicit skipped milestone and disables the Color Guide in the exported Template Pack. Completing color review later replaces the skipped milestone and enables the Color Guide again.
