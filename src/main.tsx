@@ -229,6 +229,7 @@ function App() {
   const uploadStepActive = workflowProgress.activeStep === "upload";
   const cleanStepActive = workflowProgress.activeStep === "clean";
   const colorsStepActive = workflowProgress.activeStep === "colors";
+  const exportStepActive = workflowProgress.activeStep === "export";
   const duplicatePaintSuggestion = groupDuplicatePaintPurchases(paintGuideEntries).find((group) => group.swatchNumbers.length > 1);
 
   useEffect(() => {
@@ -734,6 +735,10 @@ function App() {
   function finishColorReview(outcome: "reviewed" | "skipped") {
     setSettings((current) => ({ ...current, includePaintGuidePage: outcome === "reviewed" }));
     setWorkflowProgress((current) => completeColorReview(current, outcome));
+  }
+
+  function setExportColorGuide(included: boolean) {
+    setSettings((current) => ({ ...current, includePaintGuidePage: included }));
   }
 
   function resetTracingSettings() {
@@ -1472,24 +1477,9 @@ function App() {
             }}
           />
         </div>
-        {workflowProgress.activeStep === "export" ? <div className="topbar-actions" ref={exportSectionRef}>
-          <button
-            className="secondary-topbar-action"
-            onClick={exportSvgLinework}
-            disabled={!canExportSvg}
-            title={analysis && !analysis.outerCutPath.trim() ? "Regenerate the cutline before exporting SVG linework." : undefined}
-          >
-            <FileText size={18} />
-            Export SVG Linework
-          </button>
-          <button className="primary-action" onClick={exportPdf} disabled={!canExport}>
-            <Download size={18} />
-            Export Template Packet PDF
-          </button>
-        </div> : null}
       </header>
 
-      <section className={uploadStepActive ? "workspace upload-workspace" : cleanStepActive ? "workspace clean-lines-workspace" : colorsStepActive ? "workspace colors-workspace" : "workspace"}>
+      <section className={uploadStepActive ? "workspace upload-workspace" : cleanStepActive ? "workspace clean-lines-workspace" : colorsStepActive ? "workspace colors-workspace" : exportStepActive ? "workspace export-workspace-shell" : "workspace"}>
         {uploadStepActive ? (
         <aside className="left-panel" aria-label="Template settings">
           <PanelTitle icon={<FileImage size={18} />} title="Upload" />
@@ -1536,7 +1526,7 @@ function App() {
         </aside>
         ) : (
         <>
-        {!cleanStepActive && !colorsStepActive ? <aside className="left-panel" aria-label="Template settings">
+        {!cleanStepActive && !colorsStepActive && !exportStepActive ? <aside className="left-panel" aria-label="Template settings">
           <PanelTitle icon={<SlidersHorizontal size={18} />} title="Template Setup" />
           <GuidedWorkflowCard steps={guidedWorkflowSteps} onNavigate={navigateToWorkflowStep} />
           <div className="workflow-anchor-section" ref={setupSectionRef}>
@@ -1651,7 +1641,7 @@ function App() {
           </div>
         </aside> : null}
 
-        {!colorsStepActive ? <section className="preview-stage" aria-label={cleanStepActive ? "Clean Lines workspace" : "Trace preview"}>
+        {!colorsStepActive && !exportStepActive ? <section className="preview-stage" aria-label={cleanStepActive ? "Clean Lines workspace" : "Trace preview"}>
           {cleanStepActive ? (
             <div className="clean-workflow-nav">
               <GuidedWorkflowCard steps={guidedWorkflowSteps} onNavigate={navigateToWorkflowStep} />
@@ -2501,10 +2491,97 @@ function App() {
           )}
           {error ? <div className="error-box">{error}</div> : null}
         </aside> : null}
+        {exportStepActive && analysis ? (
+          <div ref={exportSectionRef}>
+            <ExportWorkspace
+              analysis={analysis}
+              steps={guidedWorkflowSteps}
+              includeCover={settings.includeInstructionCoverPage}
+              includeColorGuide={settings.includePaintGuidePage}
+              error={error}
+              canExportPdf={canExport}
+              canExportSvg={canExportSvg}
+              onNavigate={navigateToWorkflowStep}
+              onToggleCover={() => setSettings((current) => ({ ...current, includeInstructionCoverPage: !current.includeInstructionCoverPage }))}
+              onToggleColorGuide={() => setExportColorGuide(!settings.includePaintGuidePage)}
+              onDownloadPdf={() => void exportPdf()}
+              onDownloadSvg={exportSvgLinework}
+              onSaveProject={() => downloadProjectFile("Saved")}
+            />
+          </div>
+        ) : null}
         </>
         )}
       </section>
     </main>
+  );
+}
+
+function ExportWorkspace({
+  analysis,
+  steps,
+  includeCover,
+  includeColorGuide,
+  error,
+  canExportPdf,
+  canExportSvg,
+  onNavigate,
+  onToggleCover,
+  onToggleColorGuide,
+  onDownloadPdf,
+  onDownloadSvg,
+  onSaveProject
+}: {
+  analysis: Analysis;
+  steps: WorkflowStepItem[];
+  includeCover: boolean;
+  includeColorGuide: boolean;
+  error: string | null;
+  canExportPdf: boolean;
+  canExportSvg: boolean;
+  onNavigate: (step: WorkflowStep) => void;
+  onToggleCover: () => void;
+  onToggleColorGuide: () => void;
+  onDownloadPdf: () => void;
+  onDownloadSvg: () => void;
+  onSaveProject: () => void;
+}) {
+  return (
+    <section className="export-workspace" aria-label="Export workspace">
+      <div className="export-workflow-nav">
+        <GuidedWorkflowCard steps={steps} onNavigate={onNavigate} />
+      </div>
+      <div className="export-packet-summary">
+        <div className="export-preview">
+          <img src={analysis.previewPngDataUrl} alt="Assembled template preview" />
+        </div>
+        <div className="export-packet-copy">
+          <span className="choice-kicker">Template Pack</span>
+          <h2>Ready to Print</h2>
+          <dl>
+            <div><dt>Finished Size</dt><dd>{analysis.finishedWidthIn} x {analysis.finishedHeightIn} in</dd></div>
+            <div><dt>Trace pages</dt><dd>{analysis.tileCount} tiled pages</dd></div>
+            <div><dt>Print setting</dt><dd>Print at 100% / actual size</dd></div>
+          </dl>
+          <p className="calibration-reminder">Measure the calibration square before taping the full template together.</p>
+          <div className="packet-options" aria-label="Template Pack options">
+            <label><input type="checkbox" checked={includeCover} onChange={onToggleCover} /> Include cover page</label>
+            <label><input type="checkbox" checked={includeColorGuide} onChange={onToggleColorGuide} /> Include Color Guide</label>
+          </div>
+          <button className="primary-action export-pdf-action" onClick={onDownloadPdf} disabled={!canExportPdf}>
+            <Download size={18} /> Download Printable PDF
+          </button>
+          {error ? <div className="error-box" role="alert">{error}</div> : null}
+          <details className="more-export-options" aria-label="More Export Options">
+            <summary>More Export Options</summary>
+            <div>
+              <button className="tool-button" onClick={onDownloadSvg} disabled={!canExportSvg}><FileText size={16} /> Download SVG Linework</button>
+              <button className="tool-button" onClick={onSaveProject}><Save size={16} /> Save Project JSON</button>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
   );
 }
 

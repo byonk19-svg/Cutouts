@@ -126,11 +126,23 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
 
   await colorsWorkspace.getByRole("button", { name: "Skip Paint Guide" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
+  const exportWorkspace = page.getByLabel("Export workspace");
+  await expect(exportWorkspace.getByLabel("Include Color Guide")).not.toBeChecked();
+  await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(false);
+  await exportWorkspace.getByLabel("Include Color Guide").check();
+  await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(true);
+  await expect.poll(() => savedProjectColorsOutcome(page)).toBe("skipped");
+  await exportWorkspace.getByLabel("Include Color Guide").uncheck();
   await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(false);
   await guidedWorkflow.getByRole("button", { name: /Colors/ }).click();
   await expect(editColorDetails.getByLabel("Paint Palette Editor")).toBeVisible();
   await colorsWorkspace.getByRole("button", { name: "Continue to Export" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
+  await expect(exportWorkspace.getByLabel("Include Color Guide")).toBeChecked();
+  await exportWorkspace.getByLabel("Include Color Guide").uncheck();
+  await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(false);
+  await expect.poll(() => savedProjectColorsOutcome(page)).toBe("reviewed");
+  await exportWorkspace.getByLabel("Include Color Guide").check();
   await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(true);
   await guidedWorkflow.getByRole("button", { name: /Colors/ }).click();
   await primaryColorRows.first().getByLabel(/Area label for/).fill("Reviewed color area");
@@ -294,9 +306,23 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
 
   await page.getByRole("button", { name: "Continue to Export" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
-  await page.getByRole("button", { name: /Preview Printable Template/ }).click();
+  await expect(exportWorkspace).toContainText("Finished Size");
+  await expect(exportWorkspace).toContainText(/\d+ tiled pages/);
+  await expect(exportWorkspace).toContainText("Print at 100%");
+  await expect(exportWorkspace.getByRole("img", { name: "Assembled template preview" })).toBeVisible();
+  await expect(exportWorkspace.getByLabel("Include cover page")).toBeChecked();
+  await expect(exportWorkspace.getByLabel("Include Color Guide")).toBeChecked();
+  await expect(exportWorkspace.locator("button.primary-action")).toHaveCount(1);
 
-  const svgDownload = await downloadFrom(page, "Export SVG Linework");
+  const pdfDownload = await downloadFrom(page, "Download Printable PDF");
+  expect((await pdfDownload.path()) ?? "").toBeTruthy();
+
+  const moreExportOptions = exportWorkspace.getByLabel("More Export Options");
+  await expect(moreExportOptions.getByRole("button", { name: "Download SVG Linework" })).toBeHidden();
+  await expect(moreExportOptions.getByRole("button", { name: "Save Project JSON" })).toBeHidden();
+  await moreExportOptions.locator("summary").click();
+
+  const svgDownload = await downloadFrom(page, "Download SVG Linework");
   const svg = await readDownloadText(svgDownload);
   expect(svg).toContain("<path");
   expect(svg).toContain('id="manual-strokes"');
@@ -306,8 +332,10 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   expect(svg).not.toContain("selectedStrokeId");
   expect(svg).not.toContain("dimUnselected");
 
-  const pdfDownload = await downloadFrom(page, "Export Template Packet PDF");
-  expect((await pdfDownload.path()) ?? "").toBeTruthy();
+  const exportProjectPromise = page.waitForEvent("download");
+  await moreExportOptions.getByRole("button", { name: "Save Project JSON" }).click();
+  const exportProject = await exportProjectPromise;
+  expect(exportProject.suggestedFilename()).toMatch(/\.cutout\.json$/);
 
   const pdfResponse = await request.post("/api/export", {
     multipart: {
@@ -517,6 +545,14 @@ async function savedProjectIncludesPaintGuide(page: Page) {
     const raw = localStorage.getItem("cutout-studio:auto-save:v1");
     if (!raw) return null;
     return Boolean(JSON.parse(raw).settings.includePaintGuidePage);
+  });
+}
+
+async function savedProjectColorsOutcome(page: Page) {
+  return page.evaluate(() => {
+    const raw = localStorage.getItem("cutout-studio:auto-save:v1");
+    if (!raw) return null;
+    return JSON.parse(raw).workflowProgress.colorsOutcome as string;
   });
 }
 

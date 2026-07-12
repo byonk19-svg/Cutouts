@@ -1908,6 +1908,137 @@ button:disabled {
   align-content: start;
 }
 
+.workspace.export-workspace-shell {
+  grid-template-columns: minmax(0, 960px);
+  justify-content: center;
+  align-content: start;
+}
+
+.export-workspace {
+  display: grid;
+  gap: 12px;
+}
+
+.export-workflow-nav .workflow-card-title {
+  display: none;
+}
+
+.export-workflow-nav .workflow-steps {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.export-packet-summary {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(360px, 1.15fr);
+  min-height: 570px;
+  border: 1px solid #dce4df;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.export-preview {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #eef3f0;
+}
+
+.export-preview img {
+  width: 100%;
+  height: 100%;
+  max-height: 510px;
+  object-fit: contain;
+}
+
+.export-packet-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px;
+}
+
+.export-packet-copy h2,
+.export-packet-copy p,
+.export-packet-copy dl {
+  margin: 0;
+}
+
+.export-packet-copy h2 {
+  font-size: 24px;
+}
+
+.export-packet-copy dl {
+  display: grid;
+  gap: 8px;
+}
+
+.export-packet-copy dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 9px 0;
+  border-bottom: 1px solid #e3eae6;
+}
+
+.export-packet-copy dt {
+  color: #65736c;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.export-packet-copy dd {
+  margin: 0;
+  color: #17201d;
+  font-weight: 750;
+  text-align: right;
+}
+
+.calibration-reminder {
+  padding: 10px;
+  border-left: 3px solid #1d7a70;
+  background: #eef8f5;
+  color: #31413b;
+  font-size: 13px;
+}
+
+.packet-options {
+  display: grid;
+  gap: 8px;
+}
+
+.packet-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.export-pdf-action {
+  width: 100%;
+  min-height: 48px;
+  justify-content: center;
+}
+
+.more-export-options {
+  margin-top: auto;
+  border-top: 1px solid #dce4df;
+}
+
+.more-export-options summary {
+  padding: 12px 0;
+  color: #43524c;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.more-export-options > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
 .colors-panel {
   display: flex;
   flex-direction: column;
@@ -2169,6 +2300,26 @@ button:disabled {
 
   .workspace.colors-workspace {
     padding: 6px;
+  }
+
+  .workspace.export-workspace-shell {
+    padding: 6px;
+  }
+
+  .export-workflow-nav .workflow-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .export-packet-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .export-preview {
+    min-height: 300px;
+  }
+
+  .export-packet-copy {
+    padding: 18px;
   }
 
   .colors-workflow-nav .workflow-steps {
