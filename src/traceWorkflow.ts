@@ -1,5 +1,6 @@
 export type TraceMode = "outline" | "paint" | "manual" | "marker" | "extra";
 export type DetailPreset = "simple" | "balanced" | "detailed";
+export type DetailExtractionMode = "auto" | "lineArt" | "rendered";
 
 export type Settings = {
   finishedHeightIn: number;
@@ -10,6 +11,7 @@ export type Settings = {
   detailLines: boolean;
   detailCleanup: number;
   templateStyle: TraceMode;
+  detailExtractionMode: DetailExtractionMode;
   paletteSize: number;
   includeInstructionCoverPage: boolean;
   includePaintGuidePage: boolean;

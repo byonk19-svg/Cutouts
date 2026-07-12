@@ -88,6 +88,7 @@ import {
   traceModeHelp,
   traceModeLabel,
   traceModeSettings,
+  type DetailExtractionMode,
   type DetailPreset,
   type Settings,
   type TraceMode
@@ -118,6 +119,7 @@ const defaultSettings: Settings = {
   detailLines: true,
   detailCleanup: 88,
   templateStyle: "paint",
+  detailExtractionMode: "auto",
   paletteSize: 6,
   includeInstructionCoverPage: true,
   includePaintGuidePage: true
@@ -389,9 +391,9 @@ function App() {
     }
   }, [printPreview]);
 
-  async function generateTemplate(preset?: DetailPreset) {
+  async function generateTemplate(preset?: DetailPreset, settingsOverride?: Settings) {
     if (!image) return;
-    const nextSettings = preset ? detailPresetSettings(preset, settings) : settings;
+    const nextSettings = settingsOverride ?? (preset ? detailPresetSettings(preset, settings) : settings);
     if (preset) {
       setSettings(nextSettings);
       applyTraceModeUiState(nextSettings.templateStyle);
@@ -915,6 +917,13 @@ function App() {
     if (!current) return;
     setHistory((items) => [...items.slice(-19), current]);
     setRedoHistory([]);
+  }
+
+  function setDetailExtractionMode(mode: DetailExtractionMode) {
+    const next = { ...settings, detailExtractionMode: mode };
+    setSettings(next);
+    setProjectStatus("Unsaved changes");
+    void generateTemplate(undefined, next);
   }
 
   function undoDetailEdit() {
@@ -1699,6 +1708,24 @@ function App() {
                         <button className={traceMode === "outline" ? "choice selected" : "choice"} onClick={() => applyTraceMode("outline")}>
                           <strong>{traceModeLabel("outline")}</strong>
                         </button>
+                      </div>
+                      <div className="choice-group" aria-label="Image type">
+                        <span className="choice-label">Image type</span>
+                        <div className="auto-starter-options">
+                          {([
+                            ["auto", "Auto"],
+                            ["lineArt", "Existing line art"],
+                            ["rendered", "Rendered image"]
+                          ] as [DetailExtractionMode, string][]).map(([mode, label]) => (
+                            <button
+                              key={mode}
+                              className={settings.detailExtractionMode === mode ? "choice selected" : "choice"}
+                              onClick={() => setDetailExtractionMode(mode)}
+                            >
+                              <strong>{label}</strong>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                       <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
                         {advancedOpen ? "Hide fine-tune starter settings" : "Fine-tune starter settings"}
@@ -2721,11 +2748,15 @@ function CleanLinesStatus({
   reviewed: boolean;
   review: ReturnType<typeof buildTraceQualityReview> | null;
 }) {
+  const extractionLabel = analysis.traceQuality?.detailExtractionModeUsed === "lineArt"
+    ? "Existing line art detected"
+    : "Rendered image boundaries";
   return (
     <details className="clean-status" aria-label="Clean Lines status">
       <summary>
         <span>Cutline {analysis.outerCutPath.trim() ? "OK" : "Needs attention"}</span>
         <span>{analysis.tileCount} pages</span>
+        <span>{extractionLabel}</span>
         <span>{reviewed ? "Reviewed" : "Visual review needed"}</span>
       </summary>
       {review ? (
@@ -2739,6 +2770,7 @@ function CleanLinesStatus({
             <div><dt>Tile layout</dt><dd>{review.tileCountText}</dd></div>
             <div><dt>Original underlay</dt><dd>{review.originalUnderlayStatus}</dd></div>
             <div><dt>Detail lines</dt><dd>{review.detailLineStatus}</dd></div>
+            <div><dt>Image type</dt><dd>{extractionLabel}</dd></div>
             <div><dt>Detail cleanup</dt><dd>{review.detailCleanupStatus}</dd></div>
           </dl>
           {review.warnings.map((warning) => <p key={warning}>{warning}</p>)}

@@ -451,6 +451,33 @@ test("guided workflow remains focused and responsive through Coraline acceptance
   await captureResponsiveStep(page, evidenceDir, "export", exportWorkspace);
 });
 
+test("existing line art is reported and can be overridden from More Tools", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  await page.getByLabel("Source image").setInputFiles({
+    name: "coraline-best-clean-outline.png",
+    mimeType: "image/png",
+    buffer: readFileSync("backend/tests/fixtures/coraline/coraline-best-clean-outline.png")
+  });
+  await page.getByRole("button", { name: "Generate Template" }).click();
+
+  const cleanStatus = page.getByLabel("Clean Lines status");
+  await expect(cleanStatus).toContainText("Existing line art detected");
+  await cleanStatus.locator("summary").click();
+  await expect(cleanStatus.getByLabel("Trace Quality Review")).toContainText("Existing line art detected");
+
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+  const imageType = moreTools.getByLabel("Image type");
+  await expect(imageType.getByRole("button", { name: "Auto" })).toHaveClass(/selected/);
+  await expect(imageType.getByRole("button", { name: "Existing line art" })).toBeVisible();
+  await expect(imageType.getByRole("button", { name: "Rendered image" })).toBeVisible();
+
+  await imageType.getByRole("button", { name: "Rendered image" }).click();
+  await expect(cleanStatus).toContainText("Rendered image boundaries", { timeout: 60_000 });
+  await expect(imageType.getByRole("button", { name: "Rendered image" })).toHaveClass(/selected/);
+});
+
 async function captureResponsiveStep(page: Page, evidenceDir: string, step: string, workspace: Locator) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(workspace).toBeVisible();

@@ -264,7 +264,88 @@ def soft_shaded_render_fixture() -> tuple[Image.Image, Image.Image]:
     return image, mask
 
 
+def flat_outlined_cartoon_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGB", (220, 260), "white")
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((32, 22, 188, 238), radius=32, fill=255)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((32, 22, 188, 238), radius=32, fill=(236, 198, 54), outline=(8, 8, 8), width=7)
+    draw.ellipse((62, 54, 92, 88), fill=(248, 248, 244), outline=(8, 8, 8), width=5)
+    draw.ellipse((128, 54, 158, 88), fill=(248, 248, 244), outline=(8, 8, 8), width=5)
+    draw.arc((72, 92, 150, 140), start=15, end=165, fill=(8, 8, 8), width=6)
+    draw.line((54, 162, 166, 162), fill=(8, 8, 8), width=8)
+    return image, mask
+
+
 class PrintPipelineTest(unittest.TestCase):
+    def test_detail_extraction_mode_is_validated_from_settings(self) -> None:
+        self.assertEqual(TemplateSettings.from_mapping({"detailExtractionMode": "auto"}).detail_extraction_mode, "auto")
+        self.assertEqual(TemplateSettings.from_mapping({"detailExtractionMode": "lineArt"}).detail_extraction_mode, "lineArt")
+        self.assertEqual(TemplateSettings.from_mapping({"detailExtractionMode": "rendered"}).detail_extraction_mode, "rendered")
+        self.assertEqual(TemplateSettings.from_mapping({"detailExtractionMode": "unknown"}).detail_extraction_mode, "auto")
+
+    def test_analysis_reports_automatic_existing_line_art_detection(self) -> None:
+        image, _ = flat_outlined_cartoon_fixture()
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+
+        analysis = analyze_template(out.getvalue(), TemplateSettings(template_style="clean"))
+
+        self.assertEqual(analysis.trace_quality["detailExtractionModeUsed"], "lineArt")
+
+    def test_forced_rendered_mode_bypasses_existing_line_art_detection(self) -> None:
+        image, _ = flat_outlined_cartoon_fixture()
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+
+        analysis = analyze_template(
+            out.getvalue(),
+            TemplateSettings(template_style="clean", detail_extraction_mode="rendered"),
+        )
+
+        self.assertEqual(analysis.trace_quality["detailExtractionModeUsed"], "rendered")
+
+    def test_forced_existing_line_art_without_ink_falls_back_with_warning(self) -> None:
+        image = Image.new("RGBA", (180, 220), (255, 255, 255, 0))
+        ImageDraw.Draw(image).rounded_rectangle((32, 20, 148, 200), radius=28, fill=(244, 206, 72, 255))
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+
+        analysis = analyze_template(
+            out.getvalue(),
+            TemplateSettings(template_style="clean", detail_extraction_mode="lineArt"),
+        )
+
+        self.assertEqual(analysis.trace_quality["detailExtractionModeUsed"], "rendered")
+        self.assertTrue(any("no usable dark ink" in warning for warning in analysis.trace_quality["warnings"]))
+
+    def test_flat_cartoon_is_detected_as_existing_line_art(self) -> None:
+        image, mask = flat_outlined_cartoon_fixture()
+
+        self.assertTrue(pipeline._looks_like_flat_line_art(image, mask))
+
+    def test_soft_render_is_not_detected_as_existing_line_art(self) -> None:
+        image, mask = soft_shaded_render_fixture()
+
+        self.assertFalse(pipeline._looks_like_flat_line_art(image, mask))
+
+    def test_existing_line_art_preserves_the_center_of_a_thick_source_stroke(self) -> None:
+        image, mask = flat_outlined_cartoon_fixture()
+
+        detail = pipeline._existing_line_art_detail_mask(image, mask, cleanup=88, print_scale=False)
+
+        self.assertGreater(detail.getpixel((110, 162)), 0)
+        self.assertGreater(self._count_region_pixels(detail, (54, 157, 166, 168)), 650)
+
+    def test_existing_line_art_removes_silhouette_ink_but_keeps_interior_ink(self) -> None:
+        image, mask = flat_outlined_cartoon_fixture()
+
+        detail = pipeline._existing_line_art_detail_mask(image, mask, cleanup=88, print_scale=False)
+
+        self.assertLess(self._count_region_pixels(detail, (28, 80, 45, 180)), 20)
+        self.assertGreater(self._count_region_pixels(detail, (54, 157, 166, 168)), 650)
+
     def test_analyze_transparent_image_returns_preview_and_tile_summary(self) -> None:
         settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
 

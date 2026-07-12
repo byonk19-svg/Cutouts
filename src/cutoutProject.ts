@@ -1,6 +1,6 @@
 import type { TraceStroke } from "./traceStrokes";
 import { DEFAULT_TRACE_VIEWPORT, type TraceViewport } from "./traceViewport.ts";
-import type { Settings, TraceMode } from "./traceWorkflow";
+import type { DetailExtractionMode, Settings, TraceMode } from "./traceWorkflow";
 import { paintGuideEditsFromProjectPalette, seedProjectPaletteFromDetected, type CraftPaintMatch, type PaintGuideEdit, type ProjectPaintColor } from "./paintGuide.ts";
 import {
   deriveLegacyWorkflowProgress,
@@ -33,6 +33,7 @@ export type TraceQualityMetadata = {
   discardedComponentCoverage?: number;
   vectorCutlinePointCount?: number;
   pathBoundsPx?: [number, number, number, number] | null;
+  detailExtractionModeUsed?: Exclude<DetailExtractionMode, "auto">;
   warnings: string[];
 };
 
@@ -273,6 +274,10 @@ function assertSettings(value: unknown): asserts value is Settings {
   if (typeof value.includePaintGuidePage !== "boolean") {
     value.includePaintGuidePage = true;
   }
+  if (!("detailExtractionMode" in value)) value.detailExtractionMode = "auto";
+  if (value.detailExtractionMode !== "auto" && value.detailExtractionMode !== "lineArt" && value.detailExtractionMode !== "rendered") {
+    throw new Error("Project settings.detailExtractionMode is invalid.");
+  }
   assertTraceMode(value.templateStyle);
 }
 
@@ -325,6 +330,13 @@ function assertTraceQuality(value: unknown): asserts value is TraceQualityMetada
   }
   if (value.pathBoundsPx !== null && value.pathBoundsPx !== undefined) {
     assertBounds(value.pathBoundsPx, "analysis.traceQuality.pathBoundsPx");
+  }
+  if (
+    value.detailExtractionModeUsed !== undefined
+    && value.detailExtractionModeUsed !== "lineArt"
+    && value.detailExtractionModeUsed !== "rendered"
+  ) {
+    throw new Error("Project analysis.traceQuality.detailExtractionModeUsed is invalid.");
   }
 }
 

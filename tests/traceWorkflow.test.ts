@@ -28,6 +28,7 @@ const baseSettings: Settings = {
   detailLines: true,
   detailCleanup: 88,
   templateStyle: "paint",
+  detailExtractionMode: "auto",
   paletteSize: 6,
   includeInstructionCoverPage: true,
   includePaintGuidePage: true

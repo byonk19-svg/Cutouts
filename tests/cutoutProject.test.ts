@@ -28,6 +28,7 @@ const settings: Settings = {
   detailLines: false,
   detailCleanup: 100,
   templateStyle: "manual",
+  detailExtractionMode: "lineArt",
   paletteSize: 6,
   includeInstructionCoverPage: true,
   includePaintGuidePage: true
@@ -175,6 +176,7 @@ const analysis = {
   assertEqual(restored.workflowProgress.colorsOutcome, "reviewed", "color edits should preserve the completed Colors milestone");
   assertEqual(restored.settings.includeInstructionCoverPage, true, "round trip should preserve instruction cover setting");
   assertEqual(restored.settings.includePaintGuidePage, true, "round trip should preserve paint guide setting");
+  assertEqual(restored.settings.detailExtractionMode, "lineArt", "round trip should preserve the detail extraction override");
 }
 
 {
@@ -215,6 +217,7 @@ const analysis = {
   const legacySettings = { ...settings };
   delete (legacySettings as Partial<Settings>).includeInstructionCoverPage;
   delete (legacySettings as Partial<Settings>).includePaintGuidePage;
+  delete (legacySettings as Partial<Settings>).detailExtractionMode;
   const restored = restoreCutoutProject({
     schemaVersion: CUTOUT_PROJECT_SCHEMA_VERSION,
     projectName: "Minimal",
@@ -239,6 +242,7 @@ const analysis = {
   assertEqual(restored.layerVisibility.printPreview, false, "project import should leave printable preview off for editing");
   assertEqual(restored.settings.includeInstructionCoverPage, true, "legacy project import should default instruction cover on");
   assertEqual(restored.settings.includePaintGuidePage, true, "legacy project import should default paint guide on");
+  assertEqual(restored.settings.detailExtractionMode, "auto", "legacy project import should default detail extraction to auto");
   assertEqual(restored.paintGuideEdits.length, 0, "legacy project import should default paint guide edits to empty");
   assertEqual(restored.projectPalette.length, 1, "legacy project import should seed project palette from detected colors");
   assertEqual(restored.editedDetailPngDataUrl, null, "legacy project import should default edited starter detail layer to null");

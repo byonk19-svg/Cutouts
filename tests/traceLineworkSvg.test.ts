@@ -21,6 +21,7 @@ const settings: Settings = {
   detailLines: false,
   detailCleanup: 100,
   templateStyle: "manual",
+  detailExtractionMode: "auto",
   paletteSize: 6,
   includeInstructionCoverPage: true,
   includePaintGuidePage: true

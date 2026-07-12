@@ -20,6 +20,7 @@ from reportlab.pdfgen import canvas
 
 TEMPLATE_STYLES = {"cutOnly", "clean", "manual", "marker", "detailed"}
 TEMPLATE_STYLE_ALIASES = {"outline": "cutOnly", "paint": "clean", "extra": "detailed"}
+DETAIL_EXTRACTION_MODES = {"auto", "lineArt", "rendered"}
 LETTER_WIDTH_IN = 8.5
 LETTER_HEIGHT_IN = 11.0
 PDF_MARGIN_IN = 0.35
@@ -66,6 +67,7 @@ class TemplateSettings:
     detail_lines: bool = True
     detail_cleanup: int = 88
     template_style: str = "clean"
+    detail_extraction_mode: str = "auto"
     palette_size: int = 6
     include_instruction_cover_page: bool = True
     include_paint_guide_page: bool = True
@@ -81,6 +83,9 @@ class TemplateSettings:
         template_style = TEMPLATE_STYLE_ALIASES.get(str(data.get("templateStyle", cls.template_style)), str(data.get("templateStyle", cls.template_style)))
         if template_style not in TEMPLATE_STYLES:
             template_style = cls.template_style
+        detail_extraction_mode = str(data.get("detailExtractionMode", cls.detail_extraction_mode))
+        if detail_extraction_mode not in DETAIL_EXTRACTION_MODES:
+            detail_extraction_mode = cls.detail_extraction_mode
         return cls(
             finished_height_in=_bounded_float(data.get("finishedHeightIn"), 6.0, 96.0, cls.finished_height_in),
             threshold=_bounded_int(data.get("threshold"), 0, 180, cls.threshold),
@@ -90,6 +95,7 @@ class TemplateSettings:
             detail_lines=_bounded_bool(data.get("detailLines"), cls.detail_lines),
             detail_cleanup=_bounded_int(data.get("detailCleanup"), 0, 100, cls.detail_cleanup),
             template_style=template_style,
+            detail_extraction_mode=detail_extraction_mode,
             palette_size=_bounded_int(data.get("paletteSize"), 2, 12, cls.palette_size),
             include_instruction_cover_page=_bounded_bool(data.get("includeInstructionCoverPage"), cls.include_instruction_cover_page),
             include_paint_guide_page=_bounded_bool(data.get("includePaintGuidePage"), cls.include_paint_guide_page),
@@ -226,6 +232,8 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
         bounds,
         preview_mask.size,
         outer_cut_path,
+        _detail_extraction_mode_used(cropped_source, cropped_mask, settings.template_style, settings.detail_extraction_mode),
+        settings.detail_extraction_mode,
     )
 
     return TemplateAnalysis(
@@ -444,6 +452,8 @@ def _trace_quality_summary(
     bounds: tuple[int, int, int, int],
     preview_size: tuple[int, int],
     outer_cut_path: str,
+    detail_extraction_mode_used: str,
+    detail_extraction_mode_requested: str,
 ) -> dict[str, Any]:
     source_area = max(1, image.width * image.height)
     subject_pixels = _mask_pixel_count(final_mask)
@@ -474,6 +484,8 @@ def _trace_quality_summary(
         preview_w, preview_h = preview_size
         if min_x < 0 or min_y < 0 or max_x > preview_w or max_y > preview_h:
             warnings.append("The vector cutline extends outside the preview bounds. Regenerate the cutline before exporting SVG.")
+    if detail_extraction_mode_requested == "lineArt" and detail_extraction_mode_used == "rendered":
+        warnings.append("Existing line art was selected, but no usable dark ink was found. Rendered image boundaries were used instead.")
 
     return {
         "subjectCoverage": round(subject_coverage, 4),
@@ -482,6 +494,7 @@ def _trace_quality_summary(
         "discardedComponentCoverage": round(discarded_component_coverage, 4),
         "vectorCutlinePointCount": _svg_path_point_count(outer_cut_path),
         "pathBoundsPx": tuple(round(value, 3) for value in path_bounds) if path_bounds is not None else None,
+        "detailExtractionModeUsed": detail_extraction_mode_used,
         "warnings": warnings,
     }
 
@@ -721,6 +734,12 @@ def _mask_bounds(mask: Image.Image) -> tuple[int, int, int, int]:
 
 
 def _make_preview_layers(image: Image.Image, mask: Image.Image, settings: TemplateSettings) -> tuple[bytes, bytes, bytes, bytes]:
+    detail_extraction_mode = _detail_extraction_mode_used(
+        image,
+        mask,
+        settings.template_style,
+        settings.detail_extraction_mode,
+    )
     preview_image = image.copy()
     preview_image.thumbnail((PREVIEW_MAX_PX, PREVIEW_MAX_PX), Image.Resampling.LANCZOS)
     preview_mask = mask.resize(preview_image.size, Image.Resampling.NEAREST)
@@ -732,6 +751,7 @@ def _make_preview_layers(image: Image.Image, mask: Image.Image, settings: Templa
         detail_line_width=_detail_line_width(settings, print_scale=False),
         detail_cleanup=settings.detail_cleanup,
         template_style=settings.template_style,
+        detail_extraction_mode=detail_extraction_mode,
         print_scale=False,
     )
     paint_guide = _on_white(preview_image)
@@ -781,6 +801,12 @@ def _make_trace_image(
     height_in: float,
     edited_detail_png: bytes | None = None,
 ) -> Image.Image:
+    detail_extraction_mode = _detail_extraction_mode_used(
+        image,
+        mask,
+        settings.template_style,
+        settings.detail_extraction_mode,
+    )
     target_px = (max(1, round(width_in * PRINT_DPI)), max(1, round(height_in * PRINT_DPI)))
     scaled_image = image.resize(target_px, Image.Resampling.LANCZOS)
     scaled_mask = mask.resize(target_px, Image.Resampling.LANCZOS)
@@ -795,6 +821,7 @@ def _make_trace_image(
         detail_line_width=_detail_line_width(settings, print_scale=True),
         detail_cleanup=settings.detail_cleanup,
         template_style=settings.template_style,
+        detail_extraction_mode=detail_extraction_mode,
         print_scale=True,
     )
     if edited_detail_png:
@@ -833,6 +860,7 @@ def _line_art_layers(
     detail_cleanup: int,
     template_style: str,
     print_scale: bool,
+    detail_extraction_mode: str = "auto",
 ) -> tuple[Image.Image, Image.Image, Image.Image]:
     mask_l = mask.convert("L")
     eroded = _erode_mask(mask_l, 3)
@@ -841,7 +869,14 @@ def _line_art_layers(
     detail = Image.new("RGBA", image.size, (255, 255, 255, 0))
 
     if detail_lines:
-        detail_mask = _detail_line_mask(image, mask_l, detail_cleanup, print_scale, template_style=template_style)
+        detail_mask = _detail_line_mask(
+            image,
+            mask_l,
+            detail_cleanup,
+            print_scale,
+            template_style=template_style,
+            detail_extraction_mode=detail_extraction_mode,
+        )
         if detail_line_width > 1:
             detail_mask = detail_mask.filter(ImageFilter.MaxFilter(_odd_filter_size(detail_line_width)))
         detail = _transparent_line_layer(detail_mask)
@@ -905,12 +940,15 @@ def _detail_line_mask(
     cleanup: int,
     print_scale: bool,
     template_style: str = "detailed",
+    detail_extraction_mode: str = "auto",
 ) -> Image.Image:
     if template_style == "marker":
         cleanup = max(cleanup, 90)
         return _marker_template_line_mask(image, mask, cleanup, print_scale)
     if template_style == "clean":
         cleanup = max(cleanup, 76)
+        if _detail_extraction_mode_used(image, mask, template_style, detail_extraction_mode) == "lineArt":
+            return _existing_line_art_detail_mask(image, mask, cleanup, print_scale)
         return _clean_feature_line_mask(image, mask, cleanup, print_scale)
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
@@ -972,6 +1010,20 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
     detail = Image.fromarray(((detail_arr | color_detail_arr | head_detail_arr).astype(np.uint8) * 255), mode="L")
     detail = _remove_small_components(detail, max(24, min_area - 14))
     detail = _filter_clean_detail_components(detail)
+    if detail.size != original_size:
+        detail = detail.resize(original_size, Image.Resampling.NEAREST)
+    return detail
+
+
+def _existing_line_art_detail_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
+    work_image, work_mask, original_size = _detail_work_image(image, mask)
+    flattened = _flatten_detail_work_image(work_image, cleanup, "clean")
+    gray = np.asarray(flattened.convert("L"), dtype=np.uint8)
+    interior_arr = np.asarray(_erode_mask(work_mask, 15)) > 0
+    detail_arr = (gray < 105) & interior_arr
+    detail = Image.fromarray((detail_arr.astype(np.uint8) * 255), mode="L")
+    min_area = 8 + round((cleanup / 100) * (28 if print_scale else 12))
+    detail = _remove_small_components(detail, min_area)
     if detail.size != original_size:
         detail = detail.resize(original_size, Image.Resampling.NEAREST)
     return detail
@@ -1096,6 +1148,76 @@ def _detail_work_image(image: Image.Image, mask: Image.Image) -> tuple[Image.Ima
     scale = 1400 / max_edge
     size = (max(1, round(original_size[0] * scale)), max(1, round(original_size[1] * scale)))
     return image.resize(size, Image.Resampling.LANCZOS), mask.resize(size, Image.Resampling.NEAREST), original_size
+
+
+def _flat_line_art_metrics(image: Image.Image, mask: Image.Image) -> dict[str, float]:
+    if max(image.size) > 600:
+        scale = 600 / max(image.size)
+        size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+        image = image.resize(size, Image.Resampling.LANCZOS)
+        mask = mask.resize(size, Image.Resampling.NEAREST)
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    mask_arr = np.asarray(mask.convert("L")) > 0
+    subject = rgb[mask_arr]
+    if len(subject) == 0:
+        return {"backgroundWhiteCoverage": 0.0, "darkInkCoverage": 0.0, "darkCoreRatio": 1.0, "populatedColorBins": 0.0, "gradientDensity": 1.0}
+
+    outside = rgb[~mask_arr]
+    background_white_coverage = float(np.mean(np.all(outside >= 238, axis=1))) if len(outside) else 1.0
+    luminance = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    dark_arr = luminance < 72
+    dark_ink_coverage = float(np.mean(dark_arr[mask_arr]))
+    dark_core = cv2.erode(dark_arr.astype(np.uint8), np.ones((5, 5), dtype=np.uint8)) > 0
+    dark_core_ratio = float(np.count_nonzero(dark_core & mask_arr) / max(1, np.count_nonzero(dark_arr & mask_arr)))
+
+    sample_stride = max(1, len(subject) // 50000)
+    quantized = subject[::sample_stride] // 32
+    _, counts = np.unique(quantized, axis=0, return_counts=True)
+    populated_color_bins = int(np.count_nonzero(counts >= max(4, round(len(quantized) * 0.004))))
+
+    ink_neighborhood = cv2.dilate(dark_arr.astype(np.uint8), np.ones((7, 7), dtype=np.uint8)) > 0
+    smooth_region = mask_arr & ~ink_neighborhood
+    gradient_x = cv2.Sobel(luminance, cv2.CV_32F, 1, 0, ksize=3)
+    gradient_y = cv2.Sobel(luminance, cv2.CV_32F, 0, 1, ksize=3)
+    gradient = cv2.magnitude(gradient_x, gradient_y)
+    gradient_density = float(np.mean(gradient[smooth_region] > 36)) if np.any(smooth_region) else 1.0
+    return {
+        "backgroundWhiteCoverage": background_white_coverage,
+        "darkInkCoverage": dark_ink_coverage,
+        "darkCoreRatio": dark_core_ratio,
+        "populatedColorBins": float(populated_color_bins),
+        "gradientDensity": gradient_density,
+    }
+
+
+def _looks_like_flat_line_art(image: Image.Image, mask: Image.Image) -> bool:
+    metrics = _flat_line_art_metrics(image, mask)
+    return (
+        metrics["backgroundWhiteCoverage"] >= 0.72
+        and 0.06 <= metrics["darkInkCoverage"] <= 0.28
+        and metrics["darkCoreRatio"] <= 0.45
+        and metrics["populatedColorBins"] <= 10
+        and metrics["gradientDensity"] <= 0.12
+    )
+
+
+def _detail_extraction_mode_used(image: Image.Image, mask: Image.Image, template_style: str, requested_mode: str) -> str:
+    if template_style != "clean" or requested_mode == "rendered":
+        return "rendered"
+    if requested_mode == "lineArt":
+        return "lineArt" if _has_meaningful_existing_ink(image, mask) else "rendered"
+    return "lineArt" if _looks_like_flat_line_art(image, mask) else "rendered"
+
+
+def _has_meaningful_existing_ink(image: Image.Image, mask: Image.Image) -> bool:
+    work_image, work_mask, _ = _detail_work_image(image, mask)
+    gray = np.asarray(work_image.convert("L"), dtype=np.uint8)
+    mask_arr = np.asarray(work_mask.convert("L")) > 0
+    subject_pixels = np.count_nonzero(mask_arr)
+    if subject_pixels == 0:
+        return False
+    dark_pixels = np.count_nonzero((gray < 105) & mask_arr)
+    return dark_pixels >= max(20, round(subject_pixels * 0.001))
 
 
 def _flatten_shading(image: Image.Image, spatial_radius: int = 10, color_radius: int = 22) -> Image.Image:
