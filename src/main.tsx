@@ -98,6 +98,7 @@ type EditorTool = "erase" | "draw" | "smoothDraw" | "remove" | "select" | "pan";
 type BrushSize = "thin" | "normal" | "bold";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
 type Analysis = CutoutProjectAnalysis;
+type PaintGuidePatch = Partial<Omit<ProjectPaintColor, "id" | "source">>;
 type ProjectStatus = "No saved project" | "Unsaved changes" | "Auto-saved" | "Saved" | "Restored auto-save" | "Project opened" | "Project export failed" | "Project import failed" | "Auto-save failed";
 type StrokeDragState = {
   mode: "move" | "point";
@@ -162,7 +163,7 @@ function App() {
   const [newPaintLabel, setNewPaintLabel] = useState("Skin tone");
   const [selectedPaintColorIds, setSelectedPaintColorIds] = useState<string[]>([]);
   const [paintReviewFilter, setPaintReviewFilter] = useState<PaintReviewFilter>("all");
-  const [paintGuideOpen, setPaintGuideOpen] = useState(false);
+  const [colorDetailsOpen, setColorDetailsOpen] = useState(false);
   const [shoppingListStatus, setShoppingListStatus] = useState("");
   const [manualHistory, setManualHistory] = useState<TraceStroke[][]>([]);
   const [manualRedoHistory, setManualRedoHistory] = useState<TraceStroke[][]>([]);
@@ -189,7 +190,6 @@ function App() {
   const strokeDragRef = useRef<StrokeDragState | null>(null);
   const strokeIdRef = useRef(0);
   const pendingContentFitRef = useRef(false);
-  const previousDetailCleanupAcceptedRef = useRef(false);
   const reviewedLineworkRef = useRef<{
     manualStrokes: TraceStroke[];
     editedDetailDataUrl: string | null;
@@ -214,7 +214,6 @@ function App() {
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
   const paintShoppingList = shoppingListText(paintGuideEntries);
   const paintGuideColorCountLabel = `${paintGuideEntries.length} ${paintGuideEntries.length === 1 ? "color" : "colors"}`;
-  const canIncludePaintGuide = paintGuideEntries.length > 0;
   const detailCleanupAccepted = cleanupChecks.cutline && cleanupChecks.remove && cleanupChecks.draw;
   const traceQualityReview = analysis
     ? buildTraceQualityReview({
@@ -229,6 +228,7 @@ function App() {
   const guidedWorkflowSteps = workflowStepItems(workflowProgress, { hasAnalysis: analysis !== null });
   const uploadStepActive = workflowProgress.activeStep === "upload";
   const cleanStepActive = workflowProgress.activeStep === "clean";
+  const colorsStepActive = workflowProgress.activeStep === "colors";
   const duplicatePaintSuggestion = groupDuplicatePaintPurchases(paintGuideEntries).find((group) => group.swatchNumbers.length > 1);
 
   useEffect(() => {
@@ -250,13 +250,6 @@ function App() {
   useEffect(() => {
     if (editorTool !== "remove") clearRemovalPreview();
   }, [editorTool]);
-
-  useEffect(() => {
-    if (!previousDetailCleanupAcceptedRef.current && detailCleanupAccepted) {
-      setPaintGuideOpen(true);
-    }
-    previousDetailCleanupAcceptedRef.current = detailCleanupAccepted;
-  }, [analysis, detailCleanupAccepted]);
 
   useEffect(() => {
     if (!workflowProgress.lineworkReviewed) {
@@ -294,11 +287,6 @@ function App() {
     setCutlineBounds(null);
     setPrintPreview(false);
     setEditableDetailLinesPresent(false);
-  }
-
-  function resetPaintGuideDisclosure() {
-    previousDetailCleanupAcceptedRef.current = false;
-    setPaintGuideOpen(false);
   }
 
   useEffect(() => {
@@ -359,7 +347,7 @@ function App() {
       return;
     }
     loadDetailCanvas(editedDetailDataUrl ?? analysis.detailLinePngDataUrl);
-  }, [analysis, dimUnselectedStrokes, editorOpen, editedDetailDataUrl, manualStrokes, printPreview, selectedStrokeId, traceStudioOpen]);
+  }, [analysis, dimUnselectedStrokes, editorOpen, editedDetailDataUrl, manualStrokes, printPreview, selectedStrokeId, traceStudioOpen, workflowProgress.activeStep]);
 
   useEffect(() => {
     let cancelled = false;
@@ -423,7 +411,7 @@ function App() {
       if (!response.ok) throw new Error(body.error || "Unable to analyze image.");
       const openEditor = opensEditorWithReference(nextSettings.templateStyle);
       resetEditorState();
-      resetPaintGuideDisclosure();
+      setColorDetailsOpen(false);
       setAnalysis(body);
       setWorkflowProgress({ activeStep: "clean", lineworkReviewed: false, colorsOutcome: "incomplete" });
       if (preservedManualStrokes.length > 0) setManualStrokes(preservedManualStrokes);
@@ -520,7 +508,7 @@ function App() {
   }
 
   async function handleImageUpload(file: File | null) {
-    resetPaintGuideDisclosure();
+    setColorDetailsOpen(false);
     setImage(file);
     setAnalysis(null);
     setError(null);
@@ -576,7 +564,7 @@ function App() {
     setProjectPalette([]);
     setSelectedPaintColorIds([]);
     setPaintReviewFilter("all");
-    resetPaintGuideDisclosure();
+    setColorDetailsOpen(false);
     setShoppingListStatus("");
     resetCleanupChecks();
     setWorkflowProgress(DEFAULT_WORKFLOW_PROGRESS);
@@ -668,7 +656,7 @@ function App() {
   async function applyProject(project: CutoutProject, status: ProjectStatus) {
     const restoredFile = await fileFromDataUrl(project.sourceImage.dataUrl, project.sourceImage.name, project.sourceImage.type);
     setAutosavePaused(true);
-    resetPaintGuideDisclosure();
+    setColorDetailsOpen(false);
     setImage(restoredFile);
     setSourceImageDataUrl(project.sourceImage.dataUrl);
     setProjectName(project.projectName);
@@ -741,7 +729,6 @@ function App() {
     }
     setCleanupChecks((current) => ({ ...current, cutline: true, remove: true, draw: true }));
     setWorkflowProgress((current) => completeLineworkReview(current));
-    setPaintGuideOpen(true);
   }
 
   function finishColorReview(outcome: "reviewed" | "skipped") {
@@ -1502,7 +1489,7 @@ function App() {
         </div> : null}
       </header>
 
-      <section className={uploadStepActive ? "workspace upload-workspace" : cleanStepActive ? "workspace clean-lines-workspace" : "workspace"}>
+      <section className={uploadStepActive ? "workspace upload-workspace" : cleanStepActive ? "workspace clean-lines-workspace" : colorsStepActive ? "workspace colors-workspace" : "workspace"}>
         {uploadStepActive ? (
         <aside className="left-panel" aria-label="Template settings">
           <PanelTitle icon={<FileImage size={18} />} title="Upload" />
@@ -1549,7 +1536,7 @@ function App() {
         </aside>
         ) : (
         <>
-        {!cleanStepActive ? <aside className="left-panel" aria-label="Template settings">
+        {!cleanStepActive && !colorsStepActive ? <aside className="left-panel" aria-label="Template settings">
           <PanelTitle icon={<SlidersHorizontal size={18} />} title="Template Setup" />
           <GuidedWorkflowCard steps={guidedWorkflowSteps} onNavigate={navigateToWorkflowStep} />
           <div className="workflow-anchor-section" ref={setupSectionRef}>
@@ -1605,7 +1592,6 @@ function App() {
             </div>
           </div>
 
-          <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => updateSetting("paletteSize", value)} />
           <label className="toggle-row">
             <input
               type="checkbox"
@@ -1617,19 +1603,6 @@ function App() {
             />
             Include instruction cover page
           </label>
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={settings.includePaintGuidePage && canIncludePaintGuide}
-              disabled={!canIncludePaintGuide}
-              onChange={() => setSettings((current) => ({
-                ...current,
-                includePaintGuidePage: !current.includePaintGuidePage
-              }))}
-            />
-            Include paint guide page
-          </label>
-
           <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
             {advancedOpen
               ? "Hide fine-tune starter settings"
@@ -1678,7 +1651,7 @@ function App() {
           </div>
         </aside> : null}
 
-        <section className="preview-stage" aria-label={cleanStepActive ? "Clean Lines workspace" : "Trace preview"}>
+        {!colorsStepActive ? <section className="preview-stage" aria-label={cleanStepActive ? "Clean Lines workspace" : "Trace preview"}>
           {cleanStepActive ? (
             <div className="clean-workflow-nav">
               <GuidedWorkflowCard steps={guidedWorkflowSteps} onNavigate={navigateToWorkflowStep} />
@@ -2084,12 +2057,17 @@ function App() {
               <p>Generate a starting template, clean up feature lines, then export the full-size PDF pack.</p>
             </div>
           )}
-        </section>
+        </section> : null}
 
-        {!cleanStepActive ? <aside className="right-panel" aria-label="Paint guide and export summary">
+        {colorsStepActive ? <aside className="right-panel colors-panel" aria-label="Colors workspace">
+          {colorsStepActive ? (
+            <div className="colors-workflow-nav">
+              <GuidedWorkflowCard steps={guidedWorkflowSteps} onNavigate={navigateToWorkflowStep} />
+            </div>
+          ) : null}
           {analysis ? (
             <>
-              {traceQualityReview ? (
+              {!colorsStepActive && traceQualityReview ? (
                 <section className="trace-quality-card" aria-label="Trace Quality Review">
                   <div className="trace-quality-title">
                     <ListChecks size={16} />
@@ -2146,15 +2124,23 @@ function App() {
               ) : null}
               {workflowProgress.activeStep === "colors" ? (
                 <div className="colors-step-actions" aria-label="Colors step actions">
-                  <button className="primary-action" onClick={() => finishColorReview("reviewed")}>Colors Look Good - Continue to Export</button>
-                  <button className="tool-button" onClick={() => finishColorReview("skipped")}>Skip Color Guide</button>
+                  <button className="primary-action" onClick={() => finishColorReview("reviewed")}>Continue to Export</button>
+                  <button className="tool-button" onClick={() => finishColorReview("skipped")}>Skip Paint Guide</button>
                 </div>
+              ) : null}
+              {colorsStepActive ? (
+                <section className="colors-step-header">
+                  <div>
+                    <h2>Review Colors</h2>
+                    <p>{paintGuideColorCountLabel} in this project</p>
+                  </div>
+                  <ColorPrimaryRows entries={paintGuideEntries} onUpdate={updatePaintGuideEntry} />
+                </section>
               ) : null}
               <details
                 className="paint-guide-disclosure"
                 aria-label="Paint Guide"
-                open={paintGuideOpen}
-                onToggle={(event) => setPaintGuideOpen(event.currentTarget.open)}
+                open
                 ref={paintReviewSectionRef}
               >
                 <summary className="paint-guide-disclosure-summary">
@@ -2165,9 +2151,12 @@ function App() {
                       <span>{paintGuideColorCountLabel}</span>
                     </span>
                   </span>
-                  <span className="paint-guide-disclosure-state">{paintGuideOpen ? "Hide" : "Show"}</span>
+                  <span className="paint-guide-disclosure-state">Open</span>
                 </summary>
+                <details className="edit-color-details" aria-label="Edit Color Details" open={colorDetailsOpen} onToggle={(event) => setColorDetailsOpen(event.currentTarget.open)}>
+                  <summary>Edit Color Details</summary>
                 <div className="paint-guide-disclosure-content">
+                  <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => setSettings((current) => ({ ...current, paletteSize: value }))} />
                   <dl className="summary-grid">
                     <div>
                       <dt>Finished size</dt>
@@ -2425,18 +2414,7 @@ function App() {
                               <span>Craft paint match</span>
                               <select
                                 value={entry.manualOverride ? "__manual__" : entry.selectedMatchId ?? ""}
-                                onChange={(event) => {
-                                  const value = event.target.value;
-                                  if (value === "__manual__") {
-                                    updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: entry.manualOverride || "Choose in store" });
-                                    return;
-                                  }
-                                  if (value === "") {
-                                    updatePaintGuideEntry(entry.id, { selectedMatchId: null, manualOverride: "" });
-                                    return;
-                                  }
-                                  updatePaintGuideEntry(entry.id, { selectedMatchId: value, manualOverride: "" });
-                                }}
+                                onChange={(event) => updatePaintGuideEntry(entry.id, paintSelectionPatch(entry, event.target.value))}
                               >
                                 <option value="">No match / choose in store</option>
                                 {entry.matches.map((match) => (
@@ -2512,6 +2490,7 @@ function App() {
                     {shoppingListStatus ? <span className="copy-status">{shoppingListStatus}</span> : null}
                   </div>
                 </div>
+                </details>
               </details>
             </>
           ) : (
@@ -2557,6 +2536,53 @@ function GuidedWorkflowCard({
       </ol>
     </section>
   );
+}
+
+function ColorPrimaryRows({
+  entries,
+  onUpdate
+}: {
+  entries: PaintGuideEntry[];
+  onUpdate: (id: string, patch: PaintGuidePatch) => void;
+}) {
+  return (
+    <div className="color-primary-list" aria-label="Primary colors">
+      {entries.map((entry) => (
+        <article className="color-primary-row" key={`primary-${entry.id}`} aria-labelledby={`primary-color-${entry.id}`}>
+          <span className="swatch" style={{ backgroundColor: entry.hex }} aria-hidden="true" />
+          <h3 className="visually-hidden" id={`primary-color-${entry.id}`}>{entry.label}</h3>
+          <label>
+            <span>Area</span>
+            <input aria-label={`Area label for ${entry.label}`} type="text" value={entry.label} onChange={(event) => onUpdate(entry.id, { label: event.target.value })} />
+          </label>
+          <label>
+            <span>Paint to buy</span>
+            <select
+              aria-label={`Selected paint for ${entry.label}`}
+              value={entry.manualOverride ? "__manual__" : entry.selectedMatchId ?? ""}
+              onChange={(event) => onUpdate(entry.id, paintSelectionPatch(entry, event.target.value))}
+            >
+              <option value="">Choose in store</option>
+              {entry.matches.map((match) => <option key={match.id} value={match.id}>{matchDisplayName(match)}</option>)}
+              <option value="__manual__">Manual choice</option>
+            </select>
+          </label>
+          <label className="color-shopping-toggle">
+            <input aria-label={`Include ${entry.label} in shopping list`} type="checkbox" checked={entry.included} onChange={() => onUpdate(entry.id, { included: !entry.included })} />
+            Shopping list
+          </label>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function paintSelectionPatch(entry: PaintGuideEntry, value: string): PaintGuidePatch {
+  if (value === "__manual__") {
+    return { selectedMatchId: null, manualOverride: entry.manualOverride || "Choose in store" };
+  }
+  if (value === "") return { selectedMatchId: null, manualOverride: "" };
+  return { selectedMatchId: value, manualOverride: "" };
 }
 
 function CleanLinesPrimaryControls({

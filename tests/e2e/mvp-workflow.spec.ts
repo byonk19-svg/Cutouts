@@ -108,6 +108,36 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(traceStatus.getByText("Trace Quality Review")).toBeHidden();
   await primaryControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toHaveAttribute("aria-current", "step");
+  const colorsWorkspace = page.getByLabel("Colors workspace");
+  await expect(colorsWorkspace).toBeVisible();
+  await expect(page.getByLabel("Editable interior detail lines")).toHaveCount(0);
+  await expect(colorsWorkspace.getByText(/\d+ colors/).first()).toBeVisible();
+  const primaryColorRows = colorsWorkspace.getByLabel("Primary colors").locator(".color-primary-row");
+  await expect(colorsWorkspace.getByText("6 colors in this project")).toBeVisible();
+  await expect(primaryColorRows).toHaveCount(6);
+  await expect(primaryColorRows.first().getByLabel(/Area label for/)).toBeVisible();
+  await expect(primaryColorRows.first().getByLabel(/Selected paint for/)).toBeVisible();
+  await expect(primaryColorRows.first().getByLabel(/Include .* in shopping list/)).toBeVisible();
+  const editColorDetails = colorsWorkspace.getByLabel("Edit Color Details");
+  await expect(editColorDetails.getByLabel("Paint Palette Editor")).toBeHidden();
+  await editColorDetails.locator(":scope > summary").click();
+  await expect(editColorDetails.getByLabel("Paint Palette Editor")).toBeVisible();
+  await expect(editColorDetails.getByRole("slider")).toHaveValue("6");
+
+  await colorsWorkspace.getByRole("button", { name: "Skip Paint Guide" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
+  await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(false);
+  await guidedWorkflow.getByRole("button", { name: /Colors/ }).click();
+  await expect(editColorDetails.getByLabel("Paint Palette Editor")).toBeVisible();
+  await colorsWorkspace.getByRole("button", { name: "Continue to Export" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
+  await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(true);
+  await guidedWorkflow.getByRole("button", { name: /Colors/ }).click();
+  await primaryColorRows.first().getByLabel(/Area label for/).fill("Reviewed color area");
+  await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toBeDisabled();
+  await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toContainText("available");
+  await colorsWorkspace.getByRole("button", { name: "Continue to Export" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
   await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
   await expect(primaryControls.getByRole("button")).toHaveCount(6);
   const reviewedPreviewPoint = await waitForCanvasInkPoint(previewCanvas);
@@ -175,13 +205,6 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(paintGuide).toBeVisible();
   await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
   await expect(paintReview).toBeVisible();
-  const paintGuideSummary = paintGuide.locator(".paint-guide-disclosure-summary");
-  await paintGuideSummary.click();
-  await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(false);
-  await expect(paintReview).toBeHidden();
-  await paintGuideSummary.click();
-  await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
-  await expect(paintReview).toBeVisible();
 
   await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
   await moreTools.locator("summary").click();
@@ -219,7 +242,8 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await primaryControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toHaveAttribute("aria-current", "step");
   await expect(paintGuide).toBeVisible();
-  await expect.poll(async () => paintGuide.evaluate((element) => element instanceof HTMLDetailsElement && element.open)).toBe(true);
+  await editColorDetails.locator(":scope > summary").click();
+  await expect(paintReview).toBeVisible();
 
   const paintRows = page.locator(".palette-row");
   await expect(paintRows.nth(3)).toBeVisible({ timeout: 30_000 });
@@ -268,7 +292,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   expect(JSON.stringify(projectJson)).not.toContain("selectedStrokeId");
   expect(JSON.stringify(projectJson)).not.toContain("dimUnselected");
 
-  await page.getByRole("button", { name: "Colors Look Good - Continue to Export" }).click();
+  await page.getByRole("button", { name: "Continue to Export" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
   await page.getByRole("button", { name: /Preview Printable Template/ }).click();
 
@@ -485,6 +509,14 @@ async function canvasVisiblePixelCount(canvas: Locator) {
       if (pixels[index] > 0) count += 1;
     }
     return count;
+  });
+}
+
+async function savedProjectIncludesPaintGuide(page: Page) {
+  return page.evaluate(() => {
+    const raw = localStorage.getItem("cutout-studio:auto-save:v1");
+    if (!raw) return null;
+    return Boolean(JSON.parse(raw).settings.includePaintGuidePage);
   });
 }
 

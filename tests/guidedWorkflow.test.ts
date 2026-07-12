@@ -55,6 +55,22 @@ function assertEqual(actual: unknown, expected: unknown, message: string) {
 }
 
 {
+  const colors: WorkflowProgress = {
+    activeStep: "colors",
+    lineworkReviewed: true,
+    colorsOutcome: "incomplete"
+  };
+  const skipped = completeColorReview(colors, "skipped");
+  const revisited = navigateWorkflow(skipped, "colors", { hasAnalysis: true });
+  const reviewedLater = completeColorReview(revisited, "reviewed");
+
+  assertEqual(skipped.colorsOutcome, "skipped", "skipping should record a durable Colors outcome");
+  assertEqual(revisited.activeStep, "colors", "completed Colors should remain available for later review");
+  assertEqual(reviewedLater.colorsOutcome, "reviewed", "completing a revisited Colors step should replace skipped state");
+  assertEqual(reviewedLater.activeStep, "export", "completing revisited Colors should return to Export");
+}
+
+{
   const invalid: WorkflowProgress = {
     activeStep: "export",
     lineworkReviewed: false,

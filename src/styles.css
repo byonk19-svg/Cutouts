@@ -12,6 +12,18 @@
   box-sizing: border-box;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -1890,6 +1902,126 @@ button:disabled {
   padding: 12px;
 }
 
+.workspace.colors-workspace {
+  grid-template-columns: minmax(0, 920px);
+  justify-content: center;
+  align-content: start;
+}
+
+.colors-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  overflow: visible;
+}
+
+.colors-workflow-nav {
+  order: 1;
+  margin-bottom: 12px;
+}
+
+.colors-workflow-nav .workflow-card-title {
+  display: none;
+}
+
+.colors-workflow-nav .workflow-steps {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.colors-step-header {
+  order: 2;
+}
+
+.colors-step-header h2,
+.colors-step-header p {
+  margin: 0;
+}
+
+.colors-step-header p {
+  margin-top: 4px;
+  color: #65736c;
+}
+
+.color-primary-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.color-primary-row {
+  display: grid;
+  grid-template-columns: 38px minmax(160px, 1fr) minmax(220px, 1.4fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.color-primary-row > .swatch {
+  align-self: center;
+}
+
+.color-primary-row label {
+  display: grid;
+  gap: 4px;
+  color: #65736c;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.color-primary-row input[type="text"],
+.color-primary-row select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 8px;
+  border: 1px solid #cbd8d2;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17201d;
+}
+
+.color-primary-row .color-shopping-toggle {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.colors-panel .colors-step-actions {
+  order: 3;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  margin-top: 14px;
+}
+
+.colors-panel > .paint-guide-disclosure {
+  order: 4;
+  margin-top: 0;
+  border: 0;
+}
+
+.colors-panel > .paint-guide-disclosure > .paint-guide-disclosure-summary {
+  display: none;
+}
+
+.edit-color-details {
+  margin-top: 12px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #fbfdfc;
+}
+
+.edit-color-details > summary {
+  padding: 11px 12px;
+  color: #31413b;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
 .clean-lines-workspace .preview-stage {
   width: 100%;
   padding: 10px;
@@ -2033,6 +2165,31 @@ button:disabled {
 
   .workspace.clean-lines-workspace {
     padding: 6px;
+  }
+
+  .workspace.colors-workspace {
+    padding: 6px;
+  }
+
+  .colors-workflow-nav .workflow-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .color-primary-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .color-primary-row > label:not(.color-shopping-toggle) {
+    grid-column: 2;
+  }
+
+  .color-primary-row .color-shopping-toggle {
+    grid-column: 2;
+  }
+
+  .colors-panel .colors-step-actions {
+    grid-template-columns: 1fr;
   }
 
   .clean-workflow-nav .workflow-steps {
