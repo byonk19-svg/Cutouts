@@ -1196,8 +1196,8 @@ def _looks_like_flat_line_art(image: Image.Image, mask: Image.Image) -> bool:
         metrics["backgroundWhiteCoverage"] >= 0.72
         and 0.06 <= metrics["darkInkCoverage"] <= 0.28
         and metrics["darkCoreRatio"] <= 0.45
-        and metrics["populatedColorBins"] <= 10
-        and metrics["gradientDensity"] <= 0.12
+        and metrics["populatedColorBins"] <= 32
+        and metrics["gradientDensity"] <= 0.04
     )
 
 

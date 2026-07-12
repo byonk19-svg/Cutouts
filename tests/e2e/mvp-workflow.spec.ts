@@ -465,6 +465,7 @@ test("existing line art is reported and can be overridden from More Tools", asyn
   await expect(cleanStatus).toContainText("Existing line art detected");
   await cleanStatus.locator("summary").click();
   await expect(cleanStatus.getByLabel("Trace Quality Review")).toContainText("Existing line art detected");
+  await page.screenshot({ path: "output/screenshots/latest/flat-line-art-auto-detected.png" });
 
   const moreTools = page.getByLabel("More Tools");
   await moreTools.locator("summary").click();
