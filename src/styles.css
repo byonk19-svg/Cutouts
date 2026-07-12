@@ -142,32 +142,6 @@ button {
   display: none;
 }
 
-.project-card {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid #dce4df;
-  border-radius: 7px;
-  background: #f7fbf9;
-}
-
-.project-card-title {
-  display: grid;
-  gap: 3px;
-}
-
-.project-card-title strong {
-  color: #17201d;
-  font-size: 13px;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.project-card-title span {
-  color: #65736c;
-  font-size: 12px;
-}
-
 .project-name-field {
   display: grid;
   gap: 4px;
@@ -189,20 +163,6 @@ button {
   color: #17201d;
   font-size: 12px;
   background: #ffffff;
-}
-
-.project-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-
-.project-actions .tool-button {
-  flex: 1 1 118px;
-}
-
-.tool-button.danger-lite {
-  color: #7c2f2f;
 }
 
 .workflow-card {
@@ -301,6 +261,80 @@ button {
 
 .workflow-step.next strong {
   color: #145f56;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.file-menu {
+  position: relative;
+}
+
+.file-menu summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid #cbd8d2;
+  border-radius: 6px;
+  color: #31413b;
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.file-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.file-menu-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 190px;
+  display: grid;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid #cbd8d2;
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(23, 32, 29, 0.14);
+}
+
+.file-menu-popover button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 5px;
+  color: #17201d;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-menu-popover button:hover:not(:disabled) {
+  background: #eef6f2;
+}
+
+.file-menu-popover button:disabled {
+  color: #98a49e;
+  cursor: not-allowed;
+}
+
+.file-menu-popover > span {
+  padding: 6px 8px 3px;
+  border-top: 1px solid #e3eae6;
+  color: #65736c;
+  font-size: 11px;
 }
 
 .workflow-step.current button,
@@ -1837,6 +1871,23 @@ button:disabled {
   }
 }
 
+.workspace.upload-workspace {
+  grid-template-columns: minmax(0, 560px);
+  justify-content: center;
+  align-content: start;
+  padding-top: 40px;
+}
+
+.upload-step {
+  display: grid;
+  gap: 16px;
+}
+
+.upload-primary-action {
+  width: 100%;
+  min-height: 46px;
+}
+
 @media (max-width: 760px) {
   .topbar {
     height: auto;
@@ -1846,6 +1897,15 @@ button:disabled {
 
   .topbar-actions {
     justify-content: flex-start;
+  }
+
+  .topbar-brand {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .workspace.upload-workspace {
+    padding-top: 16px;
   }
 
   .workspace {

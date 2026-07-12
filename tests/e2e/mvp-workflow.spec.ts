@@ -4,8 +4,15 @@ import { deflateSync } from "node:zlib";
 test("maker can complete the MVP trace, restore, paint review, and export workflow", async ({ page, request }) => {
   const sourceImage = createSmokeCharacterPng();
 
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("cutout-e2e-cold-start")) return;
+    localStorage.clear();
+    sessionStorage.setItem("cutout-e2e-cold-start", "true");
+  });
   await page.goto("/");
-  await page.evaluate(() => localStorage.clear());
+  const uploadStep = page.getByLabel("Upload step");
+  await expect(uploadStep.getByLabel("Source image")).toBeAttached();
+  await expect(uploadStep.getByRole("button", { name: "Generate Template" })).toBeDisabled();
   await page.locator('input[type="file"][accept="image/png,image/jpeg"]').setInputFiles({
     name: "mvp-smoke-character.png",
     mimeType: "image/png",
@@ -22,28 +29,40 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(guidedWorkflow.getByRole("button", { name: /Clean Lines/ })).toBeDisabled();
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toBeDisabled();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toBeDisabled();
-  await expect(page.getByRole("button", { name: /Start New/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start Trace Studio with Starter lines" })).toBeVisible();
+  const fileMenu = page.getByLabel("File menu");
+  await expect(fileMenu).toBeVisible();
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByRole("button", { name: "New Project" })).toBeEnabled();
+  await expect(fileMenu.getByRole("button", { name: "Open Project" })).toBeEnabled();
+  await expect(fileMenu.getByRole("button", { name: "Save Project" })).toBeDisabled();
+
+  await expect(uploadStep.getByLabel("Project name (optional)")).toHaveValue("Mvp Smoke Character");
+  await expect(uploadStep.getByText("Finished height")).toBeVisible();
+  await expect(uploadStep.getByRole("button", { name: "Generate Template" })).toBeVisible();
+  await expect(uploadStep.locator("button.primary-action")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Start Trace Studio with Starter lines" })).toHaveCount(0);
   await expect(page.getByLabel("What to trace")).toHaveCount(0);
-  const traceStyleChoices = page.getByLabel("Trace style");
-  await expect(traceStyleChoices).toContainText("Other trace options");
-  await expect(page.getByLabel("Detail strength")).toContainText("Simple");
-  await expect(page.getByLabel("Detail strength")).toContainText("Balanced");
-  await expect(page.getByLabel("Detail strength")).toContainText("Detailed");
-  await expect(traceStyleChoices.getByRole("button", { name: /Balanced Auto Starter/ })).toHaveClass(/selected/);
-  const detailStrength = page.getByLabel("Detail strength");
-  await expect(detailStrength.getByRole("button", { name: /Balanced/ })).toHaveClass(/selected/);
-  await detailStrength.getByRole("button", { name: /Simple/ }).click();
-  await expect(detailStrength.getByRole("button", { name: /Simple/ })).toHaveClass(/selected/);
-  await detailStrength.getByRole("button", { name: /Detailed/ }).click();
-  await expect(detailStrength.getByRole("button", { name: /Detailed/ })).toHaveClass(/selected/);
-  await detailStrength.getByRole("button", { name: /Balanced/ }).click();
-  await expect(detailStrength.getByRole("button", { name: /Balanced/ })).toHaveClass(/selected/);
-  await expect(page.getByText("Line smoothness")).toBeHidden();
-  await page.getByRole("button", { name: "Start Trace Studio with Starter lines" }).click();
+  await expect(page.getByLabel("Trace style")).toHaveCount(0);
+  await expect(page.getByLabel("Detail strength")).toHaveCount(0);
+  await expect(page.getByText("Paint colors")).toHaveCount(0);
+  await expect(page.getByText("Line smoothness")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export SVG Linework" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export Template Packet PDF" })).toHaveCount(0);
+
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+  await expect(fileMenu.getByRole("button", { name: "New Project" })).toBeHidden();
   await expect(guidedWorkflow.getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toBeDisabled();
   await expect(guidedWorkflow.getByRole("button", { name: /Upload/ })).toBeEnabled();
+  const traceStyleChoices = page.getByLabel("Trace style");
+  await expect(traceStyleChoices.getByRole("button", { name: /Balanced Auto Starter/ })).toHaveClass(/selected/);
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByRole("button", { name: "Save Project" })).toBeEnabled();
+  const projectDownloadPromise = page.waitForEvent("download");
+  await fileMenu.getByRole("button", { name: "Save Project" }).click();
+  const initialProjectDownload = await projectDownloadPromise;
+  expect(initialProjectDownload.suggestedFilename()).toMatch(/\.cutout\.json$/);
+  await expect(fileMenu.getByRole("button", { name: "Save Project" })).toBeHidden();
   const starterGuidance = page.getByLabel("Starter detail line guidance");
   await expect(starterGuidance).toBeVisible({ timeout: 60_000 });
   await expect(starterGuidance).toContainText("Starter lines are generated automatically");
@@ -123,7 +142,8 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await page.getByLabel("Selection Inspector").getByRole("button", { name: "Next stroke" }).click();
   await expect(page.getByText(/Stroke [12] of 2/)).toBeVisible();
 
-  await expect(page.getByText("Auto-saved")).toBeVisible({ timeout: 15_000 });
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByText("Auto-saved")).toBeVisible({ timeout: 15_000 });
   await page.reload();
   await expect(page.getByText(/Blank Trace Studio Editor/)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".reference-layer")).toBeVisible();
@@ -163,7 +183,10 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(shoppingList).toContainText("No match / choose in store - Boots");
   await expect(shoppingList).not.toContainText("Background test");
 
-  const projectDownload = await downloadFrom(page, "Export JSON");
+  await fileMenu.getByText("File", { exact: true }).click();
+  const projectDownloadPromiseAfterEdits = page.waitForEvent("download");
+  await fileMenu.getByRole("button", { name: "Save Project" }).click();
+  const projectDownload = await projectDownloadPromiseAfterEdits;
   const projectDownloadFailure = await projectDownload.failure();
   if (projectDownloadFailure) throw new Error(projectDownloadFailure);
   const projectJson = JSON.parse(await readDownloadText(projectDownload));

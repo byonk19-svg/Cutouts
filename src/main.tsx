@@ -62,7 +62,8 @@ import {
   resetWorkflowForSource,
   workflowStepItems,
   type WorkflowProgress,
-  type WorkflowStep
+  type WorkflowStep,
+  type WorkflowStepItem
 } from "./guidedWorkflow";
 import {
   DEFAULT_TRACE_VIEWPORT,
@@ -178,6 +179,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileMenuRef = useRef<HTMLDetailsElement | null>(null);
   const setupSectionRef = useRef<HTMLDivElement | null>(null);
   const traceEditorSectionRef = useRef<HTMLDivElement | null>(null);
   const paintReviewSectionRef = useRef<HTMLDetailsElement | null>(null);
@@ -229,7 +231,19 @@ function App() {
     })
     : null;
   const guidedWorkflowSteps = workflowStepItems(workflowProgress, { hasAnalysis: analysis !== null });
+  const uploadStepActive = workflowProgress.activeStep === "upload";
   const duplicatePaintSuggestion = groupDuplicatePaintPurchases(paintGuideEntries).find((group) => group.swatchNumbers.length > 1);
+
+  useEffect(() => {
+    function dismissFileMenu(event: globalThis.PointerEvent) {
+      const menu = fileMenuRef.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) {
+        menu.open = false;
+      }
+    }
+    document.addEventListener("pointerdown", dismissFileMenu);
+    return () => document.removeEventListener("pointerdown", dismissFileMenu);
+  }, []);
 
   useEffect(() => {
     if (analysis) return;
@@ -397,8 +411,13 @@ function App() {
     }
   }, [printPreview]);
 
-  async function analyze(nextSettings = settings) {
+  async function generateTemplate(preset?: DetailPreset) {
     if (!image) return;
+    const nextSettings = preset ? detailPresetSettings(preset, settings) : settings;
+    if (preset) {
+      setSettings(nextSettings);
+      applyTraceModeUiState(nextSettings.templateStyle);
+    }
     const preservedManualStrokes = traceStudioOpen ? manualStrokes : [];
     if (analysis && preservedManualStrokes.length > 0) {
       const shouldRegenerate = window.confirm("Regenerate the cutline? This may replace the cutline and starter lines. Your manual Trace Studio lines will be kept unless you reset details.");
@@ -715,6 +734,10 @@ function App() {
       return;
     }
     setAnalysis(null);
+  }
+
+  function closeFileMenu() {
+    if (fileMenuRef.current) fileMenuRef.current.open = false;
   }
 
   function resetTracingSettings() {
@@ -1332,11 +1355,54 @@ function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
-          <h1>Cutout Studio</h1>
-          <p>Personal wood cutout template generator</p>
+        <div className="topbar-brand">
+          <div>
+            <h1>Cutout Studio</h1>
+            <p>Personal wood cutout template generator</p>
+          </div>
+          <details className="file-menu" aria-label="File menu" ref={fileMenuRef}>
+            <summary>
+              <FolderOpen size={16} />
+              File
+            </summary>
+            <div className="file-menu-popover">
+              <button type="button" onClick={() => {
+                closeFileMenu();
+                startNewProject();
+              }}>
+                <FileImage size={15} />
+                New Project
+              </button>
+              <button type="button" onClick={() => {
+                closeFileMenu();
+                projectFileInputRef.current?.click();
+              }}>
+                <FolderOpen size={15} />
+                Open Project
+              </button>
+              <button type="button" onClick={() => {
+                closeFileMenu();
+                downloadProjectFile("Saved");
+              }} disabled={!canSaveProject}>
+                <Save size={15} />
+                Save Project
+              </button>
+              <span>{projectStatus}</span>
+            </div>
+          </details>
+          <input
+            ref={projectFileInputRef}
+            className="hidden-project-input"
+            type="file"
+            accept=".cutout.json,application/json"
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              void openProjectFile(file);
+              event.currentTarget.value = "";
+            }}
+          />
         </div>
-        <div className="topbar-actions" ref={exportSectionRef}>
+        {!uploadStepActive ? <div className="topbar-actions" ref={exportSectionRef}>
           <button
             className="secondary-topbar-action"
             onClick={exportSvgLinework}
@@ -1350,93 +1416,59 @@ function App() {
             <Download size={18} />
             Export Template Packet PDF
           </button>
-        </div>
+        </div> : null}
       </header>
 
-      <section className="workspace">
+      <section className={uploadStepActive ? "workspace upload-workspace" : "workspace"}>
+        {uploadStepActive ? (
+        <aside className="left-panel" aria-label="Template settings">
+          <PanelTitle icon={<FileImage size={18} />} title="Upload" />
+          <GuidedWorkflowCard steps={guidedWorkflowSteps} onNavigate={navigateToWorkflowStep} />
+            <section className="upload-step" aria-label="Upload step" ref={setupSectionRef}>
+              <label className="upload-box">
+                <FileImage size={28} />
+                <span>{image ? image.name : "Choose a complete PNG or JPG"}</span>
+                <input
+                  aria-label="Source image"
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    void handleImageUpload(file);
+                  }}
+                />
+              </label>
+              <p className="helper-note">Choose one complete character on a simple background.</p>
+              <NumberField
+                label="Finished height"
+                suffix="in"
+                min={6}
+                max={96}
+                step={1}
+                value={settings.finishedHeightIn}
+                onChange={(value) => updateSetting("finishedHeightIn", value)}
+              />
+              <label className="project-name-field">
+                <span>Project name <small>optional</small></span>
+                <input
+                  aria-label="Project name (optional)"
+                  type="text"
+                  value={projectName}
+                  onChange={(event) => setProjectName(event.target.value)}
+                  onBlur={() => setProjectName((name) => name.trim() || "Cutout Project")}
+                />
+              </label>
+              <button className="primary-action upload-primary-action" onClick={() => void generateTemplate("balanced")} disabled={!canAnalyze}>
+                <RefreshCw size={17} />
+                {busy ? "Generating Template..." : "Generate Template"}
+              </button>
+            </section>
+        </aside>
+        ) : (
+        <>
         <aside className="left-panel" aria-label="Template settings">
           <PanelTitle icon={<SlidersHorizontal size={18} />} title="Template Setup" />
-          <label className="upload-box">
-            <FileImage size={28} />
-            <span>{image ? image.name : "Upload PNG or JPG"}</span>
-            <input
-              type="file"
-              accept="image/png,image/jpeg"
-              onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                void handleImageUpload(file);
-              }}
-            />
-          </label>
-          <p className="helper-note">
-            Upload one complete source image, not a finished template PDF or an individual tiled page. Cutout Studio generates the tiled trace packet for you.
-          </p>
-
-          <div className="project-card">
-            <label className="project-name-field">
-              <span>Project name</span>
-              <input
-                type="text"
-                value={projectName}
-                onChange={(event) => setProjectName(event.target.value)}
-                onBlur={() => setProjectName((name) => name.trim() || "Cutout Project")}
-              />
-            </label>
-            <div className="project-card-title">
-              <strong>{projectName}</strong>
-              <span>{projectStatus}</span>
-            </div>
-            <div className="project-actions">
-              <button className="tool-button danger-lite" onClick={startNewProject}>
-                <X size={15} />
-                Start New
-              </button>
-              <button className="tool-button" onClick={() => projectFileInputRef.current?.click()}>
-                <FolderOpen size={15} />
-                Open Project
-              </button>
-              <button className="tool-button" onClick={() => downloadProjectFile("Saved")} disabled={!canSaveProject}>
-                <Save size={15} />
-                Save Project
-              </button>
-              <button className="tool-button" onClick={() => downloadProjectFile("Saved")} disabled={!canSaveProject}>
-                <Download size={15} />
-                Export JSON
-              </button>
-            </div>
-            <input
-              ref={projectFileInputRef}
-              className="hidden-project-input"
-              type="file"
-              accept=".cutout.json,application/json"
-              onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                void openProjectFile(file);
-                event.currentTarget.value = "";
-              }}
-            />
-          </div>
-
-          <section className="workflow-card" aria-label="Guided workflow">
-            <div className="workflow-card-title">
-              <strong>Guided workflow</strong>
-              <span>Upload, clean the lines, review colors, then export.</span>
-            </div>
-            <ol className="workflow-steps">
-              {guidedWorkflowSteps.map((step, index) => (
-                <li key={step.step} className={`workflow-step ${step.status}`}>
-                  <button type="button" onClick={() => navigateToWorkflowStep(step.step)} disabled={!step.clickable} aria-current={step.status === "current" ? "step" : undefined}>
-                    <span>{index + 1}</span>
-                    <div>
-                      <strong>{step.label}</strong>
-                      <em>{step.status}</em>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </section>
-
+          <GuidedWorkflowCard steps={guidedWorkflowSteps} onNavigate={navigateToWorkflowStep} />
           <div className="workflow-anchor-section" ref={setupSectionRef}>
             <NumberField
               label="Finished height"
@@ -1556,7 +1588,7 @@ function App() {
           ) : null}
 
           <div className="workflow-anchor-section">
-            <button className="secondary-action" onClick={() => analyze()} disabled={!canAnalyze}>
+            <button className="secondary-action" onClick={() => void generateTemplate()} disabled={!canAnalyze}>
               <RefreshCw size={17} />
               {primaryTraceActionLabel}
             </button>
@@ -2332,8 +2364,40 @@ function App() {
           )}
           {error ? <div className="error-box">{error}</div> : null}
         </aside>
+        </>
+        )}
       </section>
     </main>
+  );
+}
+
+function GuidedWorkflowCard({
+  steps,
+  onNavigate
+}: {
+  steps: WorkflowStepItem[];
+  onNavigate: (step: WorkflowStep) => void;
+}) {
+  return (
+    <section className="workflow-card" aria-label="Guided workflow">
+      <div className="workflow-card-title">
+        <strong>Guided workflow</strong>
+        <span>Upload, clean the lines, review colors, then export.</span>
+      </div>
+      <ol className="workflow-steps">
+        {steps.map((step, index) => (
+          <li key={step.step} className={`workflow-step ${step.status}`}>
+            <button type="button" onClick={() => onNavigate(step.step)} disabled={!step.clickable} aria-current={step.status === "current" ? "step" : undefined}>
+              <span>{index + 1}</span>
+              <div>
+                <strong>{step.label}</strong>
+                <em>{step.status}</em>
+              </div>
+            </button>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

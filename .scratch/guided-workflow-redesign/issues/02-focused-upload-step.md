@@ -4,14 +4,13 @@
 
 **Blocked by:** 01 — Introduce durable Guided Workflow state.
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] Upload shows only Source Image, Finished Size, optional project name, and Generate Template as workflow controls.
-- [ ] Balanced starter tracing runs automatically without presenting preset choices before a result exists.
-- [ ] Successful generation advances to Clean Lines and auto-fits the subject.
-- [ ] Presets, paint controls, diagnostics, export controls, project JSON, PDF options, and advanced tracing settings are absent from Upload.
-- [ ] New Project, Open Project, and Save Project live in a compact File menu near the product title.
-- [ ] File-menu actions preserve their existing behavior and unavailable actions are clearly disabled.
-- [ ] Replacing the Source Image follows the reset contract while name/size changes preserve valid downstream work.
-- [ ] Browser coverage proves a first-time user sees one obvious primary action and reaches Clean Lines with Balanced selected.
-
+- [x] Upload shows only Source Image, Finished Size, optional project name, and Generate Template as workflow controls.
+- [x] Balanced starter tracing runs automatically without presenting preset choices before a result exists.
+- [x] Successful generation advances to Clean Lines and auto-fits the subject.
+- [x] Presets, paint controls, diagnostics, export controls, project JSON, PDF options, and advanced tracing settings are absent from Upload.
+- [x] New Project, Open Project, and Save Project live in a compact File menu near the product title.
+- [x] File-menu actions preserve their existing behavior and unavailable actions are clearly disabled.
+- [x] Replacing the Source Image follows the reset contract while name/size changes preserve valid downstream work.
+- [x] Browser coverage proves a first-time user sees one obvious primary action and reaches Clean Lines with Balanced selected.
