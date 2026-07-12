@@ -12,7 +12,7 @@ import {
   type CutoutProject,
   type CutoutProjectAnalysis
 } from "./cutoutProject";
-import { removeClickedDetailSegment } from "./detailEditor";
+import { previewDetailSegment, previewFirstDetailSegment, removeDetailSegmentPreview, type DetailSegmentPreview } from "./detailEditor";
 import {
   addProjectPaintColor,
   filterPaintGuideEntries,
@@ -178,6 +178,7 @@ function App() {
   const paintReviewSectionRef = useRef<HTMLDetailsElement | null>(null);
   const exportSectionRef = useRef<HTMLDivElement | null>(null);
   const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const removalPreviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
   const drawingRef = useRef(false);
   const panningRef = useRef(false);
@@ -194,6 +195,8 @@ function App() {
     editedDetailDataUrl: string | null;
     traceMode: TraceMode;
   } | null>(null);
+  const removalPreviewRef = useRef<DetailSegmentPreview | null>(null);
+  const [removalPreviewCount, setRemovalPreviewCount] = useState(0);
 
   const canAnalyze = image !== null && !busy;
   const canExport = image !== null && analysis !== null && !busy;
@@ -245,6 +248,10 @@ function App() {
   }, [analysis]);
 
   useEffect(() => {
+    if (editorTool !== "remove") clearRemovalPreview();
+  }, [editorTool]);
+
+  useEffect(() => {
     if (!previousDetailCleanupAcceptedRef.current && detailCleanupAccepted) {
       setPaintGuideOpen(true);
     }
@@ -273,6 +280,7 @@ function App() {
   }, [editedDetailDataUrl, manualStrokes, traceMode, workflowProgress.lineworkReviewed]);
 
   function resetEditorState() {
+    clearRemovalPreview();
     setHistory([]);
     setRedoHistory([]);
     setEditedDetailDataUrl(null);
@@ -884,10 +892,12 @@ function App() {
   }
 
   function loadDetailCanvas(src: string) {
+    clearRemovalPreview();
     const canvas = detailCanvasRef.current;
     if (!canvas) return;
     const image = new Image();
     image.onload = () => {
+      clearRemovalPreview();
       canvas.width = image.naturalWidth;
       canvas.height = image.naturalHeight;
       const context = canvas.getContext("2d");
@@ -1044,6 +1054,10 @@ function App() {
   }
 
   function continueStroke(event: PointerEvent<HTMLCanvasElement>) {
+    if (editorTool === "remove" && !drawingRef.current && !traceStudioOpen) {
+      previewDetailLineAt(canvasPoint(event));
+      return;
+    }
     const drag = strokeDragRef.current;
     if (traceStudioOpen && drag) {
       const point = canvasPoint(event);
@@ -1203,15 +1217,87 @@ function App() {
     const context = canvas.getContext("2d");
     if (!context) return;
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const result = removeClickedDetailSegment(imageData.data, canvas.width, canvas.height, point);
+    const preview = previewDetailSegment(imageData.data, canvas.width, canvas.height, point);
+    if (!preview) {
+      clearRemovalPreview();
+      return;
+    }
+    const result = removeDetailSegmentPreview(imageData.data, canvas.width, preview);
     if (!result.changed) return;
     saveHistorySnapshot();
     context.putImageData(imageData, 0, 0);
     setEditedDetailDataUrl(canvas.toDataURL("image/png"));
     setEditableDetailLinesPresent(canvasHasVisibleInk(canvas));
+    clearRemovalPreview();
+  }
+
+  function previewDetailLineAt(point: TracePoint) {
+    const canvas = detailCanvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const preview = previewDetailSegment(imageData.data, canvas.width, canvas.height, point);
+    renderRemovalPreview(preview, canvas.width, canvas.height);
+  }
+
+  function previewFirstDetailLine() {
+    const canvas = detailCanvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const preview = previewFirstDetailSegment(imageData.data, canvas.width, canvas.height);
+    renderRemovalPreview(preview, canvas.width, canvas.height);
+  }
+
+  function renderRemovalPreview(preview: DetailSegmentPreview | null, width: number, height: number) {
+    const previewCanvas = removalPreviewCanvasRef.current;
+    if (!previewCanvas) return;
+    const previewContext = previewCanvas.getContext("2d");
+    if (!previewContext) return;
+    removalPreviewRef.current = preview;
+    setRemovalPreviewCount(preview?.pixels.length ?? 0);
+    previewCanvas.width = width;
+    previewCanvas.height = height;
+    previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+    if (!preview) return;
+    const overlay = previewContext.createImageData(previewCanvas.width, previewCanvas.height);
+    for (const pixel of preview.pixels) {
+      const index = (pixel.y * previewCanvas.width + pixel.x) * 4;
+      overlay.data[index] = 220;
+      overlay.data[index + 1] = 62;
+      overlay.data[index + 2] = 42;
+      overlay.data[index + 3] = 230;
+    }
+    previewContext.putImageData(overlay, 0, 0);
+  }
+
+  function removePreviewedDetailLine() {
+    const canvas = detailCanvasRef.current;
+    const preview = removalPreviewRef.current;
+    if (!canvas || !preview) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const result = removeDetailSegmentPreview(imageData.data, canvas.width, preview);
+    if (!result.changed) return;
+    saveHistorySnapshot();
+    context.putImageData(imageData, 0, 0);
+    setEditedDetailDataUrl(canvas.toDataURL("image/png"));
+    setEditableDetailLinesPresent(canvasHasVisibleInk(canvas));
+    clearRemovalPreview();
+  }
+
+  function clearRemovalPreview() {
+    removalPreviewRef.current = null;
+    setRemovalPreviewCount(0);
+    const canvas = removalPreviewCanvasRef.current;
+    canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
   }
 
   function renderManualTraceLayer(strokes: TraceStroke[], draftStroke?: TraceStroke, showSelection = !printPreview) {
+    clearRemovalPreview();
     const canvas = detailCanvasRef.current;
     if (!canvas || !analysis) return;
     canvas.width = analysis.previewWidthPx;
@@ -1614,6 +1700,7 @@ function App() {
                         undoDisabled={undoDisabled}
                         showReference={showReference}
                         cutlineValid={Boolean(analysis.outerCutPath.trim())}
+                        removalPreviewCount={removalPreviewCount}
                         onRemove={() => setEditorTool("remove")}
                         onAdd={selectAddMissingLine}
                         onUndo={undoDetailEdit}
@@ -1954,7 +2041,25 @@ function App() {
                         onPointerMove={continueStroke}
                         onPointerUp={endStroke}
                         onPointerCancel={endStroke}
+                        onPointerLeave={clearRemovalPreview}
+                        onFocus={() => {
+                          if (editorTool === "remove" && !removalPreviewRef.current) previewFirstDetailLine();
+                        }}
+                        onKeyDown={(event) => {
+                          if (editorTool !== "remove" || (event.key !== "Enter" && event.key !== "Delete")) return;
+                          event.preventDefault();
+                          removePreviewedDetailLine();
+                        }}
+                        tabIndex={editorTool === "remove" ? 0 : -1}
+                        aria-describedby="connected-line-preview-status"
                         aria-label="Editable interior detail lines"
+                      />
+                      <canvas
+                        ref={removalPreviewCanvasRef}
+                        className="removal-preview-layer"
+                        width={analysis.previewWidthPx}
+                        height={analysis.previewHeightPx}
+                        aria-hidden="true"
                       />
                       {showCutline ? <img src={analysis.outerLinePngDataUrl} alt="" className="outer-line-layer" draggable={false} /> : null}
                     </div>
@@ -2460,6 +2565,7 @@ function CleanLinesPrimaryControls({
   undoDisabled,
   showReference,
   cutlineValid,
+  removalPreviewCount,
   onRemove,
   onAdd,
   onUndo,
@@ -2472,6 +2578,7 @@ function CleanLinesPrimaryControls({
   undoDisabled: boolean;
   showReference: boolean;
   cutlineValid: boolean;
+  removalPreviewCount: number;
   onRemove: () => void;
   onAdd: () => void;
   onUndo: () => void;
@@ -2489,9 +2596,11 @@ function CleanLinesPrimaryControls({
         <button className="tool-button" onClick={onFit}><ZoomIn size={16} /> Fit</button>
         <button className="primary-action" onClick={onAccept} disabled={!cutlineValid}><ChevronRight size={16} /> Looks Good - Continue to Colors</button>
       </div>
-      <p className="clean-tool-instruction" aria-label="Clean Lines instruction">
+      <p className="clean-tool-instruction" id="connected-line-preview-status" aria-label="Clean Lines instruction" role="status">
         {editorTool === "remove"
-          ? "Click a line to remove it."
+          ? removalPreviewCount > 0
+            ? `Connected line preview: ${removalPreviewCount} pixels. Click or press Enter to remove it.`
+            : "Point at a line to preview the complete segment before removing it."
           : editorTool === "draw"
             ? "Draw only the missing feature or paint-boundary line."
             : "Use the selected tool, then return to Remove Line or Add Missing Line."}

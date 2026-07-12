@@ -1,4 +1,5 @@
 import { expect, test, type Download, type Locator, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
 test("maker can complete the MVP trace, restore, paint review, and export workflow", async ({ page, request }) => {
@@ -61,7 +62,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
     await expect(primaryControls.getByRole("button", { name })).toBeVisible();
   }
   await expect(primaryControls.getByRole("button", { name: "Remove Line" })).toHaveClass(/selected/);
-  await expect(page.getByLabel("Clean Lines instruction")).toContainText("Click a line to remove it");
+  await expect(page.getByLabel("Clean Lines instruction")).toContainText("Point at a line to preview");
   await expect(page.getByLabel("Paint guide and export summary")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Export SVG Linework" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Export Template Packet PDF" })).toHaveCount(0);
@@ -73,6 +74,29 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(traceStatus).toContainText(/Cutline (OK|Needs attention)/);
   await expect(traceStatus).toContainText(/pages/);
   await traceStatus.locator("summary").click();
+
+  const previewCanvas = page.getByLabel("Editable interior detail lines");
+  const previewPoint = await waitForCanvasInkPoint(previewCanvas);
+  const detailBeforePreview = await previewCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await previewCanvas.hover({ position: await canvasLocalPoint(previewCanvas, previewPoint.x, previewPoint.y) });
+  await expect(page.getByLabel("Clean Lines instruction")).toContainText("Connected line preview");
+  await expect.poll(() => canvasVisiblePixelCount(page.locator(".removal-preview-layer"))).toBeGreaterThan(0);
+  await page.mouse.move(2, 2);
+  await expect(page.getByLabel("Clean Lines instruction")).toContainText("Point at a line to preview");
+  expect(await previewCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(detailBeforePreview);
+  await previewCanvas.click({ position: await canvasLocalPoint(previewCanvas, previewPoint.x, previewPoint.y) });
+  await expect.poll(() => previewCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(detailBeforePreview);
+  await primaryControls.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => previewCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(detailBeforePreview);
+  await expect.poll(() => canvasVisiblePixelCount(page.locator(".removal-preview-layer"))).toBe(0);
+  await page.mouse.move(2, 2);
+  await previewCanvas.evaluate((element) => (element as HTMLCanvasElement).blur());
+  await previewCanvas.focus();
+  await expect(page.getByLabel("Clean Lines instruction")).toContainText("Connected line preview");
+  await previewCanvas.press("Enter");
+  await expect.poll(() => previewCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(detailBeforePreview);
+  await primaryControls.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => previewCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(detailBeforePreview);
   await expect(traceStatus.getByText("Trace Quality Review")).toBeVisible();
   await traceStatus.locator("summary").click();
 
@@ -86,6 +110,12 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toHaveAttribute("aria-current", "step");
   await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
   await expect(primaryControls.getByRole("button")).toHaveCount(6);
+  const reviewedPreviewPoint = await waitForCanvasInkPoint(previewCanvas);
+  await previewCanvas.hover({ position: await canvasLocalPoint(previewCanvas, reviewedPreviewPoint.x, reviewedPreviewPoint.y) });
+  await expect(page.getByLabel("Clean Lines instruction")).toContainText("Connected line preview");
+  await previewCanvas.click({ position: await canvasLocalPoint(previewCanvas, reviewedPreviewPoint.x, reviewedPreviewPoint.y) });
+  await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toBeDisabled();
+  await primaryControls.getByRole("button", { name: "Undo" }).click();
   await page.setViewportSize({ width: 1440, height: 1100 });
 
   await moreTools.locator("summary").click();
@@ -281,6 +311,37 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   expect(pdfResponse.headers()["content-type"]).toContain("application/pdf");
 });
 
+test("Coraline head-area removal shows the complete connected scope before deletion", async ({ page }, testInfo) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  await page.getByLabel("Source image").setInputFiles({
+    name: "preview-seed.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await page.getByRole("button", { name: "Generate Template" }).click();
+
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  const fixtureDataUrl = `data:image/png;base64,${readFileSync("backend/tests/fixtures/coraline/coraline-detail-layer.png").toString("base64")}`;
+  await detailCanvas.evaluate(async (element, dataUrl) => {
+    const canvas = element as HTMLCanvasElement;
+    const image = new Image();
+    image.src = dataUrl;
+    await image.decode();
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    canvas.getContext("2d")?.drawImage(image, 0, 0);
+  }, fixtureDataUrl);
+
+  await detailCanvas.hover({ position: await canvasLocalPoint(detailCanvas, 180 / 359, 67 / 900) });
+  await expect(page.getByLabel("Clean Lines instruction")).toContainText("Connected line preview: 1323 pixels");
+  await expect.poll(() => canvasVisiblePixelCount(page.locator(".removal-preview-layer"))).toBe(1323);
+  await testInfo.attach("coraline-head-connected-line-preview", {
+    body: await page.getByLabel("Clean Lines workspace").screenshot(),
+    contentType: "image/png"
+  });
+});
+
 async function downloadFrom(page: Page, buttonName: string) {
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: new RegExp(buttonName) }).click();
@@ -386,6 +447,45 @@ async function expectCleanCanvasDominance(page: Page, workspace: Locator) {
   });
   expect(measurements.widthRatio).toBeGreaterThanOrEqual(0.7);
   expect(measurements.height).toBeGreaterThanOrEqual(measurements.viewportHeight * 0.65);
+}
+
+async function waitForCanvasInkPoint(canvas: Locator) {
+  await expect.poll(async () => (await findCanvasInkPoint(canvas)) !== null).toBe(true);
+  const point = await findCanvasInkPoint(canvas);
+  if (!point) throw new Error("Detail canvas did not contain a removable line.");
+  return point;
+}
+
+async function findCanvasInkPoint(canvas: Locator) {
+  return canvas.evaluate((element) => {
+    const target = element as HTMLCanvasElement;
+    const context = target.getContext("2d");
+    if (!context) return null;
+    const pixels = context.getImageData(0, 0, target.width, target.height).data;
+    for (let y = 0; y < target.height; y += 1) {
+      for (let x = 0; x < target.width; x += 1) {
+        const index = (y * target.width + x) * 4;
+        if (pixels[index + 3] > 16 && pixels[index] < 240 && pixels[index + 1] < 240 && pixels[index + 2] < 240) {
+          return { x: x / target.width, y: y / target.height };
+        }
+      }
+    }
+    return null;
+  });
+}
+
+async function canvasVisiblePixelCount(canvas: Locator) {
+  return canvas.evaluate((element) => {
+    const target = element as HTMLCanvasElement;
+    const context = target.getContext("2d");
+    if (!context) return 0;
+    const pixels = context.getImageData(0, 0, target.width, target.height).data;
+    let count = 0;
+    for (let index = 3; index < pixels.length; index += 4) {
+      if (pixels[index] > 0) count += 1;
+    }
+    return count;
+  });
 }
 
 async function updatePaintRow(row: Locator, label: string, note: string) {

@@ -1017,7 +1017,8 @@ button:disabled {
 .reference-layer,
 .suggestion-layer,
 .outer-line-layer,
-.detail-line-layer {
+.detail-line-layer,
+.removal-preview-layer {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -1869,6 +1870,12 @@ button:disabled {
   .right-panel {
     grid-column: 1 / -1;
   }
+}
+
+.removal-preview-layer {
+  z-index: 5;
+  pointer-events: none;
+  filter: drop-shadow(0 0 1px #ffffff);
 }
 
 .workspace.upload-workspace {

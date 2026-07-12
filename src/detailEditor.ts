@@ -8,6 +8,16 @@ export type RemoveSegmentResult = {
   removedPixels: number;
 };
 
+export type DetailSegmentPreview = {
+  pixels: CanvasPoint[];
+};
+
+export type DetailSegmentOptions = {
+  hitRadiusPx?: number;
+  maxComponentPixels?: number;
+  boundedRadiusPx?: number;
+};
+
 type Pixel = {
   x: number;
   y: number;
@@ -22,24 +32,55 @@ export function removeClickedDetailSegment(
   width: number,
   height: number,
   point: CanvasPoint,
-  options: {
-    hitRadiusPx?: number;
-    maxComponentPixels?: number;
-    boundedRadiusPx?: number;
-  } = {}
+  options: DetailSegmentOptions = {}
 ): RemoveSegmentResult {
+  const preview = previewDetailSegment(pixels, width, height, point, options);
+  if (!preview) return { changed: false, removedPixels: 0 };
+  return removeDetailSegmentPreview(pixels, width, preview);
+}
+
+export function previewDetailSegment(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  point: CanvasPoint,
+  options: DetailSegmentOptions = {}
+): DetailSegmentPreview | null {
   const hitRadiusPx = options.hitRadiusPx ?? DEFAULT_HIT_RADIUS_PX;
   const maxComponentPixels = options.maxComponentPixels ?? DEFAULT_MAX_COMPONENT_PIXELS;
   const boundedRadiusPx = options.boundedRadiusPx ?? DEFAULT_BOUNDED_RADIUS_PX;
   const seed = findNearestDetailPixel(pixels, width, height, point, hitRadiusPx);
-  if (!seed) return { changed: false, removedPixels: 0 };
+  if (!seed) return null;
 
   const component = collectConnectedDetailPixels(pixels, width, height, seed);
   const pixelsToRemove = component.length > maxComponentPixels
     ? component.filter((pixel) => distance(pixel, seed) <= boundedRadiusPx)
     : component;
 
-  for (const pixel of pixelsToRemove) {
+  return { pixels: pixelsToRemove };
+}
+
+export function previewFirstDetailSegment(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  options: DetailSegmentOptions = {}
+): DetailSegmentPreview | null {
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!isDetailPixel(pixels, x, y, width)) continue;
+      return previewDetailSegment(pixels, width, height, { x, y }, { ...options, hitRadiusPx: 0 });
+    }
+  }
+  return null;
+}
+
+export function removeDetailSegmentPreview(
+  pixels: Uint8ClampedArray,
+  width: number,
+  preview: DetailSegmentPreview
+): RemoveSegmentResult {
+  for (const pixel of preview.pixels) {
     const index = pixelIndex(pixel.x, pixel.y, width);
     pixels[index] = 0;
     pixels[index + 1] = 0;
@@ -47,7 +88,7 @@ export function removeClickedDetailSegment(
     pixels[index + 3] = 0;
   }
 
-  return { changed: pixelsToRemove.length > 0, removedPixels: pixelsToRemove.length };
+  return { changed: preview.pixels.length > 0, removedPixels: preview.pixels.length };
 }
 
 function findNearestDetailPixel(

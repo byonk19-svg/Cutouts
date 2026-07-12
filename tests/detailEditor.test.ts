@@ -1,4 +1,4 @@
-import { removeClickedDetailSegment } from "../src/detailEditor.ts";
+import { previewDetailSegment, previewFirstDetailSegment, removeDetailSegmentPreview, removeClickedDetailSegment } from "../src/detailEditor.ts";
 
 function makePixels(width: number, height: number) {
   return new Uint8ClampedArray(width * height * 4);
@@ -34,6 +34,47 @@ function assertEqual(actual: unknown, expected: unknown, message: string) {
 
 function clone(pixels: Uint8ClampedArray) {
   return new Uint8ClampedArray(pixels);
+}
+
+{
+  const width = 24;
+  const pixels = makePixels(width, 12);
+  for (let x = 2; x <= 8; x += 1) setBlack(pixels, width, x, 4);
+  for (let x = 15; x <= 20; x += 1) setBlack(pixels, width, x, 4);
+  const before = clone(pixels);
+
+  const preview = previewDetailSegment(pixels, width, 12, { x: 5, y: 4 });
+
+  assert(preview !== null, "hover should find a connected detail segment");
+  assertEqual(preview?.pixels.length, 7, "preview should include the complete connected segment");
+  assertEqual(JSON.stringify(Array.from(pixels)), JSON.stringify(Array.from(before)), "preview should not mutate linework");
+
+  const result = preview ? removeDetailSegmentPreview(pixels, width, preview) : { changed: false, removedPixels: 0 };
+  assert(result.changed, "removing a preview should change linework");
+  assertEqual(result.removedPixels, preview?.pixels.length, "removal should consume exactly the previewed segment");
+  assertEqual(alphaAt(pixels, width, 17, 4), 255, "removing the preview should preserve nearby disconnected details");
+}
+
+{
+  const width = 18;
+  const pixels = makePixels(width, 12);
+  for (let x = 2; x <= 8; x += 1) setBlack(pixels, width, x, 4);
+  const before = clone(pixels);
+
+  const preview = previewDetailSegment(pixels, width, 12, { x: 16, y: 10 }, { hitRadiusPx: 2 });
+
+  assertEqual(preview, null, "moving away should produce no removal preview");
+  assertEqual(JSON.stringify(Array.from(pixels)), JSON.stringify(Array.from(before)), "cancelled preview should leave linework unchanged");
+}
+
+{
+  const width = 18;
+  const pixels = makePixels(width, 12);
+  for (let x = 5; x <= 11; x += 1) setBlack(pixels, width, x, 6);
+
+  const preview = previewFirstDetailSegment(pixels, width, 12);
+
+  assertEqual(preview?.pixels.length, 7, "keyboard focus should discover a complete removable segment without pointer input");
 }
 
 {
