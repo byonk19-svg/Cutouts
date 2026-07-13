@@ -185,6 +185,7 @@ function App() {
   const paintReviewSectionRef = useRef<HTMLDetailsElement | null>(null);
   const exportSectionRef = useRef<HTMLDivElement | null>(null);
   const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const detailCanvasLoadIdRef = useRef(0);
   const removalPreviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
   const drawingRef = useRef(false);
@@ -803,11 +804,47 @@ function App() {
     setAnalysis(null);
   }
 
-  function applyDetailPreset(preset: DetailPreset) {
+  async function applyDetailPreset(preset: DetailPreset) {
     const next = detailPresetSettings(preset, settings);
+    if (analysis && (editedDetailDataUrl !== null || history.length > 0)) {
+      const shouldReplace = window.confirm("Change detail strength? This will replace your edited starter-line cleanup with a newly generated layer.");
+      if (!shouldReplace) return;
+    }
     applyTraceModeUiState(next.templateStyle);
     setSettings(next);
-    setAnalysis(null);
+    setProjectStatus(image ? "Unsaved changes" : "No saved project");
+    if (!analysis || !image) {
+      setAnalysis(null);
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = new FormData();
+      payload.append("image", image);
+      payload.append("settings", JSON.stringify(next));
+      const response = await fetch("/api/analyze", { method: "POST", body: payload });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Unable to regenerate starter lines.");
+      setAnalysis((current) => current ? {
+        ...current,
+        previewPngDataUrl: body.previewPngDataUrl,
+        detailLinePngDataUrl: body.detailLinePngDataUrl,
+        traceQuality: body.traceQuality
+      } : body);
+      setEditedDetailDataUrl(null);
+      setHistory([]);
+      setRedoHistory([]);
+      setEditableDetailLinesPresent(false);
+      viewportUserModifiedRef.current = false;
+      pendingContentFitRef.current = true;
+      resetCleanupChecks();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to regenerate starter lines.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function switchToBlankTraceStudio() {
@@ -925,9 +962,11 @@ function App() {
     clearRemovalPreview();
     const canvas = detailCanvasRef.current;
     if (!canvas) return;
+    const loadId = ++detailCanvasLoadIdRef.current;
     setDetailLineBoundsResolved(false);
     const image = new Image();
     image.onload = () => {
+      if (loadId !== detailCanvasLoadIdRef.current) return;
       clearRemovalPreview();
       canvas.width = image.naturalWidth;
       canvas.height = image.naturalHeight;
@@ -941,6 +980,7 @@ function App() {
       setDetailLineBoundsResolved(true);
     };
     image.onerror = () => {
+      if (loadId !== detailCanvasLoadIdRef.current) return;
       setDetailLineBounds(null);
       setDetailLineBoundsResolved(true);
     };

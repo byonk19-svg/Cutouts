@@ -482,6 +482,54 @@ test("existing line art is reported and can be overridden from More Tools", asyn
 
   const moreTools = page.getByLabel("More Tools");
   await moreTools.locator("summary").click();
+  const presetChoices = moreTools.getByLabel("Detail strength");
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  const primaryControls = page.getByLabel("Clean Lines primary controls");
+  const editorTools = page.getByLabel("Template editor tools");
+  mkdirSync("output/screenshots/latest/line-art-presets", { recursive: true });
+  await primaryControls.getByRole("button", { name: "Show Original" }).click();
+  await editorTools.getByRole("button", { name: "Preview Printable Template" }).click();
+
+  const balancedPixels = await canvasVisiblePixelCount(detailCanvas);
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith("/api/analyze") && response.request().method() === "POST"),
+    presetChoices.getByRole("button", { name: /Simple/ }).click()
+  ]);
+  await expect(page.getByText("Simple starter lines Editor", { exact: true })).toBeVisible();
+  await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).toBeLessThan(balancedPixels);
+  const simplePixels = await canvasVisiblePixelCount(detailCanvas);
+  await page.waitForTimeout(250);
+  await page.locator(".template-editor").screenshot({ path: "output/screenshots/latest/line-art-presets/simple.png", animations: "disabled" });
+
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith("/api/analyze") && response.request().method() === "POST"),
+    presetChoices.getByRole("button", { name: /Balanced/ }).click()
+  ]);
+  await expect(page.getByText("Balanced starter lines Editor", { exact: true })).toBeVisible();
+  await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).toBeGreaterThan(simplePixels);
+  const regeneratedBalancedPixels = await canvasVisiblePixelCount(detailCanvas);
+  await page.waitForTimeout(250);
+  await page.locator(".template-editor").screenshot({ path: "output/screenshots/latest/line-art-presets/balanced.png", animations: "disabled" });
+
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith("/api/analyze") && response.request().method() === "POST"),
+    presetChoices.getByRole("button", { name: /Detailed/ }).click()
+  ]);
+  await expect(page.getByText("Detailed starter lines Editor", { exact: true })).toBeVisible();
+  await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).not.toBe(regeneratedBalancedPixels);
+  await page.waitForTimeout(250);
+  await page.locator(".template-editor").screenshot({ path: "output/screenshots/latest/line-art-presets/detailed.png", animations: "disabled" });
+
+  await editorTools.getByRole("button", { name: "Preview Printable Template" }).click();
+  await primaryControls.getByRole("button", { name: "Add Missing Line" }).click();
+  await drawStroke(detailCanvas, [[0.45, 0.42], [0.55, 0.42]]);
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("replace your edited starter-line cleanup");
+    await dialog.dismiss();
+  });
+  await presetChoices.getByRole("button", { name: /Balanced/ }).click();
+  await expect(presetChoices.getByRole("button", { name: /Detailed/ })).toHaveClass(/selected/);
+
   const imageType = moreTools.getByLabel("Image type");
   await expect(imageType.getByRole("button", { name: "Auto" })).toHaveClass(/selected/);
   await expect(imageType.getByRole("button", { name: "Existing line art" })).toBeVisible();

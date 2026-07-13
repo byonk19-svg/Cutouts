@@ -748,7 +748,7 @@ def _make_preview_layers(image: Image.Image, mask: Image.Image, settings: Templa
         preview_mask,
         settings.detail_lines,
         outer_line_width=3,
-        detail_line_width=_detail_line_width(settings, print_scale=False),
+        detail_line_width=_detail_line_width(settings, print_scale=False, detail_extraction_mode=detail_extraction_mode),
         detail_cleanup=settings.detail_cleanup,
         template_style=settings.template_style,
         detail_extraction_mode=detail_extraction_mode,
@@ -818,7 +818,7 @@ def _make_trace_image(
         scaled_mask,
         settings.detail_lines,
         outer_line_width=9,
-        detail_line_width=_detail_line_width(settings, print_scale=True),
+        detail_line_width=_detail_line_width(settings, print_scale=True, detail_extraction_mode=detail_extraction_mode),
         detail_cleanup=settings.detail_cleanup,
         template_style=settings.template_style,
         detail_extraction_mode=detail_extraction_mode,
@@ -918,7 +918,9 @@ def _odd_filter_size(size: int) -> int:
     return size if size % 2 == 1 else size + 1
 
 
-def _detail_line_width(settings: TemplateSettings, print_scale: bool) -> int:
+def _detail_line_width(settings: TemplateSettings, print_scale: bool, detail_extraction_mode: str = "rendered") -> int:
+    if detail_extraction_mode == "lineArt":
+        return 5 if print_scale else 3
     if settings.template_style == "marker":
         return 7 if print_scale else 3
     if settings.template_style == "clean":
@@ -942,13 +944,18 @@ def _detail_line_mask(
     template_style: str = "detailed",
     detail_extraction_mode: str = "auto",
 ) -> Image.Image:
+    extraction_mode = _detail_extraction_mode_used(image, mask, template_style, detail_extraction_mode)
+    if extraction_mode == "lineArt":
+        faithful = _existing_line_art_detail_mask(image, mask, cleanup, print_scale)
+        if template_style == "detailed":
+            return faithful
+        level = "simple" if template_style == "marker" else "balanced"
+        return _simplify_existing_line_art_detail_mask(faithful, mask, level)
     if template_style == "marker":
         cleanup = max(cleanup, 90)
         return _marker_template_line_mask(image, mask, cleanup, print_scale)
     if template_style == "clean":
         cleanup = max(cleanup, 76)
-        if _detail_extraction_mode_used(image, mask, template_style, detail_extraction_mode) == "lineArt":
-            return _existing_line_art_detail_mask(image, mask, cleanup, print_scale)
         return _clean_feature_line_mask(image, mask, cleanup, print_scale)
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
@@ -1035,6 +1042,133 @@ def _existing_line_art_detail_mask(image: Image.Image, mask: Image.Image, cleanu
     if detail.size != original_size:
         detail = detail.resize(original_size, Image.Resampling.NEAREST)
     return detail
+
+
+def _simplify_existing_line_art_detail_mask(detail: Image.Image, mask: Image.Image, level: str) -> Image.Image:
+    ink = (np.asarray(detail.convert("L")) > 0).astype(np.uint8) * 255
+    if not np.any(ink):
+        return Image.new("L", detail.size, 0)
+
+    subject = np.asarray(mask.resize(detail.size, Image.Resampling.NEAREST).convert("L")) > 0
+    subject_box = cv2.boundingRect(subject.astype(np.uint8))
+    subject_x, subject_y, subject_width, subject_height = subject_box
+    perimeter_radius = max(3, round(min(subject_width, subject_height) * (0.024 if level == "simple" else 0.016)))
+    perimeter_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (perimeter_radius * 2 + 1, perimeter_radius * 2 + 1))
+    interior = cv2.erode(subject.astype(np.uint8) * 255, perimeter_kernel) > 0
+    ink = np.where(interior, ink, 0).astype(np.uint8)
+
+    # Normalize thick source strokes to one centerline before deciding which
+    # components are significant. This avoids tracing both sides of source ink.
+    closed = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, np.ones((3, 3), dtype=np.uint8))
+    skeleton = _morphological_skeleton(closed)
+    scale = max(1.0, min(subject_width, subject_height) / 220)
+    upper_limit = subject_y + subject_height * 0.42
+    protected_head_features = _protected_head_feature_skeleton(ink, subject_box, upper_limit)
+    if level == "simple":
+        body_min_length = round(40 * scale)
+        head_min_length = round(8 * scale)
+        spur_length = round(24 * scale)
+    else:
+        body_min_length = round(10 * scale)
+        head_min_length = round(4 * scale)
+        spur_length = round(4 * scale)
+
+    skeleton = _prune_short_skeleton_spurs(skeleton, spur_length, upper_limit)
+    labels, stats = _connected_components(skeleton > 0)
+    retained = np.zeros_like(skeleton)
+    for label in range(1, len(stats)):
+        top = stats[label, cv2.CC_STAT_TOP]
+        width = stats[label, cv2.CC_STAT_WIDTH]
+        height = stats[label, cv2.CC_STAT_HEIGHT]
+        length = stats[label, cv2.CC_STAT_AREA]
+        minimum = head_min_length if top + height / 2 <= upper_limit else body_min_length
+        major_span = max(width, height) >= body_min_length
+        if length >= minimum and (major_span or top + height / 2 <= upper_limit):
+            retained[labels == label] = 255
+
+    retained = cv2.bitwise_or(retained, protected_head_features)
+    if level == "balanced":
+        retained = cv2.dilate(retained, np.ones((3, 3), dtype=np.uint8), iterations=1)
+    return Image.fromarray(retained, mode="L")
+
+
+def _protected_head_feature_skeleton(
+    ink: np.ndarray,
+    subject_box: tuple[int, int, int, int],
+    upper_limit: float,
+) -> np.ndarray:
+    subject_x, subject_y, subject_width, subject_height = subject_box
+    labels, stats = _connected_components(ink > 0)
+    protected = np.zeros_like(ink)
+    for label in range(1, len(stats)):
+        left = stats[label, cv2.CC_STAT_LEFT]
+        top = stats[label, cv2.CC_STAT_TOP]
+        width = stats[label, cv2.CC_STAT_WIDTH]
+        height = stats[label, cv2.CC_STAT_HEIGHT]
+        area = stats[label, cv2.CC_STAT_AREA]
+        if top + height / 2 > upper_limit or area < 8:
+            continue
+        if width > subject_width * 0.22 or height > subject_height * 0.16:
+            continue
+        if left <= subject_x + 2 or left + width >= subject_x + subject_width - 2:
+            continue
+        component = np.where(labels == label, 255, 0).astype(np.uint8)
+        feature = _morphological_skeleton(component)
+        if cv2.countNonZero(feature) < 6:
+            center_x = left + width // 2
+            center_y = top + height // 2
+            cv2.circle(feature, (center_x, center_y), 3, 255, -1)
+        protected = cv2.bitwise_or(protected, feature)
+    return protected
+
+
+def _morphological_skeleton(mask: np.ndarray) -> np.ndarray:
+    remaining = mask.copy()
+    skeleton = np.zeros_like(remaining)
+    element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    while cv2.countNonZero(remaining) > 0:
+        opened = cv2.morphologyEx(remaining, cv2.MORPH_OPEN, element)
+        skeleton = cv2.bitwise_or(skeleton, cv2.subtract(remaining, opened))
+        remaining = cv2.erode(remaining, element)
+    return skeleton
+
+
+def _prune_short_skeleton_spurs(skeleton: np.ndarray, max_length: int, upper_limit: float) -> np.ndarray:
+    if max_length <= 1:
+        return skeleton
+    result = skeleton.copy()
+    for _pass in range(3):
+        points = set(map(tuple, np.argwhere(result > 0)))
+        endpoints = [point for point in points if len(_skeleton_neighbors(point, points)) == 1]
+        removals: set[tuple[int, int]] = set()
+        for endpoint in endpoints:
+            path = [endpoint]
+            previous: tuple[int, int] | None = None
+            current = endpoint
+            limit = max(2, round(max_length * (0.5 if endpoint[0] <= upper_limit else 1.0)))
+            while len(path) <= limit:
+                neighbors = [point for point in _skeleton_neighbors(current, points) if point != previous]
+                if len(neighbors) != 1:
+                    if len(neighbors) > 1 and len(path) <= limit:
+                        removals.update(path[:-1])
+                    break
+                previous, current = current, neighbors[0]
+                path.append(current)
+        if not removals:
+            break
+        for y, x in removals:
+            result[y, x] = 0
+    return result
+
+
+def _skeleton_neighbors(point: tuple[int, int], points: set[tuple[int, int]]) -> list[tuple[int, int]]:
+    y, x = point
+    return [
+        (near_y, near_x)
+        for near_y in range(y - 1, y + 2)
+        for near_x in range(x - 1, x + 2)
+        if (near_y, near_x) != point and (near_y, near_x) in points
+    ]
 
 
 def _marker_template_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
@@ -1210,7 +1344,7 @@ def _looks_like_flat_line_art(image: Image.Image, mask: Image.Image) -> bool:
 
 
 def _detail_extraction_mode_used(image: Image.Image, mask: Image.Image, template_style: str, requested_mode: str) -> str:
-    if template_style != "clean" or requested_mode == "rendered":
+    if template_style in {"cutOnly", "manual"} or requested_mode == "rendered":
         return "rendered"
     if requested_mode == "lineArt":
         return "lineArt" if _has_meaningful_existing_ink(image, mask) else "rendered"

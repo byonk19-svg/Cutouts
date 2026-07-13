@@ -21,9 +21,6 @@ export function detailPresetSettings(preset: DetailPreset, current: Settings): S
   if (preset === "simple") {
     return {
       ...current,
-      smoothing: 5,
-      speckArea: 120,
-      holeArea: 320,
       detailLines: true,
       detailCleanup: 96,
       templateStyle: "marker"
@@ -32,9 +29,6 @@ export function detailPresetSettings(preset: DetailPreset, current: Settings): S
   if (preset === "detailed") {
     return {
       ...current,
-      smoothing: 2,
-      speckArea: 40,
-      holeArea: 160,
       detailLines: true,
       detailCleanup: 35,
       templateStyle: "extra"
@@ -42,9 +36,6 @@ export function detailPresetSettings(preset: DetailPreset, current: Settings): S
   }
   return {
     ...current,
-    smoothing: 4,
-    speckArea: 60,
-    holeArea: 220,
     detailLines: true,
     detailCleanup: 88,
     templateStyle: "paint"
@@ -58,9 +49,9 @@ export function detailPresetLabel(preset: DetailPreset) {
 }
 
 export function detailPresetHelp(preset: DetailPreset) {
-  if (preset === "simple") return "Strongest face, clothing, and accessory features only.";
-  if (preset === "detailed") return "More paint boundaries and details; expect more cleanup.";
-  return "Best default for character cutout starter lines.";
+  if (preset === "simple") return "Wood template - fewer lines.";
+  if (preset === "detailed") return "Faithful artwork - most lines.";
+  return "Recommended - key details.";
 }
 
 export function detailPresetFromTraceMode(mode: TraceMode): DetailPreset {

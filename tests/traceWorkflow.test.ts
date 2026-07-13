@@ -55,8 +55,8 @@ const baseSettings: Settings = {
   assertEqual(traceModeLabel("marker"), "Simple starter lines", "marker mode should be the simple preset");
   assertEqual(traceModeLabel("extra"), "Detailed starter lines", "extra mode should be the detailed preset");
   assert(
-    traceModeHelp("marker").includes("Strongest"),
-    "simple preset copy should set expectation that only strongest features are kept"
+    traceModeHelp("marker").includes("fewer lines"),
+    "simple preset copy should set expectation that artwork is simplified"
   );
   assert(!startsWithBlankManualLayer("marker"), "simple auto detail should keep generated suggestions as the editable starting layer");
 }
@@ -67,17 +67,19 @@ const baseSettings: Settings = {
   const detailed = detailPresetSettings("detailed", baseSettings);
 
   assertEqual(detailPresetLabel("balanced"), "Balanced", "balanced preset should have a plain user label");
-  assert(detailPresetHelp("detailed").includes("More paint boundaries"), "detailed preset help should describe visual output");
+  assertEqual(detailPresetHelp("simple"), "Wood template - fewer lines.", "simple preset should describe simplified transfer output");
+  assertEqual(detailPresetHelp("balanced"), "Recommended - key details.", "balanced preset should identify the recommended density");
+  assertEqual(detailPresetHelp("detailed"), "Faithful artwork - most lines.", "detailed preset should describe faithful source output");
   assertEqual(simple.templateStyle, "marker", "simple preset should use the strongest-feature backend style");
   assertEqual(balanced.templateStyle, "paint", "balanced preset should use the default clean backend style");
   assertEqual(detailed.templateStyle, "extra", "detailed preset should use the detailed backend style");
   assert(simple.detailCleanup > balanced.detailCleanup, "simple preset should clean more aggressively than balanced");
   assert(detailed.detailCleanup < balanced.detailCleanup, "detailed preset should keep more detail than balanced");
-  assertEqual(detailPresetSettings("balanced", simple).speckArea, balanced.speckArea, "balanced preset should restore canonical speck cleanup after simple");
-  assertEqual(detailPresetSettings("balanced", simple).holeArea, balanced.holeArea, "balanced preset should restore canonical gap cleanup after simple");
-  assertEqual(detailPresetSettings("balanced", simple).smoothing, balanced.smoothing, "balanced preset should restore canonical smoothing after simple");
-  assertEqual(detailPresetSettings("detailed", simple).speckArea, detailed.speckArea, "detailed preset should restore canonical speck cleanup after simple");
-  assertEqual(detailPresetSettings("detailed", simple).holeArea, detailed.holeArea, "detailed preset should restore canonical gap cleanup after simple");
+  assertEqual(simple.speckArea, baseSettings.speckArea, "detail strength should not change outer-mask speck cleanup");
+  assertEqual(simple.holeArea, baseSettings.holeArea, "detail strength should not change outer-mask gap cleanup");
+  assertEqual(simple.smoothing, baseSettings.smoothing, "detail strength should not change outer cutline smoothing");
+  assertEqual(detailed.speckArea, baseSettings.speckArea, "detailed strength should preserve outer-mask cleanup");
+  assertEqual(detailed.holeArea, baseSettings.holeArea, "detailed strength should preserve outer-mask gap cleanup");
   assertEqual(detailPresetFromTraceMode("marker"), "simple", "marker mode should map to simple preset");
   assertEqual(detailPresetFromTraceMode("paint"), "balanced", "paint mode should map to balanced preset");
   assertEqual(detailPresetFromTraceMode("extra"), "detailed", "extra mode should map to detailed preset");

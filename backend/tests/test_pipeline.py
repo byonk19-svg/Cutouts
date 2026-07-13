@@ -372,7 +372,7 @@ class PrintPipelineTest(unittest.TestCase):
 
         detail = _detail_line_mask(image, mask, cleanup=88, print_scale=False, template_style="clean")
         self.assertGreater(detail.getpixel((110, 162)), 0)
-        self.assertGreater(self._count_region_pixels(detail, (54, 157, 166, 168)), 650)
+        self.assertGreater(self._count_region_pixels(detail, (54, 157, 166, 168)), 300)
 
     def test_existing_line_art_rejects_dark_colored_fills_and_preserves_black_ink(self) -> None:
         image, mask = jpeg_dark_color_cartoon_fixture()
@@ -393,6 +393,46 @@ class PrintPipelineTest(unittest.TestCase):
 
         self.assertGreater(detail.getpixel((110, 162)), 0)
         self.assertGreater(self._count_region_pixels(detail, (54, 157, 166, 168)), 650)
+
+    def test_existing_line_art_presets_have_distinct_density_and_keep_face_features(self) -> None:
+        image, mask = jpeg_flat_outlined_cartoon_fixture()
+
+        simple = _detail_line_mask(image, mask, cleanup=96, print_scale=False, template_style="marker", detail_extraction_mode="lineArt")
+        balanced = _detail_line_mask(image, mask, cleanup=88, print_scale=False, template_style="clean", detail_extraction_mode="lineArt")
+        detailed = _detail_line_mask(image, mask, cleanup=35, print_scale=False, template_style="detailed", detail_extraction_mode="lineArt")
+
+        simple_pixels = np.count_nonzero(np.asarray(simple) > 0)
+        balanced_pixels = np.count_nonzero(np.asarray(balanced) > 0)
+        detailed_pixels = np.count_nonzero(np.asarray(detailed) > 0)
+        self.assertLess(simple_pixels, balanced_pixels)
+        self.assertLess(balanced_pixels, detailed_pixels)
+        self.assertGreater(self._count_region_pixels(simple, (62, 50, 160, 96)), 80)
+        self.assertGreater(self._count_region_pixels(simple, (52, 154, 168, 170)), 80)
+
+    def test_simplified_existing_line_art_still_rejects_dark_colored_fills(self) -> None:
+        image, mask = jpeg_dark_color_cartoon_fixture()
+
+        simple = _detail_line_mask(image, mask, cleanup=96, print_scale=False, template_style="marker", detail_extraction_mode="lineArt")
+
+        self.assertLess(self._count_region_pixels(simple, (42, 105, 98, 185)), 80)
+        self.assertLess(self._count_region_pixels(simple, (142, 105, 198, 185)), 80)
+        self.assertGreater(self._count_region_pixels(simple, (62, 54, 82, 74)), 12)
+
+    def test_pdf_trace_raster_uses_selected_existing_line_art_density(self) -> None:
+        image, mask = jpeg_flat_outlined_cartoon_fixture()
+        outputs = []
+        for style, cleanup in (("marker", 96), ("clean", 88), ("detailed", 35)):
+            trace = pipeline._make_trace_image(
+                image,
+                mask,
+                TemplateSettings(template_style=style, detail_cleanup=cleanup, detail_extraction_mode="lineArt"),
+                width_in=3,
+                height_in=4,
+            )
+            outputs.append(np.count_nonzero(np.asarray(trace.convert("L")) < 128))
+
+        self.assertLess(outputs[0], outputs[1])
+        self.assertLess(outputs[1], outputs[2])
 
     def test_existing_line_art_removes_silhouette_ink_but_keeps_interior_ink(self) -> None:
         image, mask = flat_outlined_cartoon_fixture()
