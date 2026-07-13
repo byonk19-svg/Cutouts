@@ -48,15 +48,15 @@ const baseSettings: Settings = {
 
 {
   assertEqual(traceModeLabel("outline"), "Outside Shape Only Export", "outline mode should be described as a secondary outside shape path");
-  assertEqual(traceModeLabel("paint"), "Balanced starter lines", "paint mode should be described as balanced editable starter lines");
+  assertEqual(traceModeLabel("paint"), "Wood Template starter lines", "paint mode should be described as the recommended wood-template path");
   assert(traceModeHelp("paint").includes("first draft"), "paint mode copy should set expectation that starter lines are the editable first draft");
   assert(opensEditorWithReference("paint"), "starter detail mode should open the editor so rough-line guidance is visible");
   assert(!opensEditorWithReference("outline"), "outside-shape-only mode should stay in preview instead of opening the detail editor");
-  assertEqual(traceModeLabel("marker"), "Simple starter lines", "marker mode should be the simple preset");
-  assertEqual(traceModeLabel("extra"), "Detailed starter lines", "extra mode should be the detailed preset");
+  assertEqual(traceModeLabel("marker"), "Minimal starter lines", "marker mode should be the minimal preset");
+  assertEqual(traceModeLabel("extra"), "Faithful Artwork starter lines", "extra mode should be the faithful preset");
   assert(
-    traceModeHelp("marker").includes("fewer lines"),
-    "simple preset copy should set expectation that artwork is simplified"
+    traceModeHelp("marker").includes("may also remove useful paint boundaries"),
+    "minimal preset copy should disclose that useful boundaries can be lost"
   );
   assert(!startsWithBlankManualLayer("marker"), "simple auto detail should keep generated suggestions as the editable starting layer");
 }
@@ -66,8 +66,10 @@ const baseSettings: Settings = {
   const balanced = detailPresetSettings("balanced", baseSettings);
   const detailed = detailPresetSettings("detailed", baseSettings);
 
-  assertEqual(detailPresetLabel("balanced"), "Balanced", "balanced preset should have a plain user label");
-  assertEqual(detailPresetHelp("simple"), "Wood template - fewer lines.", "simple preset should describe simplified transfer output");
+  assertEqual(detailPresetLabel("simple"), "Minimal - Experimental", "simple preset should disclose its experimental status");
+  assertEqual(detailPresetLabel("balanced"), "Wood Template - Recommended", "balanced preset should be the recommended product path");
+  assertEqual(detailPresetLabel("detailed"), "Faithful Artwork", "detailed preset should describe faithful source output");
+  assertEqual(detailPresetHelp("simple"), "Removes many minor lines and may also remove useful paint boundaries.", "minimal helper should disclose the risk of losing useful boundaries");
   assertEqual(detailPresetHelp("balanced"), "Recommended - key details.", "balanced preset should identify the recommended density");
   assertEqual(detailPresetHelp("detailed"), "Faithful artwork - most lines.", "detailed preset should describe faithful source output");
   assertEqual(simple.templateStyle, "marker", "simple preset should use the strongest-feature backend style");

@@ -162,7 +162,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
 
   await moreTools.locator("summary").click();
   const traceStyleChoices = page.getByLabel("Trace style");
-  await expect(traceStyleChoices.getByRole("button", { name: /Balanced/ })).toHaveClass(/selected/);
+  await expect(traceStyleChoices.getByRole("button", { name: "Wood Template - Recommended" })).toHaveClass(/selected/);
   await primaryControls.getByRole("button", { name: "Add Missing Line" }).click();
   await expect(page.getByLabel("Clean Lines instruction")).toContainText("Draw only the missing feature");
   await expect(page.getByLabel("Brush size")).toHaveValue("normal");
@@ -493,9 +493,9 @@ test("existing line art is reported and can be overridden from More Tools", asyn
   const balancedPixels = await canvasVisiblePixelCount(detailCanvas);
   await Promise.all([
     page.waitForResponse((response) => response.url().endsWith("/api/analyze") && response.request().method() === "POST"),
-    presetChoices.getByRole("button", { name: /Simple/ }).click()
+    presetChoices.getByRole("button", { name: "Minimal - Experimental" }).click()
   ]);
-  await expect(page.getByText("Simple starter lines Editor", { exact: true })).toBeVisible();
+  await expect(page.getByText("Minimal starter lines Editor", { exact: true })).toBeVisible();
   await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).toBeLessThan(balancedPixels);
   const simplePixels = await canvasVisiblePixelCount(detailCanvas);
   await page.waitForTimeout(250);
@@ -503,9 +503,9 @@ test("existing line art is reported and can be overridden from More Tools", asyn
 
   await Promise.all([
     page.waitForResponse((response) => response.url().endsWith("/api/analyze") && response.request().method() === "POST"),
-    presetChoices.getByRole("button", { name: /Balanced/ }).click()
+    presetChoices.getByRole("button", { name: "Wood Template - Recommended" }).click()
   ]);
-  await expect(page.getByText("Balanced starter lines Editor", { exact: true })).toBeVisible();
+  await expect(page.getByText("Wood Template starter lines Editor", { exact: true })).toBeVisible();
   await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).toBeGreaterThan(simplePixels);
   const regeneratedBalancedPixels = await canvasVisiblePixelCount(detailCanvas);
   await page.waitForTimeout(250);
@@ -513,9 +513,9 @@ test("existing line art is reported and can be overridden from More Tools", asyn
 
   await Promise.all([
     page.waitForResponse((response) => response.url().endsWith("/api/analyze") && response.request().method() === "POST"),
-    presetChoices.getByRole("button", { name: /Detailed/ }).click()
+    presetChoices.getByRole("button", { name: "Faithful Artwork" }).click()
   ]);
-  await expect(page.getByText("Detailed starter lines Editor", { exact: true })).toBeVisible();
+  await expect(page.getByText("Faithful Artwork starter lines Editor", { exact: true })).toBeVisible();
   await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).not.toBe(regeneratedBalancedPixels);
   await page.waitForTimeout(250);
   await page.locator(".template-editor").screenshot({ path: "output/screenshots/latest/line-art-presets/detailed.png", animations: "disabled" });
@@ -527,8 +527,8 @@ test("existing line art is reported and can be overridden from More Tools", asyn
     expect(dialog.message()).toContain("replace your edited starter-line cleanup");
     await dialog.dismiss();
   });
-  await presetChoices.getByRole("button", { name: /Balanced/ }).click();
-  await expect(presetChoices.getByRole("button", { name: /Detailed/ })).toHaveClass(/selected/);
+  await presetChoices.getByRole("button", { name: "Wood Template - Recommended" }).click();
+  await expect(presetChoices.getByRole("button", { name: "Faithful Artwork" })).toHaveClass(/selected/);
 
   const imageType = moreTools.getByLabel("Image type");
   await expect(imageType.getByRole("button", { name: "Auto" })).toHaveClass(/selected/);

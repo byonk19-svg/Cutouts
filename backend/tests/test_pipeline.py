@@ -408,6 +408,7 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertLess(balanced_pixels, detailed_pixels)
         self.assertGreater(self._count_region_pixels(simple, (62, 50, 160, 96)), 80)
         self.assertGreater(self._count_region_pixels(simple, (52, 154, 168, 170)), 80)
+        self.assertGreater(self._count_region_pixels(simple, (48, 190, 172, 208)), 45)
 
     def test_simplified_existing_line_art_still_rejects_dark_colored_fills(self) -> None:
         image, mask = jpeg_dark_color_cartoon_fixture()
@@ -433,6 +434,24 @@ class PrintPipelineTest(unittest.TestCase):
 
         self.assertLess(outputs[0], outputs[1])
         self.assertLess(outputs[1], outputs[2])
+
+    def test_print_existing_line_art_uses_antialiased_detail_edges(self) -> None:
+        image, mask = jpeg_flat_outlined_cartoon_fixture()
+
+        _composed, _outer, detail = pipeline._line_art_layers(
+            image.resize((660, 780), Image.Resampling.LANCZOS),
+            mask.resize((660, 780), Image.Resampling.NEAREST),
+            True,
+            outer_line_width=9,
+            detail_line_width=5,
+            detail_cleanup=88,
+            template_style="clean",
+            print_scale=True,
+            detail_extraction_mode="lineArt",
+        )
+        alpha = np.asarray(detail.getchannel("A"))
+
+        self.assertGreater(np.count_nonzero((alpha > 0) & (alpha < 255)), 100)
 
     def test_existing_line_art_removes_silhouette_ink_but_keeps_interior_ink(self) -> None:
         image, mask = flat_outlined_cartoon_fixture()

@@ -879,6 +879,8 @@ def _line_art_layers(
         )
         if detail_line_width > 1:
             detail_mask = detail_mask.filter(ImageFilter.MaxFilter(_odd_filter_size(detail_line_width)))
+        if print_scale and detail_extraction_mode == "lineArt":
+            detail_mask = _antialias_line_art_mask(detail_mask)
         detail = _transparent_line_layer(detail_mask)
 
     return _compose_line_layers(outer, detail), outer, detail
@@ -888,6 +890,23 @@ def _transparent_line_layer(mask: Image.Image) -> Image.Image:
     layer = Image.new("RGBA", mask.size, BLACK_LINE_COLOR)
     layer.putalpha(mask.convert("L"))
     return layer
+
+
+def _antialias_line_art_mask(mask: Image.Image) -> Image.Image:
+    source = (np.asarray(mask.convert("L")) > 127).astype(np.uint8) * 255
+    contours, hierarchy = cv2.findContours(source, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+    if not contours or hierarchy is None:
+        return mask.convert("L")
+    scale = 2
+    rendered = np.zeros((mask.height * scale, mask.width * scale), dtype=np.uint8)
+    hierarchy_rows = hierarchy[0]
+    for index, contour in enumerate(contours):
+        epsilon = max(0.6, cv2.arcLength(contour, True) * 0.0008)
+        simplified = cv2.approxPolyDP(contour, epsilon, True) * scale
+        color = 255 if hierarchy_rows[index][3] < 0 else 0
+        cv2.drawContours(rendered, [simplified], -1, color, thickness=cv2.FILLED, lineType=cv2.LINE_AA)
+    antialiased = cv2.resize(rendered, mask.size, interpolation=cv2.INTER_LANCZOS4)
+    return Image.fromarray(antialiased, mode="L")
 
 
 def _compose_line_layers(outer: Image.Image, detail: Image.Image) -> Image.Image:
@@ -1023,7 +1042,7 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
 
 
 def _existing_line_art_detail_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
-    work_image, work_mask, original_size = _detail_work_image(image, mask)
+    work_image, work_mask, original_size = _detail_work_image(image, mask, max_work_edge=1800 if print_scale else 1400)
     rgb = np.asarray(work_image.convert("RGB"), dtype=np.uint8)
     rgb = cv2.medianBlur(rgb, 3)
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
@@ -1040,12 +1059,12 @@ def _existing_line_art_detail_mask(image: Image.Image, mask: Image.Image, cleanu
     min_area = 8 + round((cleanup / 100) * (28 if print_scale else 12))
     detail = _remove_small_components(detail, min_area)
     if detail.size != original_size:
-        detail = detail.resize(original_size, Image.Resampling.NEAREST)
+        detail = detail.resize(original_size, Image.Resampling.LANCZOS if print_scale else Image.Resampling.NEAREST)
     return detail
 
 
 def _simplify_existing_line_art_detail_mask(detail: Image.Image, mask: Image.Image, level: str) -> Image.Image:
-    ink = (np.asarray(detail.convert("L")) > 0).astype(np.uint8) * 255
+    ink = (np.asarray(detail.convert("L")) > 127).astype(np.uint8) * 255
     if not np.any(ink):
         return Image.new("L", detail.size, 0)
 
@@ -1055,6 +1074,11 @@ def _simplify_existing_line_art_detail_mask(detail: Image.Image, mask: Image.Ima
     perimeter_radius = max(3, round(min(subject_width, subject_height) * (0.024 if level == "simple" else 0.016)))
     perimeter_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (perimeter_radius * 2 + 1, perimeter_radius * 2 + 1))
     interior = cv2.erode(subject.astype(np.uint8) * 255, perimeter_kernel) > 0
+    protected_region_boundaries = (
+        _major_paint_region_boundary_skeleton(ink, subject, interior)
+        if level == "simple"
+        else np.zeros_like(ink)
+    )
     ink = np.where(interior, ink, 0).astype(np.uint8)
 
     # Normalize thick source strokes to one centerline before deciding which
@@ -1087,9 +1111,34 @@ def _simplify_existing_line_art_detail_mask(detail: Image.Image, mask: Image.Ima
             retained[labels == label] = 255
 
     retained = cv2.bitwise_or(retained, protected_head_features)
+    retained = cv2.bitwise_or(retained, protected_region_boundaries)
     if level == "balanced":
         retained = cv2.dilate(retained, np.ones((3, 3), dtype=np.uint8), iterations=1)
     return Image.fromarray(retained, mode="L")
+
+
+def _major_paint_region_boundary_skeleton(
+    ink: np.ndarray,
+    subject: np.ndarray,
+    interior: np.ndarray,
+) -> np.ndarray:
+    open_regions = subject & (ink == 0)
+    labels, stats = _connected_components(open_regions)
+    subject_area = max(1, int(np.count_nonzero(subject)))
+    adjacency_kernel = np.ones((3, 3), dtype=np.uint8)
+    candidates = [
+        (stats[label, cv2.CC_STAT_AREA], label)
+        for label in range(1, len(stats))
+        if subject_area * 0.025 <= stats[label, cv2.CC_STAT_AREA] <= subject_area * 0.5
+    ]
+    adjacency_count = np.zeros_like(ink, dtype=np.uint8)
+    for _area, label in sorted(candidates, reverse=True)[:8]:
+        region = (labels == label).astype(np.uint8) * 255
+        adjacency_count += (cv2.dilate(region, adjacency_kernel, iterations=1) > 0).astype(np.uint8)
+    shared_boundary = (adjacency_count >= 2) & (ink > 0) & interior
+    if np.count_nonzero(shared_boundary) < 8:
+        return np.zeros_like(ink)
+    return _morphological_skeleton(shared_boundary.astype(np.uint8) * 255)
 
 
 def _protected_head_feature_skeleton(
@@ -1282,12 +1331,16 @@ def _head_feature_boost_mask(image: Image.Image, mask: Image.Image, cleanup: int
     return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 
-def _detail_work_image(image: Image.Image, mask: Image.Image) -> tuple[Image.Image, Image.Image, tuple[int, int]]:
+def _detail_work_image(
+    image: Image.Image,
+    mask: Image.Image,
+    max_work_edge: int = 1400,
+) -> tuple[Image.Image, Image.Image, tuple[int, int]]:
     original_size = image.size
     max_edge = max(original_size)
-    if max_edge <= 1400:
+    if max_edge <= max_work_edge:
         return image, mask, original_size
-    scale = 1400 / max_edge
+    scale = max_work_edge / max_edge
     size = (max(1, round(original_size[0] * scale)), max(1, round(original_size[1] * scale)))
     return image.resize(size, Image.Resampling.LANCZOS), mask.resize(size, Image.Resampling.NEAREST), original_size
 

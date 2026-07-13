@@ -493,7 +493,7 @@ function App() {
       };
       payload.append("image", image);
       payload.append("settings", JSON.stringify(pdfSettings));
-      const editedDetail = traceStudioOpen ? null : currentDetailDataUrl();
+      const editedDetail = traceStudioOpen || editedDetailDataUrl === null ? null : currentDetailDataUrl();
       if (editedDetail) payload.append("editedDetail", editedDetail);
       const response = await fetch("/api/export", { method: "POST", body: payload });
       if (!response.ok) {
@@ -1655,22 +1655,9 @@ function App() {
               <span className="choice-label">Tracing method</span>
               <button className={traceMode === "paint" ? "choice selected recommended-choice" : "choice recommended-choice"} onClick={() => applyTraceMode("paint")}>
                 <span className="choice-kicker">Recommended</span>
-                <strong>Balanced Auto Starter</strong>
+                <strong>Wood Template - Recommended</strong>
                 <small>Generate editable starter details first, then delete bad lines and add only missing important features.</small>
               </button>
-              <div className="detail-preset-group" aria-label="Detail strength">
-                <span className="choice-label">Detail strength</span>
-                {(["simple", "balanced", "detailed"] as DetailPreset[]).map((preset) => (
-                  <button
-                    key={preset}
-                    className={selectedDetailPreset === preset ? "choice selected" : "choice"}
-                    onClick={() => applyDetailPreset(preset)}
-                  >
-                    <strong>{detailPresetLabel(preset)}</strong>
-                    <small>{detailPresetHelp(preset)}</small>
-                  </button>
-                ))}
-              </div>
               <details className="auto-starter-card" open={autoStarterOpen} onToggle={(event) => setAutoStarterOpen(event.currentTarget.open)}>
                 <summary>
                   <span>
@@ -1794,7 +1781,7 @@ function App() {
                     <div className="clean-more-tools-content">
                   {cleanStepActive ? (
                     <div className="choice-group clean-preset-tools" aria-label="Trace style">
-                      <span className="choice-label">Starter presets and alternate modes</span>
+                      <span className="choice-label">Detail modes</span>
                       <div className="detail-preset-group" aria-label="Detail strength">
                         {(["simple", "balanced", "detailed"] as DetailPreset[]).map((preset) => (
                           <button key={preset} className={selectedDetailPreset === preset ? "choice selected" : "choice"} onClick={() => applyDetailPreset(preset)}>

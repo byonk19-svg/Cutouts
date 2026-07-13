@@ -43,13 +43,13 @@ export function detailPresetSettings(preset: DetailPreset, current: Settings): S
 }
 
 export function detailPresetLabel(preset: DetailPreset) {
-  if (preset === "simple") return "Simple";
-  if (preset === "detailed") return "Detailed";
-  return "Balanced";
+  if (preset === "simple") return "Minimal - Experimental";
+  if (preset === "detailed") return "Faithful Artwork";
+  return "Wood Template - Recommended";
 }
 
 export function detailPresetHelp(preset: DetailPreset) {
-  if (preset === "simple") return "Wood template - fewer lines.";
+  if (preset === "simple") return "Removes many minor lines and may also remove useful paint boundaries.";
   if (preset === "detailed") return "Faithful artwork - most lines.";
   return "Recommended - key details.";
 }
@@ -95,9 +95,9 @@ export function traceModeSettings(mode: TraceMode, current: Settings): Settings 
 export function traceModeLabel(mode: TraceMode) {
   if (mode === "outline") return "Outside Shape Only Export";
   if (mode === "manual") return "Blank Trace Studio";
-  if (mode === "marker") return "Simple starter lines";
-  if (mode === "extra") return "Detailed starter lines";
-  return "Balanced starter lines";
+  if (mode === "marker") return "Minimal starter lines";
+  if (mode === "extra") return "Faithful Artwork starter lines";
+  return "Wood Template starter lines";
 }
 
 export function traceModeHelp(mode: TraceMode) {
