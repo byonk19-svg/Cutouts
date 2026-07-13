@@ -420,6 +420,19 @@ test("guided workflow remains focused and responsive through Coraline acceptance
   await expect(page.getByLabel("More Tools")).not.toHaveAttribute("open", "");
   await page.setViewportSize({ width: 1440, height: 900 });
   await expectCleanCanvasDominance(page, cleanWorkspace);
+  await expectTraceFit(page);
+
+  const tracePlane = page.locator(".template-canvas-plane");
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+  await page.getByLabel("Template editor tools").getByRole("button", { name: "Zoom in" }).click();
+  const userZoomTransform = await tracePlane.evaluate((element) => getComputedStyle(element).transform);
+  await primaryControls.getByRole("button", { name: "Show Original" }).click();
+  await expect.poll(() => tracePlane.evaluate((element) => getComputedStyle(element).transform)).toBe(userZoomTransform);
+  await primaryControls.getByRole("button", { name: "Fit" }).click();
+  await expect.poll(() => tracePlane.evaluate((element) => getComputedStyle(element).transform)).not.toBe(userZoomTransform);
+  await expectTraceFit(page);
+  await moreTools.locator("summary").click();
 
   const detailCanvas = page.getByLabel("Editable interior detail lines");
   const fixtureDataUrl = `data:image/png;base64,${readFileSync("backend/tests/fixtures/coraline/coraline-detail-layer.png").toString("base64")}`;

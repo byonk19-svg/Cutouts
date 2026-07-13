@@ -18,6 +18,10 @@ export type TraceFitOptions = {
   targetFill?: number;
 };
 
+export function shouldAutoFitViewport(state: { pending: boolean; userModified: boolean }) {
+  return state.pending && !state.userModified;
+}
+
 export const DEFAULT_TRACE_VIEWPORT: TraceViewport = {
   zoom: 1,
   panX: 0,

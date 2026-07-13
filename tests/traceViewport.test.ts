@@ -4,8 +4,10 @@ import {
   centerBoundsInViewport,
   fitBoundsToViewport,
   fittedTraceSize,
+  mergeTraceBounds,
   panViewport,
   screenToTracePoint,
+  shouldAutoFitViewport,
   zoomViewport
 } from "../src/traceViewport.ts";
 
@@ -140,6 +142,25 @@ function occupiedHeightRatio(
 }
 
 {
+  const bounds = { left: 40, top: 220, right: 1160, bottom: 620 };
+  const canvasSize = { width: 1200, height: 800 };
+  const viewportSize = { width: 700, height: 520 };
+  const viewport = fitBoundsToViewport(bounds, canvasSize, viewportSize, { paddingPx: 32, targetFill: 0.8 });
+  const center = screenToTracePoint(
+    { x: viewportSize.width / 2, y: viewportSize.height / 2 },
+    viewport,
+    canvasSize,
+    viewportSize
+  );
+  const fitted = fittedTraceSize(canvasSize, viewportSize);
+  const occupiedWidth = ((bounds.right - bounds.left) / canvasSize.width) * fitted.width * viewport.zoom;
+
+  assertEqual(Math.round(center.x), 600, "wide content should remain horizontally centered");
+  assertEqual(Math.round(center.y), 420, "wide content should remain vertically centered");
+  assert(occupiedWidth <= viewportSize.width * 0.8 + 1, "wide content should fit without horizontal clipping");
+}
+
+{
   const fullCanvasFit = fitBoundsToViewport(
     { left: 0, top: 0, right: 1000, bottom: 1000 },
     { width: 1000, height: 1000 },
@@ -154,6 +175,25 @@ function occupiedHeightRatio(
   );
 
   assert(cutlineFit.zoom > fullCanvasFit.zoom, "fit should use content bounds instead of full canvas bounds");
+}
+
+{
+  const merged = mergeTraceBounds([
+    { left: 240, top: 80, right: 560, bottom: 1120 },
+    { left: 180, top: 210, right: 620, bottom: 980 },
+    { left: 150, top: 140, right: 650, bottom: 1040 }
+  ]);
+
+  assertEqual(merged?.left, 150, "merged fit should include manual strokes left of the cutline");
+  assertEqual(merged?.top, 80, "merged fit should include the cutline top");
+  assertEqual(merged?.right, 650, "merged fit should include manual strokes right of starter lines");
+  assertEqual(merged?.bottom, 1120, "merged fit should include the cutline bottom");
+}
+
+{
+  assert(shouldAutoFitViewport({ pending: true, userModified: false }), "pending default viewport should auto-fit");
+  assert(!shouldAutoFitViewport({ pending: true, userModified: true }), "user-modified viewport must not be overwritten");
+  assert(!shouldAutoFitViewport({ pending: false, userModified: false }), "ordinary renders should not trigger fitting");
 }
 
 {

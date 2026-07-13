@@ -75,6 +75,7 @@ import {
   mergeTraceBounds,
   panViewport,
   screenToTracePoint,
+  shouldAutoFitViewport,
   zoomViewport,
   type TraceBounds,
   type TraceViewport
@@ -149,6 +150,9 @@ function App() {
   const [editableDetailLinesPresent, setEditableDetailLinesPresent] = useState(false);
   const [traceViewport, setTraceViewport] = useState<TraceViewport>(DEFAULT_TRACE_VIEWPORT);
   const [cutlineBounds, setCutlineBounds] = useState<TraceBounds | null>(null);
+  const [cutlineBoundsResolved, setCutlineBoundsResolved] = useState(false);
+  const [detailLineBounds, setDetailLineBounds] = useState<TraceBounds | null>(null);
+  const [detailLineBoundsResolved, setDetailLineBoundsResolved] = useState(false);
   const [selectedStrokeId, setSelectedStrokeId] = useState<string | null>(null);
   const [dimUnselectedStrokes, setDimUnselectedStrokes] = useState(false);
   const [selectionFeedback, setSelectionFeedback] = useState("");
@@ -192,6 +196,8 @@ function App() {
   const strokeDragRef = useRef<StrokeDragState | null>(null);
   const strokeIdRef = useRef(0);
   const pendingContentFitRef = useRef(false);
+  const viewportUserModifiedRef = useRef(false);
+  const traceContentBoundsRef = useRef<TraceBounds | null>(null);
   const reviewedLineworkRef = useRef<{
     manualStrokes: TraceStroke[];
     editedDetailDataUrl: string | null;
@@ -288,6 +294,10 @@ function App() {
     setSelectionFeedback("");
     setTraceViewport(DEFAULT_TRACE_VIEWPORT);
     setCutlineBounds(null);
+    setCutlineBoundsResolved(false);
+    setDetailLineBounds(null);
+    setDetailLineBoundsResolved(false);
+    viewportUserModifiedRef.current = false;
     setPrintPreview(false);
     setEditableDetailLinesPresent(false);
   }
@@ -346,6 +356,8 @@ function App() {
     if (!analysis || !editorOpen) return;
     if (traceStudioOpen) {
       setEditableDetailLinesPresent(false);
+      setDetailLineBounds(null);
+      setDetailLineBoundsResolved(true);
       renderManualTraceLayer(manualStrokes);
       return;
     }
@@ -355,13 +367,15 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     setCutlineBounds(null);
+    setCutlineBoundsResolved(false);
     if (!analysis) return;
     void imageContentBounds(analysis.outerLinePngDataUrl, {
       width: analysis.previewWidthPx,
       height: analysis.previewHeightPx
     }).then((bounds) => {
       if (!cancelled) {
-        setCutlineBounds(bounds ?? fullCanvasBounds({ width: analysis.previewWidthPx, height: analysis.previewHeightPx }));
+        setCutlineBounds(bounds);
+        setCutlineBoundsResolved(true);
       }
     });
     return () => {
@@ -370,11 +384,32 @@ function App() {
   }, [analysis]);
 
   useEffect(() => {
-    if (!pendingContentFitRef.current || !analysis || !editorOpen || !cutlineBounds) return;
+    if (!shouldAutoFitViewport({ pending: pendingContentFitRef.current, userModified: viewportUserModifiedRef.current })) return;
+    if (!analysis || !editorOpen || !cutlineBoundsResolved || !detailLineBoundsResolved) return;
     if (fitTraceViewportToContent()) {
       pendingContentFitRef.current = false;
     }
-  }, [analysis, editorOpen, traceStudioOpen, cutlineBounds]);
+  }, [analysis, editorOpen, traceStudioOpen, cutlineBounds, cutlineBoundsResolved, detailLineBounds, detailLineBoundsResolved, manualStrokes]);
+
+  useEffect(() => {
+    const viewport = editorViewportRef.current;
+    if (!viewport || !analysis || !editorOpen || !cutlineBoundsResolved || !detailLineBoundsResolved) return;
+    let previousWidth = 0;
+    let previousHeight = 0;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect || rect.width <= 1 || rect.height <= 1 || viewportUserModifiedRef.current) return;
+      const meaningfullyChanged = Math.abs(rect.width - previousWidth) >= 2 || Math.abs(rect.height - previousHeight) >= 2;
+      previousWidth = rect.width;
+      previousHeight = rect.height;
+      if (!meaningfullyChanged) return;
+      requestAnimationFrame(() => {
+        if (!viewportUserModifiedRef.current) fitTraceViewportToContent();
+      });
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [analysis, editorOpen, cutlineBoundsResolved, detailLineBoundsResolved]);
 
   useEffect(() => {
     if (selectedStrokeId && !manualStrokes.some((stroke) => stroke.id === selectedStrokeId)) {
@@ -681,6 +716,7 @@ function App() {
     setPrintPreview(false);
     setTraceViewport(project.traceViewport);
     pendingContentFitRef.current = isDefaultTraceViewport(project.traceViewport);
+    viewportUserModifiedRef.current = !isDefaultTraceViewport(project.traceViewport);
     setSelectedStrokeId(null);
     setDimUnselectedStrokes(false);
     setSelectionFeedback("");
@@ -889,6 +925,7 @@ function App() {
     clearRemovalPreview();
     const canvas = detailCanvasRef.current;
     if (!canvas) return;
+    setDetailLineBoundsResolved(false);
     const image = new Image();
     image.onload = () => {
       clearRemovalPreview();
@@ -898,7 +935,14 @@ function App() {
       if (!context) return;
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(image, 0, 0);
-      setEditableDetailLinesPresent(canvasHasVisibleInk(canvas));
+      const bounds = canvasContentBounds(canvas);
+      setEditableDetailLinesPresent(bounds !== null);
+      setDetailLineBounds(bounds);
+      setDetailLineBoundsResolved(true);
+    };
+    image.onerror = () => {
+      setDetailLineBounds(null);
+      setDetailLineBoundsResolved(true);
     };
     image.src = src;
   }
@@ -1075,6 +1119,8 @@ function App() {
       const previous = panStartRef.current;
       if (!previous) return;
       const current = { x: event.clientX, y: event.clientY };
+      viewportUserModifiedRef.current = true;
+      pendingContentFitRef.current = false;
       setTraceViewport((viewport) => panViewport(viewport, { x: current.x - previous.x, y: current.y - previous.y }));
       panStartRef.current = current;
       return;
@@ -1146,7 +1192,9 @@ function App() {
       }
       safelyReleasePointerCapture(event.currentTarget, event.pointerId);
       setEditedDetailDataUrl(event.currentTarget.toDataURL("image/png"));
-      setEditableDetailLinesPresent(canvasHasVisibleInk(event.currentTarget));
+      const bounds = canvasContentBounds(event.currentTarget);
+      setEditableDetailLinesPresent(bounds !== null);
+      setDetailLineBounds(bounds);
     }
     drawingRef.current = false;
     lastPointRef.current = null;
@@ -1228,7 +1276,9 @@ function App() {
     saveHistorySnapshot();
     context.putImageData(imageData, 0, 0);
     setEditedDetailDataUrl(canvas.toDataURL("image/png"));
-    setEditableDetailLinesPresent(canvasHasVisibleInk(canvas));
+    const bounds = canvasContentBounds(canvas);
+    setEditableDetailLinesPresent(bounds !== null);
+    setDetailLineBounds(bounds);
     clearRemovalPreview();
   }
 
@@ -1286,7 +1336,9 @@ function App() {
     saveHistorySnapshot();
     context.putImageData(imageData, 0, 0);
     setEditedDetailDataUrl(canvas.toDataURL("image/png"));
-    setEditableDetailLinesPresent(canvasHasVisibleInk(canvas));
+    const bounds = canvasContentBounds(canvas);
+    setEditableDetailLinesPresent(bounds !== null);
+    setDetailLineBounds(bounds);
     clearRemovalPreview();
   }
 
@@ -1382,6 +1434,8 @@ function App() {
   }
 
   function changeZoom(nextZoom: number) {
+    viewportUserModifiedRef.current = true;
+    pendingContentFitRef.current = false;
     const viewport = editorViewportRef.current;
     const focus = viewport
       ? { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 }
@@ -1393,12 +1447,16 @@ function App() {
   }
 
   function resetZoom() {
+    viewportUserModifiedRef.current = false;
+    pendingContentFitRef.current = false;
     if (!fitTraceViewportToContent()) {
       setTraceViewport(DEFAULT_TRACE_VIEWPORT);
     }
   }
 
   function hundredPercentZoom() {
+    viewportUserModifiedRef.current = true;
+    pendingContentFitRef.current = false;
     const viewport = editorViewportRef.current;
     if (!viewport || !analysis) {
       setTraceViewport({ zoom: 1, panX: 0, panY: 0 });
@@ -1429,12 +1487,16 @@ function App() {
   }
 
   function traceContentBounds() {
-    if (!analysis) return fullCanvasBounds({ width: 1, height: 1 });
-    const canvasBounds = fullCanvasBounds({ width: analysis.previewWidthPx, height: analysis.previewHeightPx });
-    const strokeBounds = boundsFromTraceStrokes(manualStrokes);
-    if (strokeBounds) return mergeTraceBounds([cutlineBounds, strokeBounds]) ?? strokeBounds;
-    return cutlineBounds ?? canvasBounds;
+    return traceContentBoundsRef.current ?? fullCanvasBounds({
+      width: analysis?.previewWidthPx ?? 1,
+      height: analysis?.previewHeightPx ?? 1
+    });
   }
+
+  traceContentBoundsRef.current = analysis
+    ? mergeTraceBounds([cutlineBounds, detailLineBounds, boundsFromTraceStrokes(manualStrokes)])
+      ?? fullCanvasBounds({ width: analysis.previewWidthPx, height: analysis.previewHeightPx })
+    : null;
 
   return (
     <main className="app-shell">
@@ -2800,16 +2862,30 @@ function defaultEditorToolForTraceMode(mode: TraceMode): EditorTool {
 }
 
 function canvasHasVisibleInk(canvas: HTMLCanvasElement) {
+  return canvasContentBounds(canvas) !== null;
+}
+
+function canvasContentBounds(canvas: HTMLCanvasElement): TraceBounds | null {
   const context = canvas.getContext("2d");
-  if (!context) return false;
+  if (!context || canvas.width === 0 || canvas.height === 0) return null;
   const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  let left = canvas.width;
+  let top = canvas.height;
+  let right = -1;
+  let bottom = -1;
   for (let index = 0; index < pixels.length; index += 4) {
     const alpha = pixels[index + 3];
     if (alpha > 8 && (pixels[index] < 245 || pixels[index + 1] < 245 || pixels[index + 2] < 245)) {
-      return true;
+      const pixelIndex = index / 4;
+      const x = pixelIndex % canvas.width;
+      const y = Math.floor(pixelIndex / canvas.width);
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
     }
   }
-  return false;
+  return right >= left && bottom >= top ? { left, top, right: right + 1, bottom: bottom + 1 } : null;
 }
 
 function isGenericPaintLabel(entry: PaintGuideEntry) {
