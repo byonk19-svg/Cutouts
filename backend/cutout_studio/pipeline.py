@@ -1017,10 +1017,18 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
 
 def _existing_line_art_detail_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
     work_image, work_mask, original_size = _detail_work_image(image, mask)
-    flattened = _flatten_detail_work_image(work_image, cleanup, "clean")
-    gray = np.asarray(flattened.convert("L"), dtype=np.uint8)
+    rgb = np.asarray(work_image.convert("RGB"), dtype=np.uint8)
+    rgb = cv2.medianBlur(rgb, 3)
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
+    lightness = lab[:, :, 0].astype(np.int16)
+    a = lab[:, :, 1].astype(np.float32) - 128
+    b = lab[:, :, 2].astype(np.float32) - 128
+    chroma = np.hypot(a, b)
     interior_arr = np.asarray(_erode_mask(work_mask, 15)) > 0
-    detail_arr = (gray < 105) & interior_arr
+    neutral_dark_ink = (lightness < 115) & (chroma < 24)
+    local_lightness = cv2.GaussianBlur(lightness.astype(np.float32), (0, 0), sigmaX=2.2, sigmaY=2.2)
+    locally_dark_stroke = ((local_lightness - lightness) > 22) & (lightness < 150)
+    detail_arr = (neutral_dark_ink | locally_dark_stroke) & interior_arr
     detail = Image.fromarray((detail_arr.astype(np.uint8) * 255), mode="L")
     min_area = 8 + round((cleanup / 100) * (28 if print_scale else 12))
     detail = _remove_small_components(detail, min_area)

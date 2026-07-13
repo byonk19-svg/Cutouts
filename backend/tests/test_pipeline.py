@@ -294,6 +294,23 @@ def jpeg_flat_outlined_cartoon_fixture() -> tuple[Image.Image, Image.Image]:
     return Image.open(encoded).convert("RGB"), mask
 
 
+def jpeg_dark_color_cartoon_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGB", (240, 240), "white")
+    mask = Image.new("L", image.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((20, 20, 220, 220), radius=24, fill=255)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((20, 20, 220, 220), radius=24, fill=(200, 35, 35), outline=(8, 8, 8), width=6)
+    draw.pieslice((20, 20, 220, 220), start=-90, end=90, fill=(20, 125, 25))
+    draw.line((120, 24, 120, 216), fill=(8, 8, 8), width=7)
+    draw.ellipse((62, 54, 82, 74), fill=(6, 6, 6))
+    draw.ellipse((158, 54, 178, 74), fill=(6, 6, 6))
+    draw.rounded_rectangle((20, 20, 220, 220), radius=24, outline=(8, 8, 8), width=6)
+    encoded = io.BytesIO()
+    image.save(encoded, format="JPEG", quality=84, subsampling=2)
+    encoded.seek(0)
+    return Image.open(encoded).convert("RGB"), mask
+
+
 class PrintPipelineTest(unittest.TestCase):
     def test_detail_extraction_mode_is_validated_from_settings(self) -> None:
         self.assertEqual(TemplateSettings.from_mapping({"detailExtractionMode": "auto"}).detail_extraction_mode, "auto")
@@ -356,6 +373,18 @@ class PrintPipelineTest(unittest.TestCase):
         detail = _detail_line_mask(image, mask, cleanup=88, print_scale=False, template_style="clean")
         self.assertGreater(detail.getpixel((110, 162)), 0)
         self.assertGreater(self._count_region_pixels(detail, (54, 157, 166, 168)), 650)
+
+    def test_existing_line_art_rejects_dark_colored_fills_and_preserves_black_ink(self) -> None:
+        image, mask = jpeg_dark_color_cartoon_fixture()
+
+        self.assertTrue(pipeline._looks_like_flat_line_art(image, mask))
+        detail = pipeline._existing_line_art_detail_mask(image, mask, cleanup=88, print_scale=False)
+
+        self.assertLess(self._count_region_pixels(detail, (42, 105, 98, 185)), 80)
+        self.assertLess(self._count_region_pixels(detail, (142, 105, 198, 185)), 80)
+        self.assertGreater(self._count_region_pixels(detail, (116, 45, 125, 195)), 700)
+        self.assertGreater(self._count_region_pixels(detail, (62, 54, 82, 74)), 220)
+        self.assertGreater(detail.getpixel((120, 130)), 0)
 
     def test_existing_line_art_preserves_the_center_of_a_thick_source_stroke(self) -> None:
         image, mask = flat_outlined_cartoon_fixture()
