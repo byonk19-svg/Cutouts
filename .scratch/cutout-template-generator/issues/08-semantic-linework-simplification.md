@@ -10,11 +10,90 @@ The current Minimal mode is intentionally labeled experimental because it can re
 
 ## Follow-up scope
 
-- Evaluate an AI-assisted image-to-line-art stage that identifies semantic character regions before vectorization.
+- Evaluate an AI-assisted semantic boundary-selection stage, followed by deterministic cleanup and vectorization.
 - Preserve face, hair, clothing, limb, footwear, hand, fur, and accessory boundaries required for painting.
 - Remove highlights, texture, minor folds, duplicate contours, and decorative accents.
 - Keep the existing deterministic outer cutline and PDF geometry unchanged.
 - Require side-by-side source, generated linework, and rendered PDF acceptance artifacts.
+
+## Research questions
+
+Before implementation, determine:
+
+- Whether the AI stage should produce simplified raster linework, semantic region masks, labeled vector paths, or a combination of these.
+- Whether an external vision model is acceptable for cost, latency, privacy, and offline-use requirements.
+- Whether the model should generate linework directly or identify protected semantic regions that a deterministic vectorizer then converts to paths.
+- How user edits and accepted starter lines survive regeneration.
+
+## Proposed pipeline boundary
+
+The preferred architecture is:
+
+```text
+source image
+-> deterministic subject mask and outer cutline
+-> AI semantic region / important-boundary selection
+-> deterministic cleanup and vectorization
+-> editable starter-detail layer
+-> existing SVG and tiled PDF exporters
+```
+
+The AI stage must not control:
+
+- finished dimensions
+- outer cutline geometry
+- page tiling
+- calibration
+- overlap
+- PDF assembly
+
+## Evaluation set
+
+Acceptance must include at least:
+
+- one soft-shaded 3D/rendered character
+- one flat outlined JPEG cartoon
+- one transparent PNG cartoon
+- one character with dark clothing or dark colored fills
+- one character with complex hands, hair, fur, or accessories
+
+Keep these fixtures stable so future changes can be compared against the same inputs.
+
+## MVP acceptance criteria
+
+For every evaluation image:
+
+- the complete outside cutline remains unchanged
+- face, hair, clothing, limb, footwear, hand, fur, and accessory boundaries needed for painting remain recognizable
+- highlights, texture, minor folds, shading, and duplicate contours are substantially reduced
+- no major region requires manual reconstruction
+- cleanup requires only deleting or adding a small number of lines
+- the result remains editable
+- SVG and PDF contain the accepted generated linework
+- rendered PDF pages remain correctly scaled and aligned
+- source, generated linework, original-off preview, SVG, and rendered PDF artifacts are saved for human review
+
+## Triage decisions
+
+Keep this issue at `needs-triage` until the following are documented:
+
+- external API versus local model
+- cost and latency limits
+- required privacy behavior
+- expected intermediate output
+- fixed evaluation images
+- measurable human-acceptance standard
+
+After triage, split implementation into:
+
+1. AI simplification feasibility spike
+2. Semantic linework MVP
+3. Editor integration and regeneration
+4. Acceptance corpus and PDF validation
+
+## Wayfinding
+
+Open architectural and feasibility decisions are tracked in the [Semantic boundary-selection wayfinder](../../semantic-linework-wayfinder/map.md). Keep this issue at `needs-triage` until that map reaches its destination.
 
 ## Acceptance boundary
 
