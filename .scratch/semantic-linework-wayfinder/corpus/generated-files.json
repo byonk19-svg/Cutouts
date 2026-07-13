@@ -1,0 +1,41 @@
+{
+  "generator": "generate_fixtures.py",
+  "fixtures": [
+    {
+      "id": "soft-shaded-render",
+      "source": "sources/soft-shaded-render.png",
+      "format": "PNG",
+      "mode": "RGBA",
+      "width": 720,
+      "height": 960,
+      "sha256": "f2c8d0355202f7049efd37ebe03297b7104e4c7740006d83a3656db52922621e"
+    },
+    {
+      "id": "flat-outlined-cartoon",
+      "source": "sources/flat-outlined-cartoon.jpg",
+      "format": "JPEG",
+      "mode": "RGB",
+      "width": 720,
+      "height": 960,
+      "sha256": "e79f4c39265caae30ae7f1e5279eab5900f50602fe5864a4c1db10a40f24564c"
+    },
+    {
+      "id": "transparent-cartoon",
+      "source": "sources/transparent-cartoon.png",
+      "format": "PNG",
+      "mode": "RGBA",
+      "width": 720,
+      "height": 960,
+      "sha256": "5651b07816f2cc1f19b08e4bf46d2d197ced9cd0b472d8fd2c987a3f4405f65d"
+    },
+    {
+      "id": "dark-complex-cartoon",
+      "source": "sources/dark-complex-cartoon.png",
+      "format": "PNG",
+      "mode": "RGBA",
+      "width": 800,
+      "height": 960,
+      "sha256": "06a2f5ee7cc2ae18fb0a7f4010ea5abdf374f0c51b0a152d2423cecaf6234b6b"
+    }
+  ]
+}

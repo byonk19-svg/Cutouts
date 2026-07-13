@@ -1,0 +1,16 @@
+Copyright (c) 2026 Cutout Studio contributors
+
+The fixture images in the sources directory are original synthetic works made
+from geometric primitives by generate_fixtures.py. No external image, character,
+font, or stock asset is incorporated.
+
+Permission is granted, free of charge, to use, copy, modify, publish,
+distribute, sublicense, and sell copies of these fixture images and their
+derivatives for any purpose, with or without attribution.
+
+THE FIXTURE IMAGES ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE FIXTURE IMAGES OR THEIR USE.
