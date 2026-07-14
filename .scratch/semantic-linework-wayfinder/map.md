@@ -1,6 +1,6 @@
 # Semantic boundary-selection wayfinder
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 **Label:** wayfinder:map
 
 ## Destination
@@ -20,6 +20,7 @@ Produce the decisions and evidence needed to write a safe implementation spec fo
 - [Decide product and model constraints](issues/01-product-model-constraints.md) - Keep the deterministic workflow local and make external AI optional, disclosed, provider-independent, bounded by cost/latency limits, and unable to control cutline or print geometry.
 - [Define the fixed evaluation corpus](issues/02-fixed-evaluation-corpus.md) - Use four reproducible, permissively licensed synthetic fixtures covering rendered shading, outlined JPEG, transparent PNG, dark fills, and complex character features with fixed review artifacts.
 - [Choose the semantic output contract](issues/03-semantic-output-contract.md) - Exchange validated full-source protected-region and important-boundary masks, then deterministically clip, crop, resize, clean, and vectorize them without any model-owned silhouette or export geometry.
+- [Prototype semantic boundary-selection feasibility](issues/04-feasibility-prototype.md) - Revise: the mask/export boundary worked, but local CLIPSeg missed major transfer lines on all four fixtures, so a stronger structured-vision provider must be compared before an MVP can be specified.
 
 ## Not yet specified
 

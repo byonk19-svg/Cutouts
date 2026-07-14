@@ -1,0 +1,477 @@
+{
+  "provider": "local-transformers-js",
+  "model": "Xenova/clipseg-rd64-refined",
+  "modelRevision": "924dc94f85f58739f353f94258b33bc47eae4862",
+  "modelDtype": "q4",
+  "requestVersion": "clipseg-prompts-v1",
+  "outputContractVersion": "semantic-selection-v1",
+  "modelLoadMs": 1354,
+  "prompts": [
+    {
+      "group": "protectedRegions",
+      "label": "face",
+      "text": "the character's face skin region"
+    },
+    {
+      "group": "protectedRegions",
+      "label": "hair",
+      "text": "the character's hair or hat region"
+    },
+    {
+      "group": "protectedRegions",
+      "label": "hands",
+      "text": "the character's hands and fingers"
+    },
+    {
+      "group": "protectedRegions",
+      "label": "clothing",
+      "text": "the character's main clothing region"
+    },
+    {
+      "group": "protectedRegions",
+      "label": "footwear",
+      "text": "the character's boots or shoes"
+    },
+    {
+      "group": "protectedRegions",
+      "label": "accessory",
+      "text": "the character's bag lantern or carried accessory"
+    },
+    {
+      "group": "protectedRegions",
+      "label": "fur",
+      "text": "the character's fur trim or fluffy collar"
+    },
+    {
+      "group": "protectedRegions",
+      "label": "strap",
+      "text": "the character's bag or accessory strap"
+    },
+    {
+      "group": "importantBoundaries",
+      "label": "face-edge",
+      "text": "the boundary around the face and facial features"
+    },
+    {
+      "group": "importantBoundaries",
+      "label": "hair-edge",
+      "text": "the important boundary between hair or hat and face"
+    },
+    {
+      "group": "importantBoundaries",
+      "label": "garment-seam",
+      "text": "important clothing seams openings belt and hem"
+    },
+    {
+      "group": "importantBoundaries",
+      "label": "hand-edge",
+      "text": "the boundary around hands and fingers"
+    },
+    {
+      "group": "importantBoundaries",
+      "label": "boot-edge",
+      "text": "the boundary around boots or shoes"
+    },
+    {
+      "group": "importantBoundaries",
+      "label": "accessory-edge",
+      "text": "the boundary around straps bags lanterns or accessories"
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture": "soft-shaded-render",
+      "source": "sources/soft-shaded-render.png",
+      "sourceWidthPx": 720,
+      "sourceHeightPx": 960,
+      "logitsDimensions": [
+        14,
+        352,
+        352
+      ],
+      "inferenceMs": 10101,
+      "peakRssBytes": 420810752,
+      "prompts": [
+        {
+          "group": "protectedRegions",
+          "label": "face",
+          "text": "the character's face skin region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "hair",
+          "text": "the character's hair or hat region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "hands",
+          "text": "the character's hands and fingers"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "clothing",
+          "text": "the character's main clothing region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "footwear",
+          "text": "the character's boots or shoes"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "accessory",
+          "text": "the character's bag lantern or carried accessory"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "fur",
+          "text": "the character's fur trim or fluffy collar"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "strap",
+          "text": "the character's bag or accessory strap"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "face-edge",
+          "text": "the boundary around the face and facial features"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "hair-edge",
+          "text": "the important boundary between hair or hat and face"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "garment-seam",
+          "text": "important clothing seams openings belt and hem"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "hand-edge",
+          "text": "the boundary around hands and fingers"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "boot-edge",
+          "text": "the boundary around boots or shoes"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "accessory-edge",
+          "text": "the boundary around straps bags lanterns or accessories"
+        }
+      ]
+    },
+    {
+      "fixture": "flat-outlined-cartoon",
+      "source": "sources/flat-outlined-cartoon.jpg",
+      "sourceWidthPx": 720,
+      "sourceHeightPx": 960,
+      "logitsDimensions": [
+        14,
+        352,
+        352
+      ],
+      "inferenceMs": 12289,
+      "peakRssBytes": 430968832,
+      "prompts": [
+        {
+          "group": "protectedRegions",
+          "label": "face",
+          "text": "the character's face skin region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "hair",
+          "text": "the character's hair or hat region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "hands",
+          "text": "the character's hands and fingers"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "clothing",
+          "text": "the character's main clothing region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "footwear",
+          "text": "the character's boots or shoes"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "accessory",
+          "text": "the character's bag lantern or carried accessory"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "fur",
+          "text": "the character's fur trim or fluffy collar"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "strap",
+          "text": "the character's bag or accessory strap"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "face-edge",
+          "text": "the boundary around the face and facial features"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "hair-edge",
+          "text": "the important boundary between hair or hat and face"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "garment-seam",
+          "text": "important clothing seams openings belt and hem"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "hand-edge",
+          "text": "the boundary around hands and fingers"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "boot-edge",
+          "text": "the boundary around boots or shoes"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "accessory-edge",
+          "text": "the boundary around straps bags lanterns or accessories"
+        }
+      ]
+    },
+    {
+      "fixture": "transparent-cartoon",
+      "source": "sources/transparent-cartoon.png",
+      "sourceWidthPx": 720,
+      "sourceHeightPx": 960,
+      "logitsDimensions": [
+        14,
+        352,
+        352
+      ],
+      "inferenceMs": 11914,
+      "peakRssBytes": 442167296,
+      "prompts": [
+        {
+          "group": "protectedRegions",
+          "label": "face",
+          "text": "the character's face skin region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "hair",
+          "text": "the character's hair or hat region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "hands",
+          "text": "the character's hands and fingers"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "clothing",
+          "text": "the character's main clothing region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "footwear",
+          "text": "the character's boots or shoes"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "accessory",
+          "text": "the character's bag lantern or carried accessory"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "fur",
+          "text": "the character's fur trim or fluffy collar"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "strap",
+          "text": "the character's bag or accessory strap"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "face-edge",
+          "text": "the boundary around the face and facial features"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "hair-edge",
+          "text": "the important boundary between hair or hat and face"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "garment-seam",
+          "text": "important clothing seams openings belt and hem"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "hand-edge",
+          "text": "the boundary around hands and fingers"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "boot-edge",
+          "text": "the boundary around boots or shoes"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "accessory-edge",
+          "text": "the boundary around straps bags lanterns or accessories"
+        }
+      ]
+    },
+    {
+      "fixture": "dark-complex-cartoon",
+      "source": "sources/dark-complex-cartoon.png",
+      "sourceWidthPx": 800,
+      "sourceHeightPx": 960,
+      "logitsDimensions": [
+        14,
+        352,
+        352
+      ],
+      "inferenceMs": 12723,
+      "peakRssBytes": 451678208,
+      "prompts": [
+        {
+          "group": "protectedRegions",
+          "label": "face",
+          "text": "the character's face skin region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "hair",
+          "text": "the character's hair or hat region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "hands",
+          "text": "the character's hands and fingers"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "clothing",
+          "text": "the character's main clothing region"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "footwear",
+          "text": "the character's boots or shoes"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "accessory",
+          "text": "the character's bag lantern or carried accessory"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "fur",
+          "text": "the character's fur trim or fluffy collar"
+        },
+        {
+          "group": "protectedRegions",
+          "label": "strap",
+          "text": "the character's bag or accessory strap"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "face-edge",
+          "text": "the boundary around the face and facial features"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "hair-edge",
+          "text": "the important boundary between hair or hat and face"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "garment-seam",
+          "text": "important clothing seams openings belt and hem"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "hand-edge",
+          "text": "the boundary around hands and fingers"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "boot-edge",
+          "text": "the boundary around boots or shoes"
+        },
+        {
+          "group": "importantBoundaries",
+          "label": "accessory-edge",
+          "text": "the boundary around straps bags lanterns or accessories"
+        }
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "fixture": "soft-shaded-render",
+      "source": "sources/soft-shaded-render.png",
+      "dimensions": "720x960",
+      "model": "Xenova/clipseg-rd64-refined@924dc94f85f58739f353f94258b33bc47eae4862",
+      "request": "clipseg-prompts-v1",
+      "contract": "semantic-selection-v1",
+      "latencyMs": 10101,
+      "estimatedCostUsd": 0,
+      "status": "completed",
+      "artifactPath": "semantic-linework-wayfinder/corpus/runs/clipseg-local-v1/soft-shaded-render",
+      "failureCategory": "semantic-under-selection"
+    },
+    {
+      "fixture": "flat-outlined-cartoon",
+      "source": "sources/flat-outlined-cartoon.jpg",
+      "dimensions": "720x960",
+      "model": "Xenova/clipseg-rd64-refined@924dc94f85f58739f353f94258b33bc47eae4862",
+      "request": "clipseg-prompts-v1",
+      "contract": "semantic-selection-v1",
+      "latencyMs": 12289,
+      "estimatedCostUsd": 0,
+      "status": "completed",
+      "artifactPath": "semantic-linework-wayfinder/corpus/runs/clipseg-local-v1/flat-outlined-cartoon",
+      "failureCategory": "semantic-under-selection"
+    },
+    {
+      "fixture": "transparent-cartoon",
+      "source": "sources/transparent-cartoon.png",
+      "dimensions": "720x960",
+      "model": "Xenova/clipseg-rd64-refined@924dc94f85f58739f353f94258b33bc47eae4862",
+      "request": "clipseg-prompts-v1",
+      "contract": "semantic-selection-v1",
+      "latencyMs": 11914,
+      "estimatedCostUsd": 0,
+      "status": "completed",
+      "artifactPath": "semantic-linework-wayfinder/corpus/runs/clipseg-local-v1/transparent-cartoon",
+      "failureCategory": "semantic-under-selection"
+    },
+    {
+      "fixture": "dark-complex-cartoon",
+      "source": "sources/dark-complex-cartoon.png",
+      "dimensions": "800x960",
+      "model": "Xenova/clipseg-rd64-refined@924dc94f85f58739f353f94258b33bc47eae4862",
+      "request": "clipseg-prompts-v1",
+      "contract": "semantic-selection-v1",
+      "latencyMs": 12723,
+      "estimatedCostUsd": 0,
+      "status": "completed",
+      "artifactPath": "semantic-linework-wayfinder/corpus/runs/clipseg-local-v1/dark-complex-cartoon",
+      "failureCategory": "semantic-under-selection"
+    }
+  ]
+}
