@@ -2,6 +2,62 @@ import { expect, test, type Download, type Locator, type Page } from "@playwrigh
 import { mkdirSync, readFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
+test("maker can use authored SVG ink as editable starter lines", async ({ page }) => {
+  await page.goto("/");
+  const uploadStep = page.getByLabel("Upload step");
+  const sourceInput = uploadStep.getByLabel("Source image");
+  await expect(sourceInput).toHaveAttribute("accept", /image\/svg\+xml/);
+
+  await sourceInput.setInputFiles({
+    name: "ready-line-art.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
+        <rect width="400" height="600" fill="white"/>
+        <path d="M120 560 L100 420 L130 250 Q200 150 270 250 L300 420 L280 560 Z" fill="#eaa0a0"/>
+        <circle cx="165" cy="300" r="18" fill="none" stroke="#111" stroke-width="8"/>
+        <circle cx="235" cy="300" r="18" fill="none" stroke="#111" stroke-width="8"/>
+        <path d="M150 350 Q200 380 250 350" fill="none" stroke="#111" stroke-width="8"/>
+        <path d="M200 395 L200 500 M140 500 L260 500" fill="none" stroke="#111" stroke-width="8"/>
+      </svg>
+    `)
+  });
+
+  await expect(uploadStep.getByText("SVG linework detected")).toBeVisible();
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  await expect(detailCanvas).toBeVisible();
+  await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).toBeGreaterThan(0);
+  await expect(page.getByLabel("Clean Lines workspace")).toContainText("Editable starter lines");
+  const originalDetail = await detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  const detailPoint = await waitForCanvasInkPoint(detailCanvas);
+  await detailCanvas.click({ position: await canvasLocalPoint(detailCanvas, detailPoint.x, detailPoint.y) });
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(originalDetail);
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+  await moreTools.getByRole("button", { name: "Reset details" }).click();
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(originalDetail);
+});
+
+test("SVG without dark authored ink uses the ordinary image workflow", async ({ page }) => {
+  await page.goto("/");
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "color-only.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="300" height="500" viewBox="0 0 300 500">
+        <rect width="300" height="500" fill="white"/>
+        <path d="M85 440 L70 260 Q150 90 230 260 L215 440 Z" fill="#e99b70"/>
+      </svg>
+    `)
+  });
+
+  await expect(uploadStep.getByText("SVG linework detected")).toHaveCount(0);
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+  await expect(page.getByLabel("Clean Lines workspace")).toBeVisible();
+});
+
 test("maker can complete the MVP trace, restore, paint review, and export workflow", async ({ page, request }) => {
   const sourceImage = createSmokeCharacterPng();
 
@@ -14,7 +70,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   const uploadStep = page.getByLabel("Upload step");
   await expect(uploadStep.getByLabel("Source image")).toBeAttached();
   await expect(uploadStep.getByRole("button", { name: "Generate Template" })).toBeDisabled();
-  await page.locator('input[type="file"][accept="image/png,image/jpeg"]').setInputFiles({
+  await page.locator('input[type="file"][accept*="image/png"]').setInputFiles({
     name: "mvp-smoke-character.png",
     mimeType: "image/png",
     buffer: sourceImage

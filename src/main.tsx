@@ -53,6 +53,7 @@ import {
 } from "./traceStrokes";
 import { buildTraceLineworkSvg, svgLineworkFileName } from "./traceLineworkSvg";
 import { buildTraceQualityReview } from "./traceQuality";
+import { isSvgFile, prepareSvgFastPathUpload, svgInkForPreview } from "./svgFastPath";
 import {
   DEFAULT_WORKFLOW_PROGRESS,
   completeColorReview,
@@ -176,6 +177,9 @@ function App() {
   const [history, setHistory] = useState<string[]>([]);
   const [redoHistory, setRedoHistory] = useState<string[]>([]);
   const [editedDetailDataUrl, setEditedDetailDataUrl] = useState<string | null>(null);
+  const [svgSourceInkDataUrl, setSvgSourceInkDataUrl] = useState<string | null>(null);
+  const [svgImportedDetailDataUrl, setSvgImportedDetailDataUrl] = useState<string | null>(null);
+  const [svgLineworkDetected, setSvgLineworkDetected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -449,9 +453,20 @@ function App() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to analyze image.");
       const openEditor = opensEditorWithReference(nextSettings.templateStyle);
+      const importedSvgDetail = svgSourceInkDataUrl
+        ? await svgInkForPreview({
+            sourceInkDataUrl: svgSourceInkDataUrl,
+            subjectBoundsPx: body.subjectBoundsPx,
+            previewWidthPx: body.previewWidthPx,
+            previewHeightPx: body.previewHeightPx,
+            outerLinePngDataUrl: body.outerLinePngDataUrl
+          })
+        : null;
       resetEditorState();
       setColorDetailsOpen(false);
       setAnalysis(body);
+      setEditedDetailDataUrl(importedSvgDetail);
+      setSvgImportedDetailDataUrl(importedSvgDetail);
       setWorkflowProgress({ activeStep: "clean", lineworkReviewed: false, colorsOutcome: "incomplete" });
       if (preservedManualStrokes.length > 0) setManualStrokes(preservedManualStrokes);
       setProjectPalette(seedProjectPaletteFromDetected(body.palette, []));
@@ -548,7 +563,7 @@ function App() {
 
   async function handleImageUpload(file: File | null) {
     setColorDetailsOpen(false);
-    setImage(file);
+    setImage(null);
     setAnalysis(null);
     setError(null);
     setSourceImageDataUrl(null);
@@ -559,14 +574,30 @@ function App() {
     setProjectCreatedAt(null);
     setWorkflowProgress((current) => resetWorkflowForSource(current));
     setProjectStatus(file ? "Unsaved changes" : "No saved project");
-    if (!file) return;
+    setSvgSourceInkDataUrl(null);
+    setSvgImportedDetailDataUrl(null);
+    setSvgLineworkDetected(false);
+    if (!file) {
+      setImage(null);
+      return;
+    }
 
     try {
-      setSourceImageDataUrl(await readFileAsDataUrl(file));
+      if (isSvgFile(file)) {
+        const prepared = await prepareSvgFastPathUpload(file);
+        setImage(prepared.sourceFile);
+        setSourceImageDataUrl(prepared.sourceDataUrl);
+        setSvgSourceInkDataUrl(prepared.sourceInkDataUrl);
+        setSvgLineworkDetected(prepared.sourceInkDataUrl !== null);
+      } else {
+        setImage(file);
+        setSourceImageDataUrl(await readFileAsDataUrl(file));
+      }
       setProjectName(cleanedProjectNameFromFileName(file.name));
       setProjectCreatedAt(new Date().toISOString());
-    } catch {
-      setError("Unable to read the selected image.");
+    } catch (err) {
+      setImage(null);
+      setError(err instanceof Error ? err.message : "Unable to read the selected image.");
     }
   }
 
@@ -585,6 +616,9 @@ function App() {
     setAutosavePaused(true);
     localStorage.removeItem(CUTOUT_AUTOSAVE_KEY);
     setImage(null);
+    setSvgSourceInkDataUrl(null);
+    setSvgImportedDetailDataUrl(null);
+    setSvgLineworkDetected(false);
     setSourceImageDataUrl(null);
     setProjectName("Cutout Project");
     setProjectCreatedAt(null);
@@ -697,6 +731,9 @@ function App() {
     setAutosavePaused(true);
     setColorDetailsOpen(false);
     setImage(restoredFile);
+    setSvgSourceInkDataUrl(null);
+    setSvgImportedDetailDataUrl(project.editedDetailPngDataUrl);
+    setSvgLineworkDetected(false);
     setSourceImageDataUrl(project.sourceImage.dataUrl);
     setProjectName(project.projectName);
     setProjectCreatedAt(project.createdAt);
@@ -827,13 +864,23 @@ function App() {
       const response = await fetch("/api/analyze", { method: "POST", body: payload });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to regenerate starter lines.");
+      const importedSvgDetail = svgSourceInkDataUrl
+        ? await svgInkForPreview({
+            sourceInkDataUrl: svgSourceInkDataUrl,
+            subjectBoundsPx: body.subjectBoundsPx,
+            previewWidthPx: body.previewWidthPx,
+            previewHeightPx: body.previewHeightPx,
+            outerLinePngDataUrl: body.outerLinePngDataUrl
+          })
+        : null;
       setAnalysis((current) => current ? {
         ...current,
         previewPngDataUrl: body.previewPngDataUrl,
         detailLinePngDataUrl: body.detailLinePngDataUrl,
         traceQuality: body.traceQuality
       } : body);
-      setEditedDetailDataUrl(null);
+      setEditedDetailDataUrl(importedSvgDetail);
+      setSvgImportedDetailDataUrl(importedSvgDetail);
       setHistory([]);
       setRedoHistory([]);
       setEditableDetailLinesPresent(false);
@@ -1061,8 +1108,9 @@ function App() {
       return;
     }
     saveHistorySnapshot();
-    setEditedDetailDataUrl(null);
-    loadDetailCanvas(analysis.detailLinePngDataUrl);
+    const restoredDetail = svgImportedDetailDataUrl ?? analysis.detailLinePngDataUrl;
+    setEditedDetailDataUrl(restoredDetail);
+    loadDetailCanvas(restoredDetail);
   }
 
   function resetCleanupChecks() {
@@ -1598,17 +1646,18 @@ function App() {
             <section className="upload-step" aria-label="Upload step" ref={setupSectionRef}>
               <label className="upload-box">
                 <FileImage size={28} />
-                <span>{image ? image.name : "Choose a complete PNG or JPG"}</span>
+                <span>{image ? image.name : "Choose a complete PNG, JPG, or SVG"}</span>
                 <input
                   aria-label="Source image"
                   type="file"
-                  accept="image/png,image/jpeg"
+                  accept="image/png,image/jpeg,image/svg+xml"
                   onChange={(event) => {
                     const file = event.target.files?.[0] ?? null;
                     void handleImageUpload(file);
                   }}
                 />
               </label>
+              {svgLineworkDetected ? <p className="helper-note">SVG linework detected. Its authored dark ink will open as editable starter lines.</p> : null}
               <p className="helper-note">Choose one complete character on a simple background.</p>
               <NumberField
                 label="Finished height"
