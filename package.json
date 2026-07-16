@@ -10,7 +10,7 @@
     "build": "tsc && vite build",
     "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
     "test:e2e:install": "playwright install chromium",
-    "test": "python -m unittest discover -s backend/tests -p \"test_*.py\" && node --experimental-strip-types tests/detailEditor.test.ts && node --experimental-strip-types tests/guidedWorkflow.test.ts && node --experimental-strip-types tests/traceWorkflow.test.ts && node --experimental-strip-types tests/traceStrokes.test.ts && node --experimental-strip-types tests/traceViewport.test.ts && node --experimental-strip-types tests/cutoutProject.test.ts && node --experimental-strip-types tests/paintGuide.test.ts && node --experimental-strip-types tests/traceLineworkSvg.test.ts && node --experimental-strip-types tests/traceQuality.test.ts",
+    "test": "python -m unittest discover -s backend/tests -p \"test_*.py\" && node --experimental-strip-types tests/detailEditor.test.ts && node --experimental-strip-types tests/guidedWorkflow.test.ts && node --experimental-strip-types tests/traceWorkflow.test.ts && node --experimental-strip-types tests/traceStrokes.test.ts && node --experimental-strip-types tests/traceViewport.test.ts && node --experimental-strip-types tests/cutoutProject.test.ts && node --experimental-strip-types tests/paintGuide.test.ts && node --experimental-strip-types tests/traceLineworkSvg.test.ts && node --experimental-strip-types tests/traceQuality.test.ts && node --experimental-strip-types tests/svgFastPath.test.ts",
     "verify": "pnpm test && pnpm build"
   },
   "dependencies": {
