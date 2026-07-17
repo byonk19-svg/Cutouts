@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { ChevronLeft, ChevronRight, Copy, Download, Eraser, Eye, FileImage, FileText, FolderOpen, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, Save, SlidersHorizontal, SwatchBook, Trash2, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, Download, Eraser, Eye, FileImage, FileText, FolderOpen, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, Save, SlidersHorizontal, Sparkles, SwatchBook, Trash2, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import {
   CUTOUT_AUTOSAVE_KEY,
   cleanedProjectNameFromFileName,
@@ -102,6 +102,22 @@ type BrushSize = "thin" | "normal" | "bold";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
 type Analysis = CutoutProjectAnalysis;
 type PaintGuidePatch = Partial<Omit<ProjectPaintColor, "id" | "source">>;
+type AiProposalPhase = "idle" | "confirming" | "requesting" | "ready" | "failed";
+const AI_PROPOSAL_ESTIMATE_USD = 0.10;
+type AiProposalResponse = {
+  status: "pending-review" | "review-only";
+  validationIssues: string[];
+  canReplaceAcceptedDetail: false;
+  proposalPreviewPngDataUrl: string;
+  proposalDetailPngDataUrl: string;
+  inkCoverage: number;
+  suppressedPixelCount: number;
+  previewWidthPx: number;
+  previewHeightPx: number;
+  model: string;
+  provider: string;
+  estimatedCostUsd: number;
+};
 type ProjectStatus = "No saved project" | "Unsaved changes" | "Auto-saved" | "Saved" | "Restored auto-save" | "Project opened" | "Project export failed" | "Project import failed" | "Auto-save failed";
 type StrokeDragState = {
   mode: "move" | "point";
@@ -180,6 +196,9 @@ function App() {
   const [svgSourceInkDataUrl, setSvgSourceInkDataUrl] = useState<string | null>(null);
   const [svgImportedDetailDataUrl, setSvgImportedDetailDataUrl] = useState<string | null>(null);
   const [svgLineworkDetected, setSvgLineworkDetected] = useState(false);
+  const [aiProposalPhase, setAiProposalPhase] = useState<AiProposalPhase>("idle");
+  const [aiProposal, setAiProposal] = useState<AiProposalResponse | null>(null);
+  const [aiProposalError, setAiProposalError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -202,6 +221,7 @@ function App() {
   const strokeIdRef = useRef(0);
   const pendingContentFitRef = useRef(false);
   const viewportUserModifiedRef = useRef(false);
+  const aiProposalRequestStartedRef = useRef(false);
   const traceContentBoundsRef = useRef<TraceBounds | null>(null);
   const reviewedLineworkRef = useRef<{
     manualStrokes: TraceStroke[];
@@ -243,6 +263,11 @@ function App() {
   const cleanStepActive = workflowProgress.activeStep === "clean";
   const colorsStepActive = workflowProgress.activeStep === "colors";
   const exportStepActive = workflowProgress.activeStep === "export";
+  const needsAiSimplification = Boolean(
+    analysis?.outerCutPath.trim()
+    && analysis.traceQuality?.detailExtractionModeUsed === "rendered"
+    && !svgLineworkDetected
+  );
   const duplicatePaintSuggestion = groupDuplicatePaintPurchases(paintGuideEntries).find((group) => group.swatchNumbers.length > 1);
 
   useEffect(() => {
@@ -305,6 +330,10 @@ function App() {
     viewportUserModifiedRef.current = false;
     setPrintPreview(false);
     setEditableDetailLinesPresent(false);
+    setAiProposalPhase("idle");
+    setAiProposal(null);
+    setAiProposalError(null);
+    aiProposalRequestStartedRef.current = false;
   }
 
   useEffect(() => {
@@ -484,6 +513,32 @@ function App() {
       setError(err instanceof Error ? err.message : "Unable to analyze image.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function requestAiLineworkProposal() {
+    if (!image || !analysis || aiProposalPhase !== "confirming" || aiProposalRequestStartedRef.current) return;
+    aiProposalRequestStartedRef.current = true;
+    setAiProposalPhase("requesting");
+    setAiProposalError(null);
+    try {
+      const payload = new FormData();
+      payload.append("image", image);
+      payload.append("settings", JSON.stringify(settings));
+      payload.append("confirmation", JSON.stringify({ uploadConfirmed: true, estimatedCostUsd: AI_PROPOSAL_ESTIMATE_USD }));
+      const response = await fetch("/api/generate-linework", { method: "POST", body: payload });
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        const message = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
+          ? body.error
+          : "Unable to generate the AI proposal.";
+        throw new Error(message);
+      }
+      setAiProposal(parseAiProposalResponse(body, analysis));
+      setAiProposalPhase("ready");
+    } catch (err) {
+      setAiProposalError(err instanceof Error ? err.message : "Unable to generate the AI proposal.");
+      setAiProposalPhase("failed");
     }
   }
 
@@ -1810,6 +1865,10 @@ function App() {
                         undoDisabled={undoDisabled}
                         showReference={showReference}
                         cutlineValid={Boolean(analysis.outerCutPath.trim())}
+                        acceptDisabled={
+                          aiProposalPhase === "requesting"
+                          || (aiProposalPhase === "ready" && aiProposal?.status === "pending-review")
+                        }
                         removalPreviewCount={removalPreviewCount}
                         onRemove={() => setEditorTool("remove")}
                         onAdd={selectAddMissingLine}
@@ -1823,6 +1882,16 @@ function App() {
                         reviewed={workflowProgress.lineworkReviewed}
                         review={traceQualityReview}
                       />
+                      {needsAiSimplification ? (
+                        <AiProposalCard
+                          phase={aiProposalPhase}
+                          proposal={aiProposal}
+                          error={aiProposalError}
+                          onBegin={() => setAiProposalPhase("confirming")}
+                          onCancel={() => setAiProposalPhase("idle")}
+                          onConfirm={() => void requestAiLineworkProposal()}
+                        />
+                      ) : null}
                     </>
                   ) : null}
                   <details className={cleanStepActive ? "clean-more-tools" : "clean-more-tools always-open"} aria-label="More Tools" open={cleanStepActive ? undefined : true}>
@@ -2827,12 +2896,80 @@ function paintSelectionPatch(entry: PaintGuideEntry, value: string): PaintGuideP
   return { selectedMatchId: value, manualOverride: "" };
 }
 
+function AiProposalCard({
+  phase,
+  proposal,
+  error,
+  onBegin,
+  onCancel,
+  onConfirm
+}: {
+  phase: AiProposalPhase;
+  proposal: AiProposalResponse | null;
+  error: string | null;
+  onBegin: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <section className="ai-proposal-card" aria-label="AI-assisted linework proposal">
+      {phase === "idle" ? (
+        <>
+          <div>
+            <strong>Needs Simplification</strong>
+            <p>Ask for one optional Wood-Transfer Style proposal. Your Cut Line, print geometry, and current Detail Lines stay unchanged.</p>
+          </div>
+          <button className="tool-button" onClick={onBegin}><Sparkles size={16} /> Request AI proposal</button>
+        </>
+      ) : null}
+      {phase === "confirming" ? (
+        <>
+          <div>
+            <strong>Confirm one provider request</strong>
+            <p>Your source image will be uploaded to OpenAI under its normal retention terms. Exact estimated cost: ${AI_PROPOSAL_ESTIMATE_USD.toFixed(2)}. No automatic retry will be sent.</p>
+          </div>
+          <div className="ai-proposal-actions">
+            <button className="primary-action" onClick={onConfirm}>Confirm upload and request one proposal</button>
+            <button className="tool-button" onClick={onCancel}>Cancel</button>
+          </div>
+        </>
+      ) : null}
+      {phase === "requesting" ? (
+        <div role="status" aria-live="polite">
+          <strong>Creating a separate linework proposal</strong>
+          <p>Exactly one request is in progress. This can take up to two minutes; your accepted lines remain unchanged.</p>
+        </div>
+      ) : null}
+      {phase === "ready" && proposal ? (
+        <>
+          <div>
+            <strong>{proposal.status === "review-only" ? "Review only" : "Ready for visual review"}</strong>
+            <p>
+              {proposal.status === "review-only"
+                ? `This proposal cannot replace accepted Detail Lines. Validation: ${proposal.validationIssues.join(", ") || "unspecified"}.`
+                : "Technical checks passed. The proposal remains separate from editable and exported Detail Lines until maker review is implemented."}
+            </p>
+          </div>
+          <img src={proposal.proposalDetailPngDataUrl} alt="AI linework proposal" />
+        </>
+      ) : null}
+      {phase === "failed" ? (
+        <div role="alert">
+          <strong>Proposal not created</strong>
+          <p>{error} No retry was sent, and your accepted Detail Lines remain unchanged.</p>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function CleanLinesPrimaryControls({
   editorTool,
   brushSize,
   undoDisabled,
   showReference,
   cutlineValid,
+  acceptDisabled,
   removalPreviewCount,
   onRemove,
   onAdd,
@@ -2846,6 +2983,7 @@ function CleanLinesPrimaryControls({
   undoDisabled: boolean;
   showReference: boolean;
   cutlineValid: boolean;
+  acceptDisabled: boolean;
   removalPreviewCount: number;
   onRemove: () => void;
   onAdd: () => void;
@@ -2862,7 +3000,7 @@ function CleanLinesPrimaryControls({
         <button className="tool-button" onClick={onUndo} disabled={undoDisabled}><Undo2 size={16} /> Undo</button>
         <button className={showReference ? "tool-button selected" : "tool-button"} onClick={onToggleOriginal}><Eye size={16} /> Show Original</button>
         <button className="tool-button" onClick={onFit}><ZoomIn size={16} /> Fit</button>
-        <button className="primary-action" onClick={onAccept} disabled={!cutlineValid}><ChevronRight size={16} /> Looks Good - Continue to Colors</button>
+        <button className="primary-action" onClick={onAccept} disabled={!cutlineValid || acceptDisabled}><ChevronRight size={16} /> Looks Good - Continue to Colors</button>
       </div>
       <p className="clean-tool-instruction" id="connected-line-preview-status" aria-label="Clean Lines instruction" role="status">
         {editorTool === "remove"
@@ -2922,6 +3060,43 @@ function brushPixels(size: BrushSize) {
   if (size === "thin") return 10;
   if (size === "bold") return 34;
   return 20;
+}
+
+function parseAiProposalResponse(value: unknown, analysis: Analysis): AiProposalResponse {
+  if (typeof value !== "object" || value === null) throw new Error("AI proposal response was malformed.");
+  const proposal = value as Record<string, unknown>;
+  if (proposal.status !== "pending-review" && proposal.status !== "review-only") {
+    throw new Error("AI proposal response had an invalid review status.");
+  }
+  if (proposal.canReplaceAcceptedDetail !== false) {
+    throw new Error("AI proposal response exceeded proposal-only authority.");
+  }
+  if (
+    proposal.previewWidthPx !== analysis.previewWidthPx
+    || proposal.previewHeightPx !== analysis.previewHeightPx
+  ) {
+    throw new Error("AI proposal response did not match the editor preview size.");
+  }
+  if (
+    typeof proposal.proposalPreviewPngDataUrl !== "string"
+    || !proposal.proposalPreviewPngDataUrl.startsWith("data:image/png;base64,")
+    || typeof proposal.proposalDetailPngDataUrl !== "string"
+    || !proposal.proposalDetailPngDataUrl.startsWith("data:image/png;base64,")
+  ) {
+    throw new Error("AI proposal response did not contain normalized PNG layers.");
+  }
+  if (
+    !Array.isArray(proposal.validationIssues)
+    || proposal.validationIssues.some((issue) => typeof issue !== "string")
+    || typeof proposal.inkCoverage !== "number"
+    || typeof proposal.suppressedPixelCount !== "number"
+    || typeof proposal.model !== "string"
+    || typeof proposal.provider !== "string"
+    || proposal.estimatedCostUsd !== AI_PROPOSAL_ESTIMATE_USD
+  ) {
+    throw new Error("AI proposal response metadata was malformed.");
+  }
+  return proposal as AiProposalResponse;
 }
 
 function traceActionLabel({ image, analysis, busy, traceMode }: { image: File | null; analysis: Analysis | null; busy: boolean; traceMode: TraceMode }) {

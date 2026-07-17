@@ -1870,6 +1870,35 @@ button:disabled {
   font-size: 13px;
 }
 
+.ai-proposal-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #c8b693;
+  border-radius: 12px;
+  background: #fffaf0;
+}
+
+.ai-proposal-card p {
+  margin: 0.3rem 0 0;
+  color: #5f5545;
+}
+
+.ai-proposal-card img {
+  display: block;
+  width: min(100%, 320px);
+  max-height: 320px;
+  object-fit: contain;
+  border: 1px solid #d8cdb8;
+  background: white;
+}
+
+.ai-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
 @media (max-width: 1060px) {
   .workspace {
     grid-template-columns: 280px minmax(0, 1fr);
