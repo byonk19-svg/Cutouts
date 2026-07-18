@@ -14,6 +14,16 @@ import {
 } from "./cutoutProject";
 import { previewDetailSegment, previewFirstDetailSegment, removeDetailSegmentPreview, type DetailSegmentPreview } from "./detailEditor";
 import {
+  acceptAiProposalReview,
+  applyAcceptedAiProposal,
+  beginAiProposalReview,
+  canAcceptAiProposal,
+  rejectAiProposalReview,
+  reviewAiProposalView,
+  type AiProposalReview,
+  type AiProposalReviewView
+} from "./aiLineworkReview";
+import {
   addProjectPaintColor,
   filterPaintGuideEntries,
   groupShoppingListItems,
@@ -198,6 +208,8 @@ function App() {
   const [svgLineworkDetected, setSvgLineworkDetected] = useState(false);
   const [aiProposalPhase, setAiProposalPhase] = useState<AiProposalPhase>("idle");
   const [aiProposal, setAiProposal] = useState<AiProposalResponse | null>(null);
+  const [aiProposalReview, setAiProposalReview] = useState<AiProposalReview | null>(null);
+  const [aiProposalReviewView, setAiProposalReviewView] = useState<AiProposalReviewView>("ai-lines-only");
   const [aiProposalError, setAiProposalError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -222,6 +234,7 @@ function App() {
   const pendingContentFitRef = useRef(false);
   const viewportUserModifiedRef = useRef(false);
   const aiProposalRequestStartedRef = useRef(false);
+  const aiProposalRequestGenerationRef = useRef(0);
   const traceContentBoundsRef = useRef<TraceBounds | null>(null);
   const reviewedLineworkRef = useRef<{
     manualStrokes: TraceStroke[];
@@ -258,7 +271,12 @@ function App() {
       printPreview
     })
     : null;
-  const guidedWorkflowSteps = workflowStepItems(workflowProgress, { hasAnalysis: analysis !== null });
+  const aiProposalBlocksAdvancement = aiProposalPhase === "requesting" || aiProposalReview?.decision === "pending";
+  const guidedWorkflowSteps = workflowStepItems(workflowProgress, { hasAnalysis: analysis !== null }).map((item) => (
+    aiProposalBlocksAdvancement && (item.step === "colors" || item.step === "export")
+      ? { ...item, status: "locked" as const, clickable: false }
+      : item
+  ));
   const uploadStepActive = workflowProgress.activeStep === "upload";
   const cleanStepActive = workflowProgress.activeStep === "clean";
   const colorsStepActive = workflowProgress.activeStep === "colors";
@@ -330,10 +348,17 @@ function App() {
     viewportUserModifiedRef.current = false;
     setPrintPreview(false);
     setEditableDetailLinesPresent(false);
+    resetAiProposalState();
+  }
+
+  function resetAiProposalState() {
+    aiProposalRequestGenerationRef.current += 1;
+    aiProposalRequestStartedRef.current = false;
     setAiProposalPhase("idle");
     setAiProposal(null);
+    setAiProposalReview(null);
+    setAiProposalReviewView("ai-lines-only");
     setAiProposalError(null);
-    aiProposalRequestStartedRef.current = false;
   }
 
   useEffect(() => {
@@ -472,6 +497,7 @@ function App() {
       const shouldRegenerate = window.confirm("Regenerate the cutline? This may replace the cutline and starter lines. Your manual Trace Studio lines will be kept unless you reset details.");
       if (!shouldRegenerate) return;
     }
+    resetAiProposalState();
     setBusy(true);
     setError(null);
     try {
@@ -518,6 +544,7 @@ function App() {
 
   async function requestAiLineworkProposal() {
     if (!image || !analysis || aiProposalPhase !== "confirming" || aiProposalRequestStartedRef.current) return;
+    const requestGeneration = aiProposalRequestGenerationRef.current;
     aiProposalRequestStartedRef.current = true;
     setAiProposalPhase("requesting");
     setAiProposalError(null);
@@ -528,18 +555,55 @@ function App() {
       payload.append("confirmation", JSON.stringify({ uploadConfirmed: true, estimatedCostUsd: AI_PROPOSAL_ESTIMATE_USD }));
       const response = await fetch("/api/generate-linework", { method: "POST", body: payload });
       const body: unknown = await response.json();
+      if (requestGeneration !== aiProposalRequestGenerationRef.current) return;
       if (!response.ok) {
         const message = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
           ? body.error
           : "Unable to generate the AI proposal.";
         throw new Error(message);
       }
-      setAiProposal(parseAiProposalResponse(body, analysis));
+      const proposal = parseAiProposalResponse(body, analysis);
+      setAiProposal(proposal);
+      setAiProposalReview(beginAiProposalReview(proposal.status));
+      setAiProposalReviewView("ai-lines-only");
       setAiProposalPhase("ready");
     } catch (err) {
+      if (requestGeneration !== aiProposalRequestGenerationRef.current) return;
       setAiProposalError(err instanceof Error ? err.message : "Unable to generate the AI proposal.");
       setAiProposalPhase("failed");
     }
+  }
+
+  function beginAiLineworkRequest() {
+    resetAiProposalState();
+    setAiProposalPhase("confirming");
+  }
+
+  function selectAiProposalReviewView(view: AiProposalReviewView) {
+    setAiProposalReviewView(view);
+    setAiProposalReview((review) => review ? reviewAiProposalView(review, view) : review);
+  }
+
+  function acceptAiLineworkProposal() {
+    if (!aiProposal || !aiProposalReview || !canAcceptAiProposal(aiProposalReview)) return;
+    const currentDetail = currentDetailDataUrl();
+    if (!currentDetail) return;
+    const acceptedReview = acceptAiProposalReview(aiProposalReview);
+    const applied = applyAcceptedAiProposal({
+      currentDetailDataUrl: currentDetail,
+      proposalDetailDataUrl: aiProposal.proposalDetailPngDataUrl,
+      history
+    });
+    setHistory(applied.history);
+    setRedoHistory([]);
+    setEditedDetailDataUrl(applied.acceptedDetailDataUrl);
+    loadDetailCanvas(applied.acceptedDetailDataUrl);
+    setAiProposalReview(acceptedReview);
+    setProjectStatus("Unsaved changes");
+  }
+
+  function rejectAiLineworkProposal() {
+    setAiProposalReview((review) => review ? rejectAiProposalReview(review) : review);
   }
 
   async function exportPdf() {
@@ -617,6 +681,7 @@ function App() {
   }
 
   async function handleImageUpload(file: File | null) {
+    resetAiProposalState();
     setColorDetailsOpen(false);
     setImage(null);
     setAnalysis(null);
@@ -703,6 +768,7 @@ function App() {
   }
 
   function navigateToWorkflowStep(step: WorkflowStep) {
+    if (aiProposalBlocksAdvancement && (step === "colors" || step === "export")) return;
     const next = navigateWorkflow(workflowProgress, step, { hasAnalysis: analysis !== null });
     if (next.activeStep !== step) return;
     setWorkflowProgress(next);
@@ -782,6 +848,7 @@ function App() {
   }
 
   async function applyProject(project: CutoutProject, status: ProjectStatus) {
+    resetAiProposalState();
     const restoredFile = await fileFromDataUrl(project.sourceImage.dataUrl, project.sourceImage.name, project.sourceImage.type);
     setAutosavePaused(true);
     setColorDetailsOpen(false);
@@ -1866,8 +1933,7 @@ function App() {
                         showReference={showReference}
                         cutlineValid={Boolean(analysis.outerCutPath.trim())}
                         acceptDisabled={
-                          aiProposalPhase === "requesting"
-                          || (aiProposalPhase === "ready" && aiProposal?.status === "pending-review")
+                          aiProposalBlocksAdvancement
                         }
                         removalPreviewCount={removalPreviewCount}
                         onRemove={() => setEditorTool("remove")}
@@ -1886,10 +1952,17 @@ function App() {
                         <AiProposalCard
                           phase={aiProposalPhase}
                           proposal={aiProposal}
+                          review={aiProposalReview}
+                          reviewView={aiProposalReviewView}
+                          originalPreviewPngDataUrl={analysis.paintGuidePngDataUrl}
+                          outerLinePngDataUrl={analysis.outerLinePngDataUrl}
                           error={aiProposalError}
-                          onBegin={() => setAiProposalPhase("confirming")}
+                          onBegin={beginAiLineworkRequest}
                           onCancel={() => setAiProposalPhase("idle")}
                           onConfirm={() => void requestAiLineworkProposal()}
+                          onReviewView={selectAiProposalReviewView}
+                          onAccept={acceptAiLineworkProposal}
+                          onReject={rejectAiLineworkProposal}
                         />
                       ) : null}
                     </>
@@ -2899,17 +2972,31 @@ function paintSelectionPatch(entry: PaintGuideEntry, value: string): PaintGuideP
 function AiProposalCard({
   phase,
   proposal,
+  review,
+  reviewView,
+  originalPreviewPngDataUrl,
+  outerLinePngDataUrl,
   error,
   onBegin,
   onCancel,
-  onConfirm
+  onConfirm,
+  onReviewView,
+  onAccept,
+  onReject
 }: {
   phase: AiProposalPhase;
   proposal: AiProposalResponse | null;
+  review: AiProposalReview | null;
+  reviewView: AiProposalReviewView;
+  originalPreviewPngDataUrl: string;
+  outerLinePngDataUrl: string;
   error: string | null;
   onBegin: () => void;
   onCancel: () => void;
   onConfirm: () => void;
+  onReviewView: (view: AiProposalReviewView) => void;
+  onAccept: () => void;
+  onReject: () => void;
 }) {
   return (
     <section className="ai-proposal-card" aria-label="AI-assisted linework proposal">
@@ -2940,17 +3027,53 @@ function AiProposalCard({
           <p>Exactly one request is in progress. This can take up to two minutes; your accepted lines remain unchanged.</p>
         </div>
       ) : null}
-      {phase === "ready" && proposal ? (
+      {phase === "ready" && proposal && review ? (
         <>
           <div>
-            <strong>{proposal.status === "review-only" ? "Review only" : "Ready for visual review"}</strong>
+            <strong>{review.decision === "review-only" ? "Review only" : review.decision === "accepted" ? "Proposal accepted" : review.decision === "rejected" ? "Proposal rejected" : "Ready for visual review"}</strong>
             <p>
-              {proposal.status === "review-only"
+              {review.decision === "review-only"
                 ? `This proposal cannot replace accepted Detail Lines. Validation: ${proposal.validationIssues.join(", ") || "unspecified"}.`
-                : "Technical checks passed. The proposal remains separate from editable and exported Detail Lines until maker review is implemented."}
+                : review.decision === "accepted"
+                  ? "The reviewed proposal is now the editable Detail Line layer. Undo restores the prior accepted layer."
+                  : review.decision === "rejected"
+                    ? "The proposal was discarded. Accepted Detail Lines and manual Feature Lines were preserved."
+                    : "Technical checks passed. Review AI lines only, Original Overlay, and Print Preview before accepting."}
             </p>
           </div>
-          <img src={proposal.proposalDetailPngDataUrl} alt="AI linework proposal" />
+          {review.decision === "pending" || review.decision === "review-only" ? (
+            <>
+              <div className="ai-proposal-view-tabs" aria-label="AI proposal review views">
+                {([
+                  ["ai-lines-only", "AI lines only"],
+                  ["original-overlay", "Original Overlay"],
+                  ["print-preview", "Print Preview"]
+                ] as [AiProposalReviewView, string][]).map(([view, label]) => (
+                  <button key={view} className={reviewView === view ? "tool-button selected" : "tool-button"} aria-pressed={reviewView === view} onClick={() => onReviewView(view)}>
+                    {label}{review.reviewedViews.has(view) ? " ✓" : ""}
+                  </button>
+                ))}
+              </div>
+              <div className="ai-proposal-review-frame" aria-label={`${reviewView === "ai-lines-only" ? "AI lines only" : reviewView === "original-overlay" ? "Original Overlay" : "Print Preview"} review`}>
+                {reviewView === "original-overlay" ? <img src={originalPreviewPngDataUrl} alt="Original artwork" /> : null}
+                {reviewView === "print-preview" ? <img src={outerLinePngDataUrl} alt="Protected Cut Line" /> : null}
+                <img className={reviewView === "ai-lines-only" ? "" : "ai-proposal-review-overlay"} src={proposal.proposalDetailPngDataUrl} alt="AI linework proposal" />
+              </div>
+              <div className="ai-proposal-actions">
+                {review.decision === "pending" ? (
+                  <>
+                    <button className="primary-action" onClick={onAccept} disabled={!canAcceptAiProposal(review)}>Accept AI Detail Lines</button>
+                    <button className="tool-button" onClick={onReject}>Reject proposal</button>
+                  </>
+                ) : null}
+                {review.decision === "review-only" ? <button className="tool-button" onClick={onBegin}>Request another proposal</button> : null}
+              </div>
+            </>
+          ) : (
+            <div className="ai-proposal-actions">
+              <button className="tool-button" onClick={onBegin}>Request another proposal</button>
+            </div>
+          )}
         </>
       ) : null}
       {phase === "failed" ? (
