@@ -343,6 +343,74 @@ test("a proposal response is ignored after the source project is replaced", asyn
   await expect(proposalCard).not.toContainText("Ready for visual review");
 });
 
+test("exports only accepted AI Detail Lines to SVG and PDF", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  const source = readFileSync("backend/tests/fixtures/coraline/coraline-best-clean-outline.png");
+  const rejectedDetail = readFileSync("backend/tests/fixtures/coraline/coraline-cut-only-outline.png");
+  const acceptedDetail = readFileSync("backend/tests/fixtures/coraline/coraline-detail-layer.png");
+  const rejectedDataUrl = `data:image/png;base64,${rejectedDetail.toString("base64")}`;
+  const acceptedDataUrl = `data:image/png;base64,${acceptedDetail.toString("base64")}`;
+  await page.getByLabel("Source image").setInputFiles({ name: "accepted-export.png", mimeType: "image/png", buffer: source });
+  await page.getByRole("button", { name: "Generate Template" }).click();
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith("/api/analyze") && response.request().method() === "POST"),
+    moreTools.getByLabel("Image type").getByRole("button", { name: "Rendered image" }).click()
+  ]);
+  const canvas = page.getByLabel("Editable interior detail lines");
+  const width = Number(await canvas.getAttribute("width"));
+  const height = Number(await canvas.getAttribute("height"));
+  let requestCount = 0;
+  await page.route("**/api/generate-linework", (route) => {
+    const detailDataUrl = requestCount++ === 0 ? rejectedDataUrl : acceptedDataUrl;
+    return route.fulfill({ json: {
+      status: "pending-review", validationIssues: [], canReplaceAcceptedDetail: false,
+      proposalPreviewPngDataUrl: detailDataUrl,
+      proposalDetailPngDataUrl: detailDataUrl,
+      inkCoverage: 0.04, suppressedPixelCount: 21, previewWidthPx: width, previewHeightPx: height,
+      model: "gpt-image-1.5", provider: "openai", estimatedCostUsd: 0.1
+    } });
+  });
+
+  const proposalCard = page.getByLabel("AI-assisted linework proposal");
+  await proposalCard.getByRole("button", { name: "Request AI proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
+  await expect(proposalCard).toContainText("Ready for visual review");
+  await proposalCard.getByRole("button", { name: "Reject proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Request another proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
+  await proposalCard.getByRole("button", { name: "AI Lines Only" }).click();
+  await proposalCard.getByRole("button", { name: "Original Overlay" }).click();
+  await proposalCard.getByRole("button", { name: "Print Preview" }).click();
+  await proposalCard.getByRole("button", { name: "Accept AI Detail Lines" }).click();
+
+  await page.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Skip Paint Guide" }).click();
+  const exportWorkspace = page.getByLabel("Export workspace");
+  const moreExportOptions = exportWorkspace.getByLabel("More Export Options");
+  await moreExportOptions.locator("summary").click();
+  const svgDownloadPromise = page.waitForEvent("download");
+  await moreExportOptions.getByRole("button", { name: "Download SVG Linework" }).click();
+  const svgDownload = await svgDownloadPromise;
+  const svgPath = await svgDownload.path();
+  expect(svgPath).not.toBeNull();
+  const svg = readFileSync(svgPath ?? "", "utf-8");
+  expect(svg).toContain('id="accepted-detail-layer"');
+  expect(svg).toContain(acceptedDataUrl);
+  expect(svg).not.toContain(rejectedDataUrl);
+
+  const pdfRequestPromise = page.waitForRequest((request) => request.url().endsWith("/api/export") && request.method() === "POST");
+  const pdfDownloadPromise = page.waitForEvent("download");
+  await exportWorkspace.getByRole("button", { name: "Download Printable PDF" }).click();
+  const [pdfRequest, pdfDownload] = await Promise.all([pdfRequestPromise, pdfDownloadPromise]);
+  const pdfMultipart = pdfRequest.postDataBuffer()?.toString("utf-8") ?? "";
+  expect(pdfMultipart).toContain(acceptedDataUrl);
+  expect(pdfMultipart).not.toContain(rejectedDataUrl);
+  expect((await pdfDownload.path()) ?? "").toBeTruthy();
+});
+
 async function savedProject(page: import("@playwright/test").Page) {
   await expect.poll(() => page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"))).not.toBeNull();
   return page.evaluate(() => JSON.parse(localStorage.getItem("cutout-studio:auto-save:v1") ?? "{}"));
