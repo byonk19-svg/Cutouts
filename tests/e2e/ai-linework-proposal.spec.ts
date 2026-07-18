@@ -132,7 +132,11 @@ test("maker reviews all views, explicitly accepts once, and undoes back to the p
 
   await proposalCard.getByRole("button", { name: "Original Overlay" }).click();
   await expect(proposalCard.getByRole("button", { name: "Original Overlay" })).toHaveAttribute("aria-pressed", "true");
-  await expect(proposalCard.getByLabel("Original Overlay review")).toBeVisible();
+  const originalOverlayReview = proposalCard.getByLabel("Original Overlay review");
+  await expect(originalOverlayReview).toBeVisible();
+  await expect.poll(() => originalOverlayReview.getByRole("img", { name: "AI linework proposal" }).evaluate(
+    (image) => getComputedStyle(image).backgroundColor
+  )).toBe("rgba(0, 0, 0, 0)");
   await expect(acceptProposal).toBeDisabled();
   await proposalCard.getByRole("button", { name: "Print Preview" }).click();
   await expect(proposalCard.getByLabel("Print Preview review")).toBeVisible();

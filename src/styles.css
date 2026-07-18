@@ -1920,6 +1920,7 @@ button:disabled {
   max-height: none;
   border: 0;
   object-fit: contain;
+  background: transparent;
 }
 
 .ai-proposal-card .ai-proposal-review-overlay {
