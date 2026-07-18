@@ -145,11 +145,39 @@ A first-version app that is started with local development commands by the maker
 
 A legacy workflow assumption where the maker imports one source image, adjusts template settings, and exports a PDF in one sitting. Cutout Studio now supports autosave and editable project files, so new workflow design must preserve progress across sessions.
 
+### Project Session
+
+The active state for one project, including durable maker decisions and artifacts plus transient lifecycle facts needed to govern Project Capabilities. Its durable Source Image, analysis, accepted Detail Lines, Feature Lines, paint selections, and Review Milestones survive save and restore; transient presentation choices and active gestures remain outside the Project Session.
+
+### Project File
+
+The saved representation of a Project Session's durable state and saved workspace preferences. A Project File excludes unaccepted AI Linework Proposals, Editor Transaction history, transient operation status, transient presentation choices, and active gestures.
+
+### Project Transition
+
+An atomic change to a Project Session that applies the maker's requested change together with every required preservation, invalidation, and workflow consequence. Asynchronous work is prepared and validated before the transition; failure leaves durable project state unchanged while allowing transient operation status to report the failure, and a partially applied Project Transition is not a valid project state.
+
+### Project Revision
+
+The exact version of a Project Session from which asynchronous work began. A result may apply only while that Project Revision is still current; a result for an older revision is discarded without changing the project.
+
+### Project Capability
+
+A maker action that is currently permitted by the Project Session, derived from its artifacts and Review Milestones. The maker may be shown which Project Capabilities are available, but the Project Session remains responsible for enforcing them when an action is attempted.
+
+### Editor Transaction
+
+One reversible change to accepted Detail Lines or Feature Lines, recorded as exactly one Undo entry for the active app run. Undo restores the prior editable artifact but does not restore revoked Review Milestones, workflow navigation, AI proposal-review status, or saved status; Undo and Redo history do not survive project save and restore.
+
+### Autosave
+
+A best-effort local snapshot of the current Project Session after a valid Project Transition. Autosave failure does not invalidate or roll back the project and does not trigger an automatic retry loop; the next project change or explicit save provides another save opportunity.
+
 ### Guided Workflow
 
 The primary four-step product journey: Upload, Clean Lines, Colors, and Export. Only the active step exposes its working controls. Earlier steps remain available for backward navigation, while later steps remain gated by durable review milestones.
 
-The Guided Workflow is a single-page state machine, not a set of routes. Image data, editor history, paint selections, autosave, and project restoration remain inside one project state boundary while the active step determines which workspace is visible.
+The Guided Workflow is a single-page state machine, not a set of routes. Image data, accepted editor artifacts, paint selections, Autosave, and project restoration remain inside one Project Session while the active step determines which workspace is visible. Runtime-only Undo and Redo history belongs to Editor Transactions rather than the saved project.
 
 Its step header allows navigation to the current step and previously unlocked steps. Locked future steps remain visible but disabled. Advancement to the next step happens through the active screen's primary action after its Review Milestone is satisfied.
 

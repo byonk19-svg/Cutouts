@@ -2,6 +2,55 @@ import { expect, test, type Download, type Locator, type Page } from "@playwrigh
 import { mkdirSync, readFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
+test("project name and Finished Size preserve reviewed project work", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "session-transition.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByLabel("Project name (optional)").fill("Session Transition");
+  await uploadStep.getByLabel("Finished height").fill("42");
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const guidedWorkflow = page.getByLabel("Guided workflow");
+  const cleanControls = page.getByLabel("Clean Lines primary controls");
+  await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toHaveAttribute("aria-current", "step");
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(true);
+  const before = await savedProjectSnapshot(page);
+  if (!before) throw new Error("Autosave did not contain the reviewed project.");
+
+  await guidedWorkflow.getByRole("button", { name: /Upload/ }).click();
+  await uploadStep.getByLabel("Project name (optional)").fill("Session Transition Revised");
+  await uploadStep.getByLabel("Finished height").fill("48");
+
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.projectName).toBe("Session Transition Revised");
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.settings.finishedHeightIn).toBe(48);
+  const after = await savedProjectSnapshot(page);
+  if (!after) throw new Error("Autosave did not contain the revised project.");
+
+  expect(after.analysis.finishedHeightIn).toBe(48);
+  expect(after.analysis.finishedWidthIn).toBeCloseTo(before.analysis.finishedWidthIn * (48 / 42), 2);
+  expect(after.analysis.outerCutPath).toBe(before.analysis.outerCutPath);
+  expect(after.analysis.detailLinePngDataUrl).toBe(before.analysis.detailLinePngDataUrl);
+  expect(after.editedDetailPngDataUrl).toBe(before.editedDetailPngDataUrl);
+  expect(after.manualStrokes).toEqual(before.manualStrokes);
+  expect(after.projectPalette).toEqual(before.projectPalette);
+  expect(after.sourceImage).toEqual(before.sourceImage);
+  expect(after.cleanupChecks).toEqual(before.cleanupChecks);
+  expect(after.layerVisibility).toEqual(before.layerVisibility);
+  expect(after.referenceOpacity).toBe(before.referenceOpacity);
+  expect(after.traceViewport).toEqual(before.traceViewport);
+  expect(after.workflowProgress).toEqual({
+    ...before.workflowProgress,
+    activeStep: "upload"
+  });
+});
+
 test("maker can use authored SVG ink as editable starter lines", async ({ page }) => {
   await page.goto("/");
   const uploadStep = page.getByLabel("Upload step");
@@ -785,6 +834,13 @@ async function savedProjectColorsOutcome(page: Page) {
     const raw = localStorage.getItem("cutout-studio:auto-save:v1");
     if (!raw) return null;
     return JSON.parse(raw).workflowProgress.colorsOutcome as string;
+  });
+}
+
+async function savedProjectSnapshot(page: Page) {
+  return page.evaluate(() => {
+    const raw = localStorage.getItem("cutout-studio:auto-save:v1");
+    return raw ? JSON.parse(raw) : null;
   });
 }
 

@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode, type SetStateAction } from "react";
 import { createRoot } from "react-dom/client";
 import { ChevronLeft, ChevronRight, Copy, Download, Eraser, Eye, FileImage, FileText, FolderOpen, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, Save, SlidersHorizontal, Sparkles, SwatchBook, Trash2, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import {
@@ -6,12 +6,19 @@ import {
   cleanedProjectNameFromFileName,
   createCutoutProjectSnapshot,
   projectFileName,
-  resizeAnalysisForFinishedHeight,
   restoreCutoutProject,
   serializeCutoutProject,
   type CutoutProject,
   type CutoutProjectAnalysis
 } from "./cutoutProject";
+import {
+  createProjectSession,
+  executeProjectSessionEffects,
+  transitionProjectSession,
+  type ProjectSession,
+  type ProjectSessionAction,
+  type ProjectSessionEffect
+} from "./projectSession.ts";
 import { previewDetailSegment, previewFirstDetailSegment, removeDetailSegmentPreview, type DetailSegmentPreview } from "./detailEditor";
 import {
   acceptAiProposalReview,
@@ -111,6 +118,15 @@ type EditorTool = "erase" | "draw" | "smoothDraw" | "remove" | "select" | "pan";
 type BrushSize = "thin" | "normal" | "bold";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
 type Analysis = CutoutProjectAnalysis;
+type AppProjectSessionProject = {
+  projectName: string;
+  settings: Settings;
+  analysis: Analysis | null;
+};
+type AppProjectSessionState = {
+  session: ProjectSession<AppProjectSessionProject>;
+  pendingEffects: readonly ProjectSessionEffect[];
+};
 type PaintGuidePatch = Partial<Omit<ProjectPaintColor, "id" | "source">>;
 type AiProposalPhase = "idle" | "confirming" | "requesting" | "ready" | "failed";
 const AI_PROPOSAL_ESTIMATE_USD = 0.10;
@@ -156,15 +172,36 @@ const defaultSettings: Settings = {
 function App() {
   const [image, setImage] = useState<File | null>(null);
   const [sourceImageDataUrl, setSourceImageDataUrl] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState("Cutout Project");
+  const [projectSessionState, setProjectSessionState] = useState<AppProjectSessionState>(() => ({
+    session: createProjectSession({
+      projectName: "Cutout Project",
+      settings: defaultSettings,
+      analysis: null
+    }),
+    pendingEffects: []
+  }));
+  const projectSession = projectSessionState.session;
+  const { projectName, settings, analysis } = projectSession.project;
+  const [projectNameDraft, setProjectNameDraft] = useState(projectName);
+  const pendingProjectSessionAutosaveRevisionRef = useRef<number | null>(null);
+  const setSettings = (action: SetStateAction<Settings>) => setProjectSessionState((current) =>
+    reduceProjectSessionTransition(current, {
+      type: "update-non-size-settings",
+      settings: resolveStateAction(action, current.session.project.settings)
+    })
+  );
+  const setAnalysis = (action: SetStateAction<Analysis | null>) => setProjectSessionState((current) =>
+    reduceProjectSessionTransition(current, {
+      type: "replace-analysis",
+      analysis: resolveStateAction(action, current.session.project.analysis)
+    })
+  );
   const [projectCreatedAt, setProjectCreatedAt] = useState<string | null>(null);
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>("No saved project");
   const [autosavePaused, setAutosavePaused] = useState(false);
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [traceMode, setTraceMode] = useState<TraceMode>("paint");
   const [autoStarterOpen, setAutoStarterOpen] = useState(true);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTool, setEditorTool] = useState<EditorTool>("remove");
   const [brushSize, setBrushSize] = useState<BrushSize>("normal");
@@ -374,13 +411,35 @@ function App() {
   }, []);
 
   useEffect(() => {
+    setProjectNameDraft(projectName);
+  }, [projectName]);
+
+  useEffect(() => {
+    const pendingEffects = projectSessionState.pendingEffects;
+    if (pendingEffects.length === 0) return;
+    executeProjectSessionEffects(pendingEffects, {
+      requestAutosave: (revision) => {
+        pendingProjectSessionAutosaveRevisionRef.current = revision;
+      }
+    });
+    setProjectSessionState((current) => current.pendingEffects === pendingEffects
+      ? { ...current, pendingEffects: [] }
+      : current);
+  }, [projectSessionState.pendingEffects]);
+
+  useEffect(() => {
     if (autosavePaused) return;
+    const requestedProjectRevision = pendingProjectSessionAutosaveRevisionRef.current;
+    if (requestedProjectRevision !== null && requestedProjectRevision !== projectSession.revision) return;
     const snapshot = buildProjectSnapshot();
     if (!snapshot) return;
     setProjectStatus("Unsaved changes");
     const timeoutId = window.setTimeout(() => {
       try {
         localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serializeCutoutProject(snapshot));
+        if (pendingProjectSessionAutosaveRevisionRef.current === requestedProjectRevision) {
+          pendingProjectSessionAutosaveRevisionRef.current = null;
+        }
         setProjectStatus("Auto-saved");
       } catch {
         setProjectStatus("Auto-save failed");
@@ -408,7 +467,8 @@ function App() {
     traceViewport,
     cleanupChecks,
     workflowProgress,
-    autosavePaused
+    autosavePaused,
+    projectSession.revision
   ]);
 
   useEffect(() => {
@@ -713,7 +773,7 @@ function App() {
         setImage(file);
         setSourceImageDataUrl(await readFileAsDataUrl(file));
       }
-      setProjectName(cleanedProjectNameFromFileName(file.name));
+      applyProjectSessionAction({ type: "rename-project", projectName: cleanedProjectNameFromFileName(file.name) });
       setProjectCreatedAt(new Date().toISOString());
     } catch (err) {
       setImage(null);
@@ -740,10 +800,13 @@ function App() {
     setSvgImportedDetailDataUrl(null);
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(null);
-    setProjectName("Cutout Project");
+    hydrateProjectSession({
+      projectName: "Cutout Project",
+      settings: defaultSettings,
+      analysis: null
+    });
     setProjectCreatedAt(null);
     setProjectStatus("No saved project");
-    setSettings(defaultSettings);
     applyTraceModeUiState("paint");
     setAdvancedOpen(false);
     setAnalysis(null);
@@ -857,16 +920,18 @@ function App() {
     setSvgImportedDetailDataUrl(project.editedDetailPngDataUrl);
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(project.sourceImage.dataUrl);
-    setProjectName(project.projectName);
+    hydrateProjectSession({
+      projectName: project.projectName,
+      settings: project.settings,
+      analysis: project.analysis
+    });
     setProjectCreatedAt(project.createdAt);
-    setSettings(project.settings);
     applyTraceModeUiState(project.traceMode);
     setManualStrokes(project.manualStrokes);
     setProjectPalette(project.projectPalette);
     setSelectedPaintColorIds([]);
     setPaintReviewFilter("all");
     setShoppingListStatus("");
-    setAnalysis(project.analysis);
     setEditorOpen(opensEditorWithReference(project.traceMode) || project.manualStrokes.length > 0);
     setShowReference(project.layerVisibility.showReference);
     setReferenceOpacity(project.referenceOpacity);
@@ -901,15 +966,39 @@ function App() {
   }
 
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
-    const next = { ...settings, [key]: value };
-    setSettings(next);
     if (key === "finishedHeightIn") {
-      setAnalysis((current) => current
-        ? resizeAnalysisForFinishedHeight(current, value as Settings["finishedHeightIn"])
-        : current);
+      applyProjectSessionAction({
+        type: "change-finished-size",
+        finishedHeightIn: value as Settings["finishedHeightIn"]
+      });
       return;
     }
+    const next = { ...settings, [key]: value };
+    setSettings(next);
     setAnalysis(null);
+  }
+
+  function applyProjectSessionAction(action: ProjectSessionAction) {
+    setProjectSessionState((current) => reduceProjectSessionTransition(current, action));
+  }
+
+  function hydrateProjectSession(project: typeof projectSession.project) {
+    setProjectSessionState((current) => reduceProjectSessionTransition(current, {
+      type: "hydrate-project",
+      project
+    }));
+  }
+
+  function reduceProjectSessionTransition(
+    current: AppProjectSessionState,
+    action: ProjectSessionAction<typeof projectSession.project>
+  ): AppProjectSessionState {
+    const transition = transitionProjectSession(current.session, action);
+    if (transition.session === current.session && transition.effects.length === 0) return current;
+    return {
+      session: transition.session,
+      pendingEffects: [...current.pendingEffects, ...transition.effects]
+    };
   }
 
   function closeFileMenu() {
@@ -1795,9 +1884,13 @@ function App() {
                 <input
                   aria-label="Project name (optional)"
                   type="text"
-                  value={projectName}
-                  onChange={(event) => setProjectName(event.target.value)}
-                  onBlur={() => setProjectName((name) => name.trim() || "Cutout Project")}
+                  value={projectNameDraft}
+                  onChange={(event) => setProjectNameDraft(event.target.value)}
+                  onBlur={() => {
+                    const normalizedName = projectNameDraft.trim() || "Cutout Project";
+                    setProjectNameDraft(normalizedName);
+                    applyProjectSessionAction({ type: "rename-project", projectName: normalizedName });
+                  }}
                 />
               </label>
               <button className="primary-action upload-primary-action" onClick={() => void generateTemplate("balanced")} disabled={!canAnalyze}>
@@ -3369,6 +3462,12 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(reader.error ?? new Error("Unable to read file."));
     reader.readAsDataURL(file);
   });
+}
+
+function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
 }
 
 async function fileFromDataUrl(dataUrl: string, name: string, type: string) {
