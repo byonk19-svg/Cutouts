@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createCutoutProjectSnapshot, restoreCutoutProject, serializeCutoutProject } from "../src/cutoutProject.ts";
 import { buildTraceLineworkSvg, svgLineworkFileName } from "../src/traceLineworkSvg.ts";
 import { changeTraceStrokeWidth, createTraceStroke, moveTraceStroke } from "../src/traceStrokes.ts";
@@ -10,6 +11,14 @@ function assert(condition: unknown, message: string) {
 
 function assertEqual(actual: unknown, expected: unknown, message: string) {
   if (actual !== expected) throw new Error(`${message}: expected ${expected}, got ${actual}`);
+}
+
+function protectedSvgGeometryDigest(svg: string) {
+  const opening = svg.split("\n", 1)[0];
+  const cutline = svg.match(/<path id="cutline-layer"[^>]*\/>/)?.[0] ?? "";
+  const manualStrokes = svg.match(/<g id="manual-strokes"[\s\S]*?<\/g>/)?.[0] ?? "";
+  const calibration = svg.match(/<g id="print-calibration"[\s\S]*?<\/g>/)?.[0] ?? "";
+  return createHash("sha256").update([opening, cutline, manualStrokes, calibration].join("\n")).digest("hex");
 }
 
 const settings: Settings = {
@@ -139,19 +148,36 @@ const analysis = {
 }
 
 {
+  const featureLines = [createTraceStroke("manual-eye", [{ x: 40, y: 70 }, { x: 64, y: 70 }], 10)];
+  const baselineSvg = buildTraceLineworkSvg({
+    projectName: "Accepted starter details",
+    analysis,
+    manualStrokes: featureLines,
+    acceptedDetailPngDataUrl: "data:image/png;base64,previous-accepted-detail-lines",
+    includeCutline: true,
+    includeSuggestions: true,
+    includeCalibration: true
+  });
   const svg = buildTraceLineworkSvg({
     projectName: "Accepted starter details",
     analysis,
-    manualStrokes: [],
+    manualStrokes: featureLines,
     acceptedDetailPngDataUrl: "data:image/png;base64,accepted-detail-lines",
     includeCutline: true,
-    includeSuggestions: true
+    includeSuggestions: true,
+    includeCalibration: true
   });
 
   assert(svg.includes('id="accepted-detail-layer"'), "SVG export should include accepted edited starter detail layer");
   assert(svg.includes("data:image/png;base64,accepted-detail-lines"), "SVG export should use the accepted edited starter detail data");
+  assert(!svg.includes("previous-accepted-detail-lines"), "SVG export should not retain a replaced accepted detail layer");
   assert(!svg.includes('id="suggestion-layer"'), "SVG export should suppress raw suggestions when accepted details are provided");
   assert(!svg.includes("data:image/png;base64,suggestion-lines"), "SVG export should not reintroduce deleted raw suggestions when accepted details are provided");
+  assertEqual(
+    protectedSvgGeometryDigest(svg),
+    protectedSvgGeometryDigest(baselineSvg),
+    "replacing accepted detail data should not change SVG size, viewBox, cutline, calibration, or manual Feature Lines"
+  );
 }
 
 {

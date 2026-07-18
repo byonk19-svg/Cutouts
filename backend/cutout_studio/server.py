@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from .ai_linework import CONFIRMED_ESTIMATE_USD, generate_linework_proposal
 from .pipeline import TemplateSettings, analyze_template, build_template_pdf, match_paint_hex
 
 
@@ -28,6 +30,9 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
             if self.path == "/api/match-color":
                 self._handle_match_color()
                 return
+            if self.path == "/api/generate-linework":
+                self._handle_generate_linework()
+                return
             image_bytes, settings, edited_detail = self._read_template_request()
             if self.path == "/api/analyze":
                 analysis = analyze_template(image_bytes, settings)
@@ -51,13 +56,20 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
         print(f"{self.address_string()} - {format % args}")
 
     def _read_template_request(self) -> tuple[bytes, TemplateSettings, bytes | None]:
+        form = self._read_template_form()
+        image_bytes, settings = self._image_and_settings(form)
+        return image_bytes, settings, form.get("editedDetail")
+
+    def _read_template_form(self) -> dict[str, bytes]:
         content_type = self.headers.get("Content-Type", "")
         if not content_type.startswith("multipart/form-data"):
             raise ValueError("Request must be multipart/form-data.")
 
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
-        form = _parse_multipart(body, content_type)
+        return _parse_multipart(body, content_type)
+
+    def _image_and_settings(self, form: dict[str, bytes]) -> tuple[bytes, TemplateSettings]:
         image_bytes = form.get("image")
         if not image_bytes:
             raise ValueError("An image file is required.")
@@ -66,8 +78,54 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
             settings_data = json.loads(settings_payload)
         except json.JSONDecodeError as exc:
             raise ValueError("Settings must be valid JSON.") from exc
-        edited_detail = form.get("editedDetail")
-        return image_bytes, TemplateSettings.from_mapping(settings_data), edited_detail
+        return image_bytes, TemplateSettings.from_mapping(settings_data)
+
+    def _handle_generate_linework(self) -> None:
+        form = self._read_template_form()
+        image_bytes, settings = self._image_and_settings(form)
+        try:
+            confirmation = json.loads(form.get("confirmation", b"{}").decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("AI proposal confirmation must be valid JSON.") from exc
+        if not isinstance(confirmation, dict):
+            raise ValueError("AI proposal confirmation must be an object.")
+        upload_confirmed = confirmation.get("uploadConfirmed") is True
+        confirmed_estimate = confirmation.get("estimatedCostUsd")
+        if not upload_confirmed or confirmed_estimate != CONFIRMED_ESTIMATE_USD:
+            raise ValueError(
+                f"Confirm the source-image upload and exact ${CONFIRMED_ESTIMATE_USD:.2f} estimate before generating."
+            )
+
+        analysis = analyze_template(image_bytes, settings)
+        if not analysis.outer_cut_path.strip():
+            raise ValueError("A valid Cut Line is required before generating an AI proposal.")
+        if analysis.trace_quality.get("detailExtractionModeUsed") != "rendered":
+            raise ValueError("AI proposals are available only for a Needs Simplification source.")
+        proposal = generate_linework_proposal(
+            image_bytes,
+            analysis.outer_line_png,
+            preview_size=(analysis.preview_width_px, analysis.preview_height_px),
+            upload_confirmed=True,
+            confirmed_estimate_usd=CONFIRMED_ESTIMATE_USD,
+        )
+        self._send_json(
+            {
+                "status": proposal.status,
+                "validationIssues": list(proposal.validation_issues),
+                "canReplaceAcceptedDetail": proposal.can_replace_accepted_detail,
+                "proposalPreviewPngDataUrl": _png_data_url(proposal.preview_png),
+                "proposalDetailPngDataUrl": _png_data_url(proposal.detail_png),
+                "inkCoverage": proposal.ink_coverage,
+                "suppressedPixelCount": proposal.suppressed_pixel_count,
+                "previewWidthPx": proposal.preview_size[0],
+                "previewHeightPx": proposal.preview_size[1],
+                "providerOutputWidthPx": proposal.provider_output_size[0] if proposal.provider_output_size else None,
+                "providerOutputHeightPx": proposal.provider_output_size[1] if proposal.provider_output_size else None,
+                "model": proposal.model,
+                "provider": proposal.provider,
+                "estimatedCostUsd": proposal.estimated_cost_usd,
+            }
+        )
 
     def _handle_match_color(self) -> None:
         content_type = self.headers.get("Content-Type", "")
@@ -151,6 +209,10 @@ def _field_name(headers: str) -> str | None:
             if segment.startswith("name="):
                 return segment.split("=", 1)[1].strip().strip('"')
     return None
+
+
+def _png_data_url(payload: bytes) -> str:
+    return "data:image/png;base64," + base64.b64encode(payload).decode("ascii")
 
 
 def main() -> None:

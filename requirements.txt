@@ -2,4 +2,5 @@ Pillow
 numpy
 opencv-python-headless
 pypdf
+PyMuPDF
 reportlab

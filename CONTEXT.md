@@ -60,6 +60,43 @@ The image provided by the maker as the basis for a cutout template. In the first
 
 Replacing the Source Image resets generated analysis and every downstream Review Milestone. Changing project name or Finished Size does not change image geometry, so it preserves cleaned linework, paint selections, and completed milestones.
 
+### Input Readiness
+
+The classification that determines how Cutout Studio obtains starter Detail
+Lines. Ready Line Art has usable authored or detected linework and stays on the
+local SVG or deterministic tracing path. Needs Simplification is a rendered or
+photographic source for which the maker may explicitly request an optional AI
+proposal after a valid Cut Line exists.
+
+### AI-Assisted Simplification
+
+An optional, maker-initiated cloud request for one Wood-Transfer Style interior
+Detail Line proposal. Before the request, Cutout Studio discloses that the
+Source Image will be uploaded under the provider's normal retention terms and
+requires confirmation of the exact estimated cost. It never runs for Ready
+Line Art, never retries automatically, and never owns the Cut Line or print
+geometry.
+
+### Wood-Transfer Style
+
+The single AI proposal style. It favors sparse, deliberate feature and major
+paint-boundary lines while excluding shading, texture, background decoration,
+and duplicate silhouettes.
+
+### AI Linework Proposal
+
+A preview-sized, alpha-safe raster normalized into a transparent black Detail
+Line candidate. Cutout Studio applies deterministic technical validation and
+`exterior-component-band-24` suppression before displaying it. The proposal is
+separate from accepted Detail Lines and cannot become editable or exportable
+without a later explicit maker review decision.
+
+### Simplification Attempt
+
+One confirmed provider request with an exact estimated cost of $0.10 and no
+automatic retry. A request failure or review-only result leaves the accepted
+Detail Line layer unchanged. The existing SVG Fast Path remains fully local.
+
 ### Removable Background
 
 A transparent, white, or simple background that can be separated from the subject using deterministic image-processing settings such as thresholding.

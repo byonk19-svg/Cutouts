@@ -1,11 +1,14 @@
+import hashlib
 import io
+import json
 import math
 import re
 import unittest
 from pathlib import Path
 
+import fitz
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 from pypdf import PdfReader
 
 import backend.cutout_studio.pipeline as pipeline
@@ -35,6 +38,50 @@ from backend.cutout_studio.debug_trace_layers import export_trace_debug_layers
 
 
 CORALINE_FIXTURE_DIR = Path(__file__).with_name("fixtures") / "coraline"
+
+
+def protected_pdf_geometry_digest(reader: PdfReader) -> str:
+    protected_text_prefixes = (
+        "Finished size:",
+        "Trace pages:",
+        "1-inch calibration square",
+        "Page ",
+        "Row ",
+        "Overlap guide:",
+    )
+    pages = []
+    for page in reader.pages:
+        content = page.get_contents()
+        normalized_content = re.sub(
+            rb"/FormXob\.[0-9a-f]+ Do",
+            b"/FormXob.<accepted-detail> Do",
+            content.get_data() if content is not None else b"",
+        ).decode("latin-1")
+        media_box = [float(value) for value in page.mediabox]
+        protected_text = [
+            line.strip()
+            for line in (page.extract_text() or "").splitlines()
+            if line.strip().startswith(protected_text_prefixes)
+        ]
+        image_geometry = [list(image.image.size) for image in page.images]
+        pages.append({
+            "mediaBox": media_box,
+            "rotation": int(page.get("/Rotate", 0)),
+            "protectedText": protected_text,
+            "imageGeometry": image_geometry,
+            "normalizedContent": normalized_content,
+        })
+    manifest = {"pageCount": len(reader.pages), "pages": pages}
+    return hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def render_pdf_pages(pdf_bytes: bytes) -> list[Image.Image]:
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+        return [
+            Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+            for page in document
+            for pixmap in [page.get_pixmap(alpha=False)]
+        ]
 
 
 def transparent_fixture() -> bytes:
@@ -1199,6 +1246,65 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreaterEqual(len(accepted_detail_reader.pages), 3)
         self.assertEqual(baseline_dark_pixels, 0)
         self.assertGreater(accepted_detail_dark_pixels, 1_000)
+
+    def test_accepted_ai_fixture_preserves_protected_pdf_geometry_digest(self) -> None:
+        settings = TemplateSettings(
+            project_name="Accepted AI Fixture",
+            finished_height_in=18,
+            threshold=40,
+            palette_size=3,
+            detail_lines=False,
+            include_instruction_cover_page=True,
+            include_paint_guide_page=False,
+        )
+        source_image = (CORALINE_FIXTURE_DIR / "coraline-best-clean-outline.png").read_bytes()
+        accepted_detail_png = (CORALINE_FIXTURE_DIR / "coraline-detail-layer.png").read_bytes()
+
+        baseline_pdf = build_template_pdf(source_image, settings)
+        accepted_pdf = build_template_pdf(source_image, settings, edited_detail_png=accepted_detail_png)
+        baseline_reader = PdfReader(io.BytesIO(baseline_pdf))
+        accepted_reader = PdfReader(io.BytesIO(accepted_pdf))
+        baseline_pages = render_pdf_pages(baseline_pdf)
+        accepted_pages = render_pdf_pages(accepted_pdf)
+        first_tile_page = int(settings.include_instruction_cover_page)
+        baseline_dark_pixels = sum(
+            self._count_dark_pixels(page.images[0].image)
+            for page in baseline_reader.pages[first_tile_page:]
+        )
+        accepted_dark_pixels = sum(
+            self._count_dark_pixels(page.images[0].image)
+            for page in accepted_reader.pages[first_tile_page:]
+        )
+
+        self.assertEqual(
+            protected_pdf_geometry_digest(accepted_reader),
+            protected_pdf_geometry_digest(baseline_reader),
+        )
+        self.assertEqual(len(accepted_reader.pages), len(baseline_reader.pages))
+        self.assertGreater(accepted_dark_pixels, baseline_dark_pixels + 5_000)
+        self.assertEqual(baseline_pages[0].tobytes(), accepted_pages[0].tobytes())
+
+        changed_rendered_pixels = 0
+        for baseline_page, accepted_page in zip(
+            baseline_pages[first_tile_page:],
+            accepted_pages[first_tile_page:],
+        ):
+            self.assertEqual(accepted_page.size, (612, 792))
+            difference = ImageChops.difference(baseline_page, accepted_page)
+            difference_box = difference.getbbox()
+            self.assertIsNotNone(difference_box)
+            assert difference_box is not None
+            self.assertGreaterEqual(difference_box[0], 25)
+            self.assertGreaterEqual(difference_box[1], 55)
+            self.assertLessEqual(difference_box[2], 587)
+            self.assertLessEqual(difference_box[3], 768)
+            self.assertEqual(
+                sum(1 for red, green, blue in accepted_page.get_flattened_data() if red != green or green != blue),
+                0,
+            )
+            changed_rendered_pixels += sum(1 for pixel in difference.convert("L").get_flattened_data() if pixel > 0)
+
+        self.assertGreater(changed_rendered_pixels, 20_000)
 
     def _count_mask_pixels(self, image: Image.Image) -> int:
         return sum(1 for pixel in list(image.convert("L").get_flattened_data()) if pixel > 0)
