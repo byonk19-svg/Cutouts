@@ -12,13 +12,14 @@ import {
   type CutoutProjectAnalysis
 } from "./cutoutProject";
 import {
+  createProjectSessionPersistenceCoordinator,
   createProjectSession,
-  executeProjectSessionEffects,
   projectSessionView,
   transitionProjectSession,
   type ProjectSession,
   type ProjectSessionAction,
   type ProjectSessionEffect,
+  type ProjectPersistenceSnapshot,
   type ProjectSessionSourceImage
 } from "./projectSession.ts";
 import { previewDetailSegment, previewFirstDetailSegment, removeDetailSegmentPreview, type DetailSegmentPreview } from "./detailEditor";
@@ -124,10 +125,15 @@ type AppProjectSessionProject = {
   projectPalette: ProjectPaintColor[];
   workflowProgress: WorkflowProgress;
   cleanupChecks: Record<CleanupStep, boolean>;
+  createdAt: string | null;
+  traceMode: TraceMode;
+  referenceOpacity: number;
+  layerVisibility: CutoutProject["layerVisibility"];
+  traceViewport: TraceViewport;
 };
 type AppProjectSessionState = {
   session: ProjectSession<AppProjectSessionProject>;
-  pendingEffects: readonly ProjectSessionEffect[];
+  pendingEffects: readonly ProjectSessionEffect<AppProjectSessionProject>[];
 };
 type PaintGuidePatch = Partial<Omit<ProjectPaintColor, "id" | "source">>;
 type PreparedSourceCandidate = {
@@ -179,6 +185,53 @@ const defaultSettings: Settings = {
   includePaintGuidePage: true
 };
 
+function cutoutProjectFromPersistenceSnapshot(
+  snapshot: ProjectPersistenceSnapshot<AppProjectSessionProject>
+): CutoutProject {
+  const project = snapshot.project;
+  if (!project.sourceImage || !project.analysis) {
+    throw new Error("The project is not ready to save.");
+  }
+  const now = new Date().toISOString();
+  return createCutoutProjectSnapshot({
+    projectName: project.projectName,
+    createdAt: project.createdAt ?? now,
+    updatedAt: now,
+    sourceImage: project.sourceImage,
+    settings: project.settings,
+    traceMode: project.traceMode,
+    analysis: project.analysis,
+    editedDetailPngDataUrl: project.traceMode === "manual" ? null : project.editedDetailPngDataUrl,
+    manualStrokes: project.manualStrokes,
+    projectPalette: project.projectPalette,
+    paintGuideEdits: paintGuideEditsFromProjectPalette(project.projectPalette),
+    referenceOpacity: project.referenceOpacity,
+    layerVisibility: { ...project.layerVisibility, printPreview: false },
+    traceViewport: project.traceViewport,
+    cleanupChecks: project.cleanupChecks,
+    workflowProgress: project.workflowProgress
+  });
+}
+
+function appProjectFromCutoutProject(project: CutoutProject): AppProjectSessionProject {
+  return {
+    projectName: project.projectName,
+    settings: project.settings,
+    sourceImage: project.sourceImage,
+    analysis: project.analysis,
+    editedDetailPngDataUrl: project.editedDetailPngDataUrl,
+    manualStrokes: project.manualStrokes,
+    projectPalette: project.projectPalette,
+    workflowProgress: project.workflowProgress,
+    cleanupChecks: project.cleanupChecks,
+    createdAt: project.createdAt,
+    traceMode: project.traceMode,
+    referenceOpacity: project.referenceOpacity,
+    layerVisibility: { ...project.layerVisibility, printPreview: false },
+    traceViewport: project.traceViewport
+  };
+}
+
 function App() {
   const [image, setImage] = useState<File | null>(null);
   const [sourceImageDataUrl, setSourceImageDataUrl] = useState<string | null>(null);
@@ -192,7 +245,18 @@ function App() {
       manualStrokes: [],
       projectPalette: [],
       workflowProgress: DEFAULT_WORKFLOW_PROGRESS,
-      cleanupChecks: { cutline: false, remove: false, draw: false, export: false }
+      cleanupChecks: { cutline: false, remove: false, draw: false, export: false },
+      createdAt: null,
+      traceMode: "paint",
+      referenceOpacity: 35,
+      layerVisibility: {
+        showReference: false,
+        showCutline: true,
+        showManualLines: true,
+        showSuggestions: false,
+        printPreview: false
+      },
+      traceViewport: DEFAULT_TRACE_VIEWPORT
     }),
     pendingEffects: []
   }));
@@ -205,12 +269,15 @@ function App() {
     editedDetailPngDataUrl: editedDetailDataUrl,
     manualStrokes,
     projectPalette,
-    cleanupChecks
+    cleanupChecks,
+    traceMode,
+    referenceOpacity,
+    layerVisibility: { showReference, showCutline, showManualLines, showSuggestions },
+    traceViewport
   } = projectSession.project;
   const projectCapabilities = projectSessionView(projectSession).capabilities;
   const workflowProgress = projectCapabilities.guidedWorkflow.progress;
   const [projectNameDraft, setProjectNameDraft] = useState(projectName);
-  const pendingProjectSessionAutosaveRevisionRef = useRef<number | null>(null);
   const setSettings = (action: SetStateAction<Settings>) => {
     const currentSettings = projectSessionRef.current.project.settings;
     applyProjectSessionAction({
@@ -248,25 +315,44 @@ function App() {
       projectPalette: resolveStateAction(action, current)
     });
   };
+  const updateWorkspacePreferences = (
+    preferences: Partial<Pick<AppProjectSessionProject, "traceMode" | "referenceOpacity" | "layerVisibility" | "traceViewport">>
+  ) => applyProjectSessionAction({ type: "update-workspace-preferences", preferences });
+  const setTraceMode = (action: SetStateAction<TraceMode>) => {
+    const current = projectSessionRef.current.project.traceMode;
+    updateWorkspacePreferences({ traceMode: resolveStateAction(action, current) });
+  };
+  const setReferenceOpacity = (action: SetStateAction<number>) => {
+    const current = projectSessionRef.current.project.referenceOpacity;
+    updateWorkspacePreferences({ referenceOpacity: resolveStateAction(action, current) });
+  };
+  const setLayerVisibility = (
+    key: "showReference" | "showCutline" | "showManualLines" | "showSuggestions",
+    action: SetStateAction<boolean>
+  ) => {
+    const current = projectSessionRef.current.project.layerVisibility;
+    updateWorkspacePreferences({
+      layerVisibility: { ...current, [key]: resolveStateAction(action, current[key]), printPreview: false }
+    });
+  };
+  const setShowReference = (action: SetStateAction<boolean>) => setLayerVisibility("showReference", action);
+  const setShowCutline = (action: SetStateAction<boolean>) => setLayerVisibility("showCutline", action);
+  const setShowManualLines = (action: SetStateAction<boolean>) => setLayerVisibility("showManualLines", action);
+  const setShowSuggestions = (action: SetStateAction<boolean>) => setLayerVisibility("showSuggestions", action);
+  const setTraceViewport = (action: SetStateAction<TraceViewport>) => {
+    const current = projectSessionRef.current.project.traceViewport;
+    updateWorkspacePreferences({ traceViewport: resolveStateAction(action, current) });
+  };
   const [sourceCandidate, setSourceCandidate] = useState<PreparedSourceCandidate | null>(null);
   const [sourceReadPending, setSourceReadPending] = useState(false);
-  const [projectCreatedAt, setProjectCreatedAt] = useState<string | null>(null);
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>("No saved project");
-  const [autosavePaused, setAutosavePaused] = useState(false);
-  const [traceMode, setTraceMode] = useState<TraceMode>("paint");
   const [autoStarterOpen, setAutoStarterOpen] = useState(true);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTool, setEditorTool] = useState<EditorTool>("remove");
   const [brushSize, setBrushSize] = useState<BrushSize>("normal");
-  const [showReference, setShowReference] = useState(false);
-  const [referenceOpacity, setReferenceOpacity] = useState(35);
-  const [showCutline, setShowCutline] = useState(true);
-  const [showManualLines, setShowManualLines] = useState(true);
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [printPreview, setPrintPreview] = useState(false);
   const [editableDetailLinesPresent, setEditableDetailLinesPresent] = useState(false);
-  const [traceViewport, setTraceViewport] = useState<TraceViewport>(DEFAULT_TRACE_VIEWPORT);
   const [cutlineBounds, setCutlineBounds] = useState<TraceBounds | null>(null);
   const [cutlineBoundsResolved, setCutlineBoundsResolved] = useState(false);
   const [detailLineBounds, setDetailLineBounds] = useState<TraceBounds | null>(null);
@@ -320,6 +406,26 @@ function App() {
   const traceContentBoundsRef = useRef<TraceBounds | null>(null);
   const removalPreviewRef = useRef<DetailSegmentPreview | null>(null);
   const [removalPreviewCount, setRemovalPreviewCount] = useState(0);
+  const persistenceCoordinatorRef = useRef<ReturnType<typeof createProjectSessionPersistenceCoordinator<AppProjectSessionProject>> | null>(null);
+  if (persistenceCoordinatorRef.current === null) {
+    persistenceCoordinatorRef.current = createProjectSessionPersistenceCoordinator<AppProjectSessionProject>({
+      debounceMs: 450,
+      schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      cancel: (handle) => window.clearTimeout(handle as number),
+      serialize: (snapshot) => serializeCutoutProject(cutoutProjectFromPersistenceSnapshot(snapshot)),
+      writeAutosave: (serialized) => localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serialized),
+      downloadProject: (serialized, snapshot) => {
+        const blob = new Blob([serialized], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = projectFileName(snapshot.project.projectName);
+        link.click();
+        URL.revokeObjectURL(url);
+      },
+      clearAutosave: () => localStorage.removeItem(CUTOUT_AUTOSAVE_KEY)
+    });
+  }
 
   const selectedImage = sourceCandidate?.file ?? image;
   const canAnalyze = selectedImage !== null && !busy && !sourceReadPending && projectCapabilities.analyzeSource;
@@ -418,9 +524,7 @@ function App() {
     try {
       const rawProject = localStorage.getItem(CUTOUT_AUTOSAVE_KEY);
       if (!rawProject) return;
-      void applyProject(restoreCutoutProject(rawProject), "Restored auto-save").catch(() => {
-        setProjectStatus("Project import failed");
-      });
+      void restoreProjectFromText(rawProject, "Restored auto-save", false);
     } catch {
       setProjectStatus("Project import failed");
     }
@@ -433,60 +537,28 @@ function App() {
   useEffect(() => {
     const pendingEffects = projectSessionState.pendingEffects;
     if (pendingEffects.length === 0) return;
-    executeProjectSessionEffects(pendingEffects, {
-      requestAutosave: (revision) => {
-        pendingProjectSessionAutosaveRevisionRef.current = revision;
-      },
-      clearAutosave: () => localStorage.removeItem(CUTOUT_AUTOSAVE_KEY)
-    });
+    const coordinator = persistenceCoordinatorRef.current;
+    if (!coordinator) return;
+    for (const effect of pendingEffects) {
+      if (effect.type === "request-autosave") setProjectStatus("Unsaved changes");
+      void coordinator.execute(effect, (resultAction) => {
+        const transition = applyProjectSessionAction(resultAction);
+        if (transition.outcome.status === "stale") return;
+        if (resultAction.type === "persistence-succeeded") {
+          setProjectStatus(resultAction.mode === "autosave" ? "Auto-saved" : "Saved");
+        } else {
+          setProjectStatus(resultAction.mode === "autosave" ? "Auto-save failed" : "Project export failed");
+        }
+      });
+    }
     setProjectSessionState((current) => current.pendingEffects === pendingEffects
       ? { ...current, pendingEffects: [] }
       : current);
   }, [projectSessionState.pendingEffects]);
 
   useEffect(() => {
-    if (autosavePaused) return;
-    const requestedProjectRevision = pendingProjectSessionAutosaveRevisionRef.current;
-    if (requestedProjectRevision !== null && requestedProjectRevision !== projectSession.revision) return;
-    const snapshot = buildProjectSnapshot();
-    if (!snapshot) return;
-    setProjectStatus("Unsaved changes");
-    const timeoutId = window.setTimeout(() => {
-      try {
-        localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serializeCutoutProject(snapshot));
-        if (pendingProjectSessionAutosaveRevisionRef.current === requestedProjectRevision) {
-          pendingProjectSessionAutosaveRevisionRef.current = null;
-        }
-        setProjectStatus("Auto-saved");
-      } catch {
-        setProjectStatus("Auto-save failed");
-      }
-    }, 450);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [
-    image,
-    sourceImageDataUrl,
-    projectName,
-    projectCreatedAt,
-    settings,
-    traceMode,
-    analysis,
-    manualStrokes,
-    projectPalette,
-    referenceOpacity,
-    showReference,
-    showCutline,
-    showManualLines,
-    showSuggestions,
-    printPreview,
-    editedDetailDataUrl,
-    traceViewport,
-    cleanupChecks,
-    workflowProgress,
-    autosavePaused,
-    projectSession.revision
-  ]);
+    return () => persistenceCoordinatorRef.current?.dispose();
+  }, []);
 
   useEffect(() => {
     if (!analysis || !editorOpen) return;
@@ -614,7 +686,8 @@ function App() {
         settings: nextSettings,
         analysis: body,
         initialDetailPngDataUrl: importedSvgDetail,
-        initialProjectPalette
+        initialProjectPalette,
+        ...(candidate ? { createdAt: new Date().toISOString() } : {})
       });
       if (completed.outcome.status === "stale") return;
       if (completed.outcome.status !== "successful") {
@@ -631,7 +704,6 @@ function App() {
         setSvgSourceInkDataUrl(candidate.sourceInkDataUrl);
         setSvgLineworkDetected(candidate.lineworkDetected);
         setSourceCandidate((current) => current?.generation === candidate.generation ? null : current);
-        setProjectCreatedAt(new Date().toISOString());
       }
       setEditedDetailDataUrl(importedSvgDetail);
       setSvgImportedDetailDataUrl(importedSvgDetail);
@@ -873,11 +945,21 @@ function App() {
         manualStrokes: [],
         projectPalette: [],
         workflowProgress: DEFAULT_WORKFLOW_PROGRESS,
-        cleanupChecks: { cutline: false, remove: false, draw: false, export: false }
+        cleanupChecks: { cutline: false, remove: false, draw: false, export: false },
+        createdAt: null,
+        traceMode: "paint",
+        referenceOpacity: 35,
+        layerVisibility: {
+          showReference: false,
+          showCutline: true,
+          showManualLines: true,
+          showSuggestions: false,
+          printPreview: false
+        },
+        traceViewport: DEFAULT_TRACE_VIEWPORT
       }
     });
     if (confirmed.outcome.status !== "successful") return;
-    setAutosavePaused(true);
     sourceSelectionGenerationRef.current += 1;
     setSourceCandidate(null);
     setSourceReadPending(false);
@@ -886,7 +968,6 @@ function App() {
     setSvgImportedDetailDataUrl(null);
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(null);
-    setProjectCreatedAt(null);
     setProjectStatus("No saved project");
     applyTraceModeUiState("paint");
     setAdvancedOpen(false);
@@ -904,7 +985,6 @@ function App() {
     resetEditorState();
     setError(null);
     strokeIdRef.current = 0;
-    window.setTimeout(() => setAutosavePaused(false), 100);
   }
 
   function navigateToWorkflowStep(step: WorkflowStep) {
@@ -921,104 +1001,63 @@ function App() {
     targetElement?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function buildProjectSnapshot() {
-    if (!image || !sourceImageDataUrl || !analysis) return null;
-    const now = new Date().toISOString();
-    return createCutoutProjectSnapshot({
-      projectName,
-      createdAt: projectCreatedAt ?? now,
-      updatedAt: now,
-      sourceImage: {
-        name: image.name,
-        type: image.type || "application/octet-stream",
-        dataUrl: sourceImageDataUrl
-      },
-      settings,
-      traceMode,
-      analysis,
-      editedDetailPngDataUrl: traceStudioOpen ? null : editedDetailDataUrl,
-      manualStrokes,
-      projectPalette,
-      paintGuideEdits: paintGuideEditsFromProjectPalette(projectPalette),
-      referenceOpacity,
-      layerVisibility: {
-        showReference,
-        showCutline,
-        showManualLines,
-        showSuggestions,
-        printPreview
-      },
-      traceViewport,
-      cleanupChecks,
-      workflowProgress
-    });
-  }
-
-  function downloadProjectFile(status: ProjectStatus) {
-    const project = buildProjectSnapshot();
-    if (!project) return;
-    try {
-      const blob = new Blob([serializeCutoutProject(project)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = projectFileName(project.projectName);
-      link.click();
-      URL.revokeObjectURL(url);
-      localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serializeCutoutProject(project));
-      setProjectStatus(status);
-    } catch {
-      setProjectStatus("Project export failed");
-    }
+  function downloadProjectFile() {
+    if (!canSaveProject) return;
+    applyProjectSessionAction({ type: "request-explicit-save" });
   }
 
   async function openProjectFile(file: File | null) {
     if (!file) return;
+    await restoreProject(() => file.text(), "Project opened", true);
+  }
+
+  async function restoreProjectFromText(text: string, status: ProjectStatus, requestAutosave: boolean) {
+    await restoreProject(() => Promise.resolve(text), status, requestAutosave);
+  }
+
+  async function restoreProject(
+    readProject: () => Promise<string>,
+    status: ProjectStatus,
+    requestAutosave: boolean
+  ) {
+    const preparing = applyProjectSessionAction({ type: "begin-project-preparation", operation: "restore-project" });
+    if (preparing.outcome.status !== "preparing") return;
+    const token = preparing.outcome.token;
     try {
-      const text = await file.text();
-      const project = restoreCutoutProject(text);
-      await applyProject(project, "Project opened");
-      localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serializeCutoutProject(project));
-    } catch {
+      const project = restoreCutoutProject(await readProject());
+      const restoredFile = await fileFromDataUrl(project.sourceImage.dataUrl, project.sourceImage.name, project.sourceImage.type);
+      const completed = applyProjectSessionAction({
+        type: "complete-project-restore",
+        token,
+        project: appProjectFromCutoutProject(project),
+        requestAutosave
+      });
+      if (completed.outcome.status !== "successful") return;
+      installRestoredProjectRuntime(project, restoredFile, status);
+    } catch (restoreError) {
+      const message = restoreError instanceof Error ? restoreError.message : "Unable to open that project file.";
+      const failed = applyProjectSessionAction({ type: "fail-project-preparation", token, error: message });
+      if (failed.outcome.status === "stale") return;
       setProjectStatus("Project import failed");
       setError("Unable to open that project file.");
     }
   }
 
-  async function applyProject(project: CutoutProject, status: ProjectStatus) {
+  function installRestoredProjectRuntime(project: CutoutProject, restoredFile: File, status: ProjectStatus) {
     resetAiProposalState();
-    const restoredFile = await fileFromDataUrl(project.sourceImage.dataUrl, project.sourceImage.name, project.sourceImage.type);
-    setAutosavePaused(true);
     setColorDetailsOpen(false);
     setImage(restoredFile);
     setSvgSourceInkDataUrl(null);
     setSvgImportedDetailDataUrl(project.editedDetailPngDataUrl);
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(project.sourceImage.dataUrl);
-    hydrateProjectSession({
-      projectName: project.projectName,
-      settings: project.settings,
-      sourceImage: project.sourceImage,
-      analysis: project.analysis,
-      editedDetailPngDataUrl: project.editedDetailPngDataUrl,
-      manualStrokes: project.manualStrokes,
-      projectPalette: project.projectPalette,
-      workflowProgress: project.workflowProgress,
-      cleanupChecks: project.cleanupChecks
-    });
-    setProjectCreatedAt(project.createdAt);
-    applyTraceModeUiState(project.traceMode);
+    setAutoStarterOpen(project.traceMode !== "manual");
+    setEditorTool(defaultEditorToolForTraceMode(project.traceMode));
     setSelectedPaintColorIds([]);
     setPaintReviewFilter("all");
     setShoppingListStatus("");
     setEditorOpen(opensEditorWithReference(project.traceMode) || project.manualStrokes.length > 0);
-    setShowReference(project.layerVisibility.showReference);
-    setReferenceOpacity(project.referenceOpacity);
-    setShowCutline(project.layerVisibility.showCutline);
-    setShowManualLines(project.layerVisibility.showManualLines);
-    setShowSuggestions(project.layerVisibility.showSuggestions);
     setPrintPreview(false);
-    setTraceViewport(project.traceViewport);
     pendingContentFitRef.current = isDefaultTraceViewport(project.traceViewport);
     viewportUserModifiedRef.current = !isDefaultTraceViewport(project.traceViewport);
     setSelectedStrokeId(null);
@@ -1031,7 +1070,6 @@ function App() {
     setError(null);
     setProjectStatus(status);
     strokeIdRef.current = highestStrokeNumber(project.manualStrokes);
-    window.setTimeout(() => setAutosavePaused(false), 100);
   }
 
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -1054,13 +1092,6 @@ function App() {
       pendingEffects: [...current.pendingEffects, ...transition.effects]
     }));
     return transition;
-  }
-
-  function hydrateProjectSession(project: typeof projectSession.project) {
-    return applyProjectSessionAction({
-      type: "hydrate-project",
-      project
-    });
   }
 
   function closeFileMenu() {
@@ -1839,7 +1870,7 @@ function App() {
               </button>
               <button type="button" onClick={() => {
                 closeFileMenu();
-                downloadProjectFile("Saved");
+                downloadProjectFile();
               }} disabled={!canSaveProject}>
                 <Save size={15} />
                 Save Project
@@ -2916,7 +2947,7 @@ function App() {
               onToggleColorGuide={() => setExportColorGuide(!settings.includePaintGuidePage)}
               onDownloadPdf={() => void exportPdf()}
               onDownloadSvg={exportSvgLinework}
-              onSaveProject={() => downloadProjectFile("Saved")}
+              onSaveProject={downloadProjectFile}
             />
           </div>
         ) : null}

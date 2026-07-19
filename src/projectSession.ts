@@ -26,6 +26,11 @@ export type ProjectSessionProject = {
   manualStrokes?: readonly unknown[];
   projectPalette?: readonly unknown[];
   workflowProgress?: WorkflowProgress;
+  createdAt?: string | null;
+  traceMode?: unknown;
+  referenceOpacity?: number;
+  layerVisibility?: unknown;
+  traceViewport?: unknown;
   cleanupChecks?: {
     cutline: boolean;
     remove: boolean;
@@ -41,7 +46,8 @@ export type ProjectSessionSourceImage = {
   dataUrl: string;
 };
 
-export type ProjectPreparationOperation = "replace-source" | "regenerate-analysis";
+export type ProjectPreparationOperation = "replace-source" | "regenerate-analysis" | "restore-project";
+export type ProjectSourcePreparationOperation = Exclude<ProjectPreparationOperation, "restore-project">;
 
 export type ProjectPreparationToken = {
   revision: number;
@@ -56,12 +62,19 @@ export type ProjectOperationStatus =
   | { status: "successful"; operation: ProjectPreparationOperation | "new-project" }
   | { status: "stale"; operation: ProjectPreparationOperation };
 
+export type ProjectPersistenceHealth =
+  | { status: "idle" }
+  | { status: "pending"; revision: number; mode: "autosave" | "explicit" }
+  | { status: "saved"; revision: number; mode: "autosave" | "explicit" }
+  | { status: "failed"; revision: number; mode: "autosave" | "explicit"; error: string };
+
 export type ProjectSession<TProject extends ProjectSessionProject = ProjectSessionProject> = {
   revision: number;
   project: TProject;
   operation: ProjectOperationStatus;
   nextOperationId: number;
   guidedWorkflowBlocked: boolean;
+  persistence: ProjectPersistenceHealth;
 };
 
 export type GuidedWorkflowCapabilities = {
@@ -98,27 +111,34 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
       manualStrokes: readonly unknown[];
     }
   | { type: "update-project-palette"; projectPalette: readonly unknown[] }
+  | { type: "update-workspace-preferences"; preferences: Partial<Pick<ProjectSessionProject, "traceMode" | "referenceOpacity" | "layerVisibility" | "traceViewport">> }
   | { type: "set-color-guide-included"; included: boolean }
   | { type: "set-guided-workflow-blocked"; blocked: boolean }
+  | { type: "request-explicit-save" }
+  | { type: "persistence-succeeded"; revision: number; mode: "autosave" | "explicit" }
+  | { type: "persistence-failed"; revision: number; mode: "autosave" | "explicit"; error: string }
   | { type: "begin-project-preparation"; operation: ProjectPreparationOperation }
   | { type: "complete-project-preparation"; token: ProjectPreparationToken }
   | { type: "fail-project-preparation"; token: ProjectPreparationToken; error: string }
   | {
       type: "complete-source-analysis";
       token: ProjectPreparationToken;
-      mode: ProjectPreparationOperation;
+      mode: ProjectSourcePreparationOperation;
       projectName?: string;
       sourceImage?: ProjectSessionSourceImage;
       settings: Settings;
       analysis: CutoutProjectAnalysis;
       initialDetailPngDataUrl: string | null;
       initialProjectPalette: readonly unknown[];
+      createdAt?: string;
     }
+  | { type: "complete-project-restore"; token: ProjectPreparationToken; project: TProject; requestAutosave: boolean }
   | { type: "cancel-new-project" }
   | { type: "confirm-new-project"; project: TProject };
 
-export type ProjectSessionEffect =
-  | { type: "request-autosave"; revision: number }
+export type ProjectSessionEffect<TProject extends ProjectSessionProject = ProjectSessionProject> =
+  | { type: "request-autosave"; revision: number; project: TProject }
+  | { type: "request-explicit-save"; revision: number; project: TProject }
   | { type: "clear-autosave" };
 
 export type ProjectSessionTransition<TProject extends ProjectSessionProject> = {
@@ -132,12 +152,14 @@ export type ProjectSessionTransition<TProject extends ProjectSessionProject> = {
     | { status: "successful" }
     | { status: "stale" }
     | { status: "cancelled" }
+    | { status: "save-requested" }
     | { status: "rejected"; error: { code: ProjectSessionRejectionCode; message: string } };
-  effects: readonly ProjectSessionEffect[];
+  effects: readonly ProjectSessionEffect<TProject>[];
 };
 
 export type ProjectSessionRejectionCode =
   | "invalid-project-name"
+  | "invalid-project-file"
   | "invalid-finished-size"
   | "analysis-size-mismatch"
   | "locked-workflow-step"
@@ -146,8 +168,9 @@ export type ProjectSessionRejectionCode =
   | "color-review-required"
   | "workflow-blocked";
 
-export type ProjectSessionEffectAdapter = {
-  requestAutosave: (revision: number) => void;
+export type ProjectSessionEffectAdapter<TProject extends ProjectSessionProject = ProjectSessionProject> = {
+  requestAutosave: (revision: number, project: TProject) => void;
+  requestExplicitSave?: (revision: number, project: TProject) => void;
   clearAutosave?: () => void;
 };
 
@@ -159,7 +182,8 @@ export function createProjectSession<TProject extends ProjectSessionProject>(
     project: normalizeProjectWorkflow(project),
     operation: { status: "idle" },
     nextOperationId: 1,
-    guidedWorkflowBlocked: false
+    guidedWorkflowBlocked: false,
+    persistence: { status: "idle" }
   };
 }
 
@@ -178,6 +202,43 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
   session: ProjectSession<TProject>,
   action: ProjectSessionAction<TProject>
 ): ProjectSessionTransition<TProject> {
+  if (action.type === "request-explicit-save") {
+    if (!isPersistableProject(session.project)) {
+      return rejectedTransition(session, "invalid-project-file", "The project is not ready to save.");
+    }
+    const nextSession = {
+      ...session,
+      persistence: { status: "pending", revision: session.revision, mode: "explicit" } as const
+    };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "save-requested" },
+      effects: [{ type: "request-explicit-save", revision: session.revision, project: session.project }]
+    };
+  }
+  if (action.type === "persistence-succeeded" || action.type === "persistence-failed") {
+    if (
+      action.revision !== session.revision
+      || session.persistence.status !== "pending"
+      || session.persistence.revision !== action.revision
+      || session.persistence.mode !== action.mode
+    ) {
+      return { session, capabilities: projectCapabilities(session), outcome: { status: "stale" }, effects: [] };
+    }
+    const persistence = action.type === "persistence-succeeded"
+      ? { status: "saved", revision: action.revision, mode: action.mode } as const
+      : { status: "failed", revision: action.revision, mode: action.mode, error: action.error } as const;
+    const nextSession = { ...session, persistence };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: action.type === "persistence-succeeded"
+        ? { status: "successful" }
+        : { status: "failed", error: action.error },
+      effects: []
+    };
+  }
   if (action.type === "set-guided-workflow-blocked") {
     if (session.guidedWorkflowBlocked === action.blocked) return unchangedTransition(session);
     const nextSession = { ...session, guidedWorkflowBlocked: action.blocked };
@@ -263,6 +324,13 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     if (session.project.projectPalette === action.projectPalette) return unchangedTransition(session);
     return applyProjectTransition(session, { ...session.project, projectPalette: action.projectPalette } as TProject);
   }
+  if (action.type === "update-workspace-preferences") {
+    const project = { ...session.project, ...action.preferences } as TProject;
+    if (Object.entries(action.preferences).every(([key, value]) => session.project[key as keyof TProject] === value)) {
+      return unchangedTransition(session);
+    }
+    return applyProjectTransition(session, project);
+  }
   if (action.type === "set-color-guide-included") {
     const progress = normalizedWorkflowProgress(session.project);
     if (progress.colorsOutcome === "incomplete" || (progress.colorsOutcome === "skipped" && action.included)) {
@@ -318,6 +386,29 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       effects: []
     };
   }
+  if (action.type === "complete-project-restore") {
+    if (!isCurrentPreparation(session, action.token) || action.token.operation !== "restore-project") {
+      return staleTransition(session, action.token);
+    }
+    const revision = session.revision + 1;
+    const project = normalizeProjectWorkflow(action.project);
+    const nextSession = {
+      ...session,
+      revision,
+      project,
+      guidedWorkflowBlocked: false,
+      operation: { status: "successful", operation: "restore-project" } as const,
+      persistence: action.requestAutosave
+        ? { status: "pending", revision, mode: "autosave" } as const
+        : { status: "saved", revision, mode: "autosave" } as const
+    };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "successful" },
+      effects: action.requestAutosave ? [autosaveEffect(nextSession)] : []
+    };
+  }
   if (action.type === "complete-source-analysis") {
     if (!isCurrentPreparation(session, action.token) || action.mode !== action.token.operation) {
       return staleTransition(session, action.token);
@@ -340,7 +431,11 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     const project = {
       ...session.project,
       ...(action.mode === "replace-source"
-        ? { projectName: action.projectName!.trim(), sourceImage: action.sourceImage! }
+        ? {
+            projectName: action.projectName!.trim(),
+            sourceImage: action.sourceImage!,
+            ...(action.createdAt ? { createdAt: action.createdAt } : {})
+          }
         : {}),
       settings: action.settings,
       analysis: action.analysis,
@@ -356,13 +451,14 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       ...session,
       revision,
       project,
-      operation: { status: "successful", operation: action.mode } as const
+      operation: { status: "successful", operation: action.mode } as const,
+      persistence: { status: "pending", revision, mode: "autosave" } as const
     };
     return {
       session: nextSession,
       capabilities: projectCapabilities(nextSession),
       outcome: { status: "successful" },
-      effects: [{ type: "request-autosave", revision }]
+      effects: [autosaveEffect(nextSession)]
     };
   }
   if (action.type === "cancel-new-project") {
@@ -379,7 +475,8 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       revision: session.revision + 1,
       project: normalizeProjectWorkflow(action.project),
       guidedWorkflowBlocked: false,
-      operation: { status: "successful", operation: "new-project" } as const
+      operation: { status: "successful", operation: "new-project" } as const,
+      persistence: { status: "idle" } as const
     };
     return {
       session: nextSession,
@@ -447,24 +544,119 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
             } as TProject
           : { ...session.project, analysis: action.analysis } as TProject;
   const revision = session.revision + 1;
-  const nextSession = { ...session, revision, project };
+  const persistable = isPersistableProject(project);
+  const nextSession = {
+    ...session,
+    revision,
+    project,
+    persistence: persistable
+      ? { status: "pending", revision, mode: "autosave" } as const
+      : { status: "idle" } as const
+  };
 
   return {
     session: nextSession,
     capabilities: projectCapabilities(nextSession),
     outcome: { status: "applied" },
-    effects: [{ type: "request-autosave", revision }]
+    effects: persistable ? [autosaveEffect(nextSession)] : []
   };
 }
 
-export function executeProjectSessionEffects(
-  effects: readonly ProjectSessionEffect[],
-  adapter: ProjectSessionEffectAdapter
+export function executeProjectSessionEffects<TProject extends ProjectSessionProject>(
+  effects: readonly ProjectSessionEffect<TProject>[],
+  adapter: ProjectSessionEffectAdapter<TProject>
 ) {
   for (const effect of effects) {
-    if (effect.type === "request-autosave") adapter.requestAutosave(effect.revision);
+    if (effect.type === "request-autosave") adapter.requestAutosave(effect.revision, effect.project);
+    if (effect.type === "request-explicit-save") adapter.requestExplicitSave?.(effect.revision, effect.project);
     if (effect.type === "clear-autosave") adapter.clearAutosave?.();
   }
+}
+
+export type ProjectPersistenceSnapshot<TProject extends ProjectSessionProject> = {
+  revision: number;
+  project: TProject;
+};
+
+export type ProjectSessionPersistenceCoordinatorAdapter<TProject extends ProjectSessionProject> = {
+  debounceMs: number;
+  schedule: (callback: () => void | Promise<void>, delayMs: number) => unknown;
+  cancel: (handle: unknown) => void;
+  serialize: (snapshot: ProjectPersistenceSnapshot<TProject>) => string;
+  writeAutosave: (serialized: string) => void | Promise<void>;
+  downloadProject: (serialized: string, snapshot: ProjectPersistenceSnapshot<TProject>) => void | Promise<void>;
+  clearAutosave: () => void | Promise<void>;
+};
+
+export type ProjectPersistenceResultAction =
+  | { type: "persistence-succeeded"; revision: number; mode: "autosave" | "explicit" }
+  | { type: "persistence-failed"; revision: number; mode: "autosave" | "explicit"; error: string };
+
+export function createProjectSessionPersistenceCoordinator<TProject extends ProjectSessionProject>(
+  adapter: ProjectSessionPersistenceCoordinatorAdapter<TProject>
+) {
+  let pendingAutosave: unknown | null = null;
+
+  function reportFailure(
+    report: (action: ProjectPersistenceResultAction) => void,
+    revision: number,
+    mode: "autosave" | "explicit",
+    error: unknown
+  ) {
+    report({
+      type: "persistence-failed",
+      revision,
+      mode,
+      error: error instanceof Error ? error.message : "Unable to save the project."
+    });
+  }
+
+  return {
+    execute(
+      effect: ProjectSessionEffect<TProject>,
+      report: (action: ProjectPersistenceResultAction) => void
+    ): void | Promise<void> {
+      if (effect.type === "clear-autosave") {
+        if (pendingAutosave !== null) adapter.cancel(pendingAutosave);
+        pendingAutosave = null;
+        return Promise.resolve(adapter.clearAutosave()).then(() => undefined);
+      }
+
+      const snapshot = { revision: effect.revision, project: effect.project };
+      if (effect.type === "request-autosave") {
+        if (pendingAutosave !== null) adapter.cancel(pendingAutosave);
+        const handle = adapter.schedule(async () => {
+          if (pendingAutosave === handle) pendingAutosave = null;
+          try {
+            const serialized = adapter.serialize(snapshot);
+            await adapter.writeAutosave(serialized);
+            report({ type: "persistence-succeeded", revision: effect.revision, mode: "autosave" });
+          } catch (error) {
+            reportFailure(report, effect.revision, "autosave", error);
+          }
+        }, adapter.debounceMs);
+        pendingAutosave = handle;
+        return;
+      }
+
+      if (pendingAutosave !== null) adapter.cancel(pendingAutosave);
+      pendingAutosave = null;
+      return (async () => {
+        try {
+          const serialized = adapter.serialize(snapshot);
+          await adapter.writeAutosave(serialized);
+          await adapter.downloadProject(serialized, snapshot);
+          report({ type: "persistence-succeeded", revision: effect.revision, mode: "explicit" });
+        } catch (error) {
+          reportFailure(report, effect.revision, "explicit", error);
+        }
+      })();
+    },
+    dispose() {
+      if (pendingAutosave !== null) adapter.cancel(pendingAutosave);
+      pendingAutosave = null;
+    }
+  };
 }
 
 function isCurrentPreparation<TProject extends ProjectSessionProject>(
@@ -573,6 +765,10 @@ function hasAnalysis(project: ProjectSessionProject) {
   return project.analysis !== null;
 }
 
+function isPersistableProject(project: ProjectSessionProject) {
+  return project.sourceImage != null && project.analysis !== null;
+}
+
 function hasValidCutLine(project: ProjectSessionProject) {
   return Boolean(project.analysis?.outerCutPath.trim());
 }
@@ -593,13 +789,27 @@ function applyProjectTransition<TProject extends ProjectSessionProject>(
   project: TProject
 ): ProjectSessionTransition<TProject> {
   const revision = session.revision + 1;
-  const nextSession = { ...session, revision, project: normalizeProjectWorkflow(project) };
+  const persistable = isPersistableProject(project);
+  const nextSession = {
+    ...session,
+    revision,
+    project: normalizeProjectWorkflow(project),
+    persistence: persistable
+      ? { status: "pending", revision, mode: "autosave" } as const
+      : { status: "idle" } as const
+  };
   return {
     session: nextSession,
     capabilities: projectCapabilities(nextSession),
     outcome: { status: "applied" },
-    effects: [{ type: "request-autosave", revision }]
+    effects: persistable ? [autosaveEffect(nextSession)] : []
   };
+}
+
+function autosaveEffect<TProject extends ProjectSessionProject>(
+  session: ProjectSession<TProject>
+): ProjectSessionEffect<TProject> {
+  return { type: "request-autosave", revision: session.revision, project: session.project };
 }
 
 function isValidFinishedHeight(value: number) {

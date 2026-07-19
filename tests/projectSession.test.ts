@@ -1,4 +1,5 @@
 import {
+  createProjectSessionPersistenceCoordinator,
   createProjectSession,
   executeProjectSessionEffects,
   projectSessionView,
@@ -193,7 +194,12 @@ for (const finishedHeightIn of [Number.NaN, -1, 5, 97]) {
 }
 
 {
-  const session = createProjectSession({ projectName: "Coraline", settings, analysis });
+  const session = createProjectSession({
+    projectName: "Coraline",
+    settings,
+    analysis,
+    sourceImage: { name: "coraline.png", type: "image/png", dataUrl: "data:image/png;base64,source" }
+  });
   const applied = transitionProjectSession(session, { type: "rename-project", projectName: "Coraline Revised" });
   const unchanged = transitionProjectSession(session, { type: "rename-project", projectName: "Coraline" });
   const requestedRevisions: number[] = [];
@@ -601,6 +607,186 @@ const lifecycleProject = {
   const bypassed = transitionProjectSession(clean.session, { type: "navigate-workflow", target: "colors" });
   assertEqual(bypassed.outcome.status, "rejected", "a disabled available-step request should be rejected at the public seam");
   assertEqual(bypassed.session, clean.session, "available-step bypass should preserve the current Clean Lines state");
+}
+
+const persistedWorkspace = {
+  createdAt: "2026-07-18T10:00:00.000Z",
+  traceMode: "manual" as const,
+  referenceOpacity: 57,
+  layerVisibility: {
+    showReference: true,
+    showCutline: true,
+    showManualLines: false,
+    showSuggestions: true,
+    printPreview: false
+  },
+  traceViewport: { zoom: 1.6, panX: 24, panY: -13 }
+};
+
+{
+  const session = createProjectSession({ ...lifecycleProject, ...persistedWorkspace });
+  const renamed = transitionProjectSession(session, { type: "rename-project", projectName: "Coherent revision" });
+  const autosave = renamed.effects.find((effect) => effect.type === "request-autosave");
+
+  assert(autosave?.type === "request-autosave", "a durable transition should request Autosave");
+  assertEqual(autosave.revision, renamed.session.revision, "Autosave should capture the resulting Project Revision");
+  assertEqual(autosave.project, renamed.session.project, "Autosave should capture one coherent project object");
+  assertEqual(autosave.project.projectName, "Coherent revision", "the captured snapshot should contain the applied change");
+
+  const explicit = transitionProjectSession(renamed.session, { type: "request-explicit-save" });
+  const save = explicit.effects.find((effect) => effect.type === "request-explicit-save");
+  assert(save?.type === "request-explicit-save", "explicit save should emit a persistence effect");
+  assertEqual(save.revision, renamed.session.revision, "explicit save should capture the current revision without changing it");
+  assertEqual(save.project, renamed.session.project, "explicit save should serialize one coherent project object");
+
+  const incompleteSession = createProjectSession({
+    ...persistedWorkspace,
+    projectName: "Not ready",
+    sourceImage: null,
+    analysis: null
+  });
+  const incompleteRename = transitionProjectSession(incompleteSession, {
+    type: "rename-project",
+    projectName: "Still not ready"
+  });
+  assertDeepEqual(incompleteRename.effects, [], "an incomplete workspace should not request an invalid Project File Autosave");
+  assertEqual(incompleteRename.session.persistence.status, "idle", "an incomplete workspace should not report a pending save");
+}
+
+{
+  const session = createProjectSession({ ...lifecycleProject, ...persistedWorkspace });
+  const preparing = transitionProjectSession(session, { type: "begin-project-preparation", operation: "restore-project" });
+  assertEqual(preparing.outcome.status, "preparing", "project open should begin controlled preparation");
+  if (preparing.outcome.status !== "preparing") throw new Error("expected restore token");
+
+  const failed = transitionProjectSession(preparing.session, {
+    type: "fail-project-preparation",
+    token: preparing.outcome.token,
+    error: "Unsupported project schema"
+  });
+  assertEqual(failed.outcome.status, "failed", "invalid project preparation should report failure");
+  assertEqual(failed.session.project, session.project, "invalid project preparation should preserve the active project");
+  assertEqual(failed.session.revision, session.revision, "invalid project preparation should preserve the revision");
+  assertEqual(failed.effects.length, 0, "invalid project preparation should preserve Autosave");
+
+  const retrying = transitionProjectSession(failed.session, { type: "begin-project-preparation", operation: "restore-project" });
+  if (retrying.outcome.status !== "preparing") throw new Error("expected retry restore token");
+  const restoredProject = {
+    ...lifecycleProject,
+    ...persistedWorkspace,
+    projectName: "Restored project",
+    workflowProgress: { activeStep: "export", lineworkReviewed: false, colorsOutcome: "reviewed" } as never
+  };
+  const restored = transitionProjectSession(retrying.session, {
+    type: "complete-project-restore",
+    token: retrying.outcome.token,
+    project: restoredProject,
+    requestAutosave: true
+  });
+  assertEqual(restored.outcome.status, "successful", "a validated project should install successfully");
+  assertEqual(restored.session.revision, session.revision + 1, "restore should apply one atomic Project Transition");
+  assertEqual(restored.session.project.projectName, "Restored project", "restore should install durable project fields");
+  assertEqual(restored.session.project.traceMode, "manual", "restore should install saved workspace preferences atomically");
+  assertDeepEqual(restored.session.project.workflowProgress, {
+    activeStep: "clean",
+    lineworkReviewed: false,
+    colorsOutcome: "incomplete"
+  }, "restore should normalize malformed Workflow Progress against artifacts");
+  assertEqual(restored.effects.length, 1, "opening a valid Project File should create one Autosave opportunity");
+}
+
+{
+  const session = createProjectSession({ ...lifecycleProject, ...persistedWorkspace });
+  const first = transitionProjectSession(session, { type: "begin-project-preparation", operation: "restore-project" });
+  if (first.outcome.status !== "preparing") throw new Error("expected restore token");
+  const changed = transitionProjectSession(first.session, { type: "rename-project", projectName: "Newer active work" });
+  const stale = transitionProjectSession(changed.session, {
+    type: "complete-project-restore",
+    token: first.outcome.token,
+    project: { ...lifecycleProject, ...persistedWorkspace, projectName: "Late restore" },
+    requestAutosave: true
+  });
+  assertEqual(stale.outcome.status, "stale", "a late project-open result should be discarded");
+  assertEqual(stale.session.project.projectName, "Newer active work", "a late restore should not rewind newer work");
+}
+
+{
+  type TimerTask = { id: number; callback: () => void | Promise<void>; cancelled: boolean };
+  const tasks: TimerTask[] = [];
+  const autosaves: string[] = [];
+  const downloads: string[] = [];
+  const results: unknown[] = [];
+  let nextTimerId = 1;
+  let failAutosave = false;
+  const coordinator = createProjectSessionPersistenceCoordinator({
+    debounceMs: 450,
+    schedule: (callback) => {
+      const task = { id: nextTimerId++, callback, cancelled: false };
+      tasks.push(task);
+      return task.id;
+    },
+    cancel: (id) => {
+      const task = tasks.find((candidate) => candidate.id === id);
+      if (task) task.cancelled = true;
+    },
+    serialize: ({ revision, project }) => JSON.stringify({ revision, projectName: project.projectName }),
+    writeAutosave: (serialized) => {
+      if (failAutosave) throw new Error("Storage quota exceeded");
+      autosaves.push(serialized);
+    },
+    downloadProject: (serialized) => downloads.push(serialized),
+    clearAutosave: () => autosaves.splice(0)
+  });
+  const initial = createProjectSession({ ...lifecycleProject, ...persistedWorkspace });
+  const first = transitionProjectSession(initial, { type: "rename-project", projectName: "First debounce value" });
+  const second = transitionProjectSession(first.session, { type: "rename-project", projectName: "Latest debounce value" });
+  const firstEffect = first.effects[0];
+  const secondEffect = second.effects[0];
+  if (!firstEffect || !secondEffect) throw new Error("expected Autosave effects");
+
+  coordinator.execute(firstEffect, (result) => results.push(result));
+  coordinator.execute(secondEffect, (result) => results.push(result));
+  assertEqual(tasks.length, 2, "each new Autosave request should replace the debounce timer");
+  assertEqual(tasks[0]?.cancelled, true, "the older debounce timer should be cancelled");
+  await tasks[1]?.callback();
+  assertEqual(autosaves.length, 1, "debouncing should write only the latest coherent revision");
+  assert(autosaves[0]?.includes("Latest debounce value"), "Autosave should serialize the latest captured project");
+  assertEqual((results[0] as { type?: string }).type, "persistence-succeeded", "successful Autosave should report persistence health");
+
+  failAutosave = true;
+  const failing = transitionProjectSession(second.session, { type: "rename-project", projectName: "Fails Autosave" });
+  if (!failing.effects[0]) throw new Error("expected failing Autosave effect");
+  coordinator.execute(failing.effects[0], (result) => results.push(result));
+  await tasks[2]?.callback();
+  assertEqual(tasks.length, 3, "Autosave failure should not start an automatic retry timer");
+  assertEqual((results[1] as { type?: string }).type, "persistence-failed", "Autosave failure should report persistence health");
+  const failedHealth = transitionProjectSession(failing.session, results[1] as never);
+  assertEqual(failedHealth.session.project, failing.session.project, "Autosave failure should not roll back in-memory project work");
+  assertEqual(failedHealth.session.persistence.status, "failed", "Autosave failure should remain visible on the session");
+
+  const explicitWhileAutosaveFinishes = transitionProjectSession(failing.session, { type: "request-explicit-save" });
+  const lateAutosaveResult = transitionProjectSession(explicitWhileAutosaveFinishes.session, {
+    type: "persistence-failed",
+    revision: failing.session.revision,
+    mode: "autosave",
+    error: "late Autosave result"
+  });
+  assertEqual(lateAutosaveResult.outcome.status, "stale", "a late Autosave result should not overwrite newer explicit-save health");
+  assertDeepEqual(lateAutosaveResult.session.persistence, explicitWhileAutosaveFinishes.session.persistence, "the current persistence attempt should remain authoritative");
+
+  failAutosave = false;
+  const retryOpportunity = transitionProjectSession(failedHealth.session, { type: "rename-project", projectName: "Retry opportunity" });
+  if (!retryOpportunity.effects[0]) throw new Error("expected next Autosave opportunity");
+  coordinator.execute(retryOpportunity.effects[0], (result) => results.push(result));
+  await tasks[3]?.callback();
+  assertEqual(autosaves.length, 2, "the next durable transition should create a new save opportunity");
+
+  const explicit = transitionProjectSession(retryOpportunity.session, { type: "request-explicit-save" });
+  if (!explicit.effects[0]) throw new Error("expected explicit save effect");
+  await coordinator.execute(explicit.effects[0], (result) => results.push(result));
+  assertEqual(downloads.length, 1, "explicit save should download exactly once");
+  assertEqual(autosaves.length, 3, "explicit save should refresh Autosave with the identical serialization");
+  assertEqual(downloads[0], autosaves[2], "explicit save and Autosave should use one coherent serialization");
 }
 
 console.log("project session tests passed");

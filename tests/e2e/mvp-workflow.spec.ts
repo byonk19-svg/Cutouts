@@ -48,6 +48,94 @@ test("locked Guided Workflow requests stay rejected when disabled controls are b
   await expect(cleanButton).toHaveAttribute("aria-current", "step");
 });
 
+test("project persistence keeps one coherent revision and recovers from a visible Autosave failure", async ({ page }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("persistence-test-started")) return;
+    localStorage.clear();
+    sessionStorage.setItem("persistence-test-started", "true");
+  });
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "persistence-session.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByLabel("Project name (optional)").fill("Persistence Session");
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const fileMenu = page.getByLabel("File menu");
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByText("Auto-saved")).toBeVisible({ timeout: 15_000 });
+  const initialAutosave = await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"));
+  expect(initialAutosave).not.toBeNull();
+  await fileMenu.getByText("File", { exact: true }).click();
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    let remainingFailures = 1;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === "cutout-studio:auto-save:v1" && remainingFailures > 0) {
+        remainingFailures -= 1;
+        throw new Error("controlled Autosave failure");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  const showOriginal = page.getByLabel("Trace Studio layer visibility").getByLabel("Show original");
+  await expect(showOriginal).toBeChecked();
+  await showOriginal.uncheck();
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByText("Auto-save failed")).toBeVisible({ timeout: 15_000 });
+  await expect(showOriginal).not.toBeChecked();
+  expect(await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"))).toBe(initialAutosave);
+
+  const projectDownloadPromise = page.waitForEvent("download");
+  await fileMenu.getByRole("button", { name: "Save Project" }).click();
+  const projectDownload = await projectDownloadPromise;
+  const serializedProject = await readDownloadText(projectDownload);
+  const downloadedProject = JSON.parse(serializedProject);
+  expect(downloadedProject.projectName).toBe("Persistence Session");
+  expect(downloadedProject.layerVisibility.showReference).toBe(false);
+  for (const runtimeOnlyField of ["operation", "persistence", "pendingEffects", "unacceptedAiProposal", "manualHistory", "manualRedoHistory", "history", "redoHistory", "selectedStrokeId", "aiProposalReview"]) {
+    expect(downloadedProject).not.toHaveProperty(runtimeOnlyField);
+  }
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByText("Saved")).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"))).toBe(serializedProject);
+
+  await fileMenu.getByText("File", { exact: true }).click();
+  await showOriginal.check();
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "restored.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(serializedProject)
+  });
+  await expect(showOriginal).not.toBeChecked();
+  await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
+  const editorTools = page.getByLabel("Template editor tools");
+  await expect(editorTools.getByRole("button", { name: "Undo" })).toBeDisabled();
+  await expect(editorTools.getByRole("button", { name: "Redo" })).toBeDisabled();
+
+  const autosaveBeforeInvalidOpen = await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"));
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "unsupported.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ schemaVersion: 999 }))
+  });
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByText("Project import failed")).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"))).toBe(autosaveBeforeInvalidOpen);
+  await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
+
+  await page.reload();
+  await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
+});
+
 test("project name and Finished Size preserve reviewed project work", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
   await page.goto("/");
