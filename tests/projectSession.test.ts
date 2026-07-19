@@ -22,6 +22,51 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string) {
   }
 }
 
+function paintMatch(id: string, brand: string, line: string, colorName: string, hex: string) {
+  return {
+    id,
+    brand,
+    line,
+    colorName,
+    hex,
+    finish: "matte",
+    outdoorRecommended: false,
+    retailer: "",
+    productUrl: "",
+    notes: "",
+    distance: 4.2,
+    confidence: "close match" as const
+  };
+}
+
+function projectPaintColor(input: {
+  id: string;
+  hex: string;
+  label: string;
+  note?: string;
+  included?: boolean;
+  selectedMatchId?: string | null;
+  manualOverride?: string;
+  coverage?: number;
+  matches?: ReturnType<typeof paintMatch>[];
+  locked?: boolean;
+  source?: "detected" | "manual";
+}) {
+  return {
+    id: input.id,
+    hex: input.hex,
+    label: input.label,
+    note: input.note ?? "",
+    included: input.included ?? true,
+    selectedMatchId: input.selectedMatchId ?? null,
+    manualOverride: input.manualOverride ?? "",
+    coverage: input.coverage ?? 0,
+    matches: input.matches ?? [],
+    locked: input.locked ?? false,
+    source: input.source ?? "detected"
+  };
+}
+
 const settings: Settings = {
   finishedHeightIn: 36,
   threshold: 42,
@@ -59,6 +104,48 @@ const analysis = {
   }
 };
 
+const navyPaintMatch = paintMatch("folkart-outdoor-navy", "FolkArt", "Outdoor", "Navy", "#1f315d");
+const yellowPaintMatch = paintMatch("apple-barrel-bright-yellow", "Apple Barrel", "Matte Acrylic", "Bright Yellow", "#f6cc27");
+const bluePaintMatch = paintMatch("folkart-deep-blue", "FolkArt", "Outdoor", "Deep Blue", "#2563eb");
+const peachPaintMatch = paintMatch("folkart-skin-tone", "FolkArt", "Multi-Surface", "Portrait Light", "#f0c3a2");
+const detectedPalette = [
+  { hex: "#0c143a", coverage: 0.32, matches: [navyPaintMatch] },
+  { hex: "#f1ce2d", coverage: 0.24, matches: [yellowPaintMatch] }
+];
+const analysisWithPalette = {
+  ...analysis,
+  palette: detectedPalette
+};
+const defaultProjectPalette = [
+  projectPaintColor({
+    id: "detected-1-0c143a",
+    hex: "#0c143a",
+    label: "Hair / outline",
+    note: "marker outline",
+    coverage: 0.32,
+    matches: [navyPaintMatch]
+  }),
+  projectPaintColor({
+    id: "detected-2-f1ce2d",
+    hex: "#f1ce2d",
+    label: "Raincoat",
+    note: "main coat",
+    selectedMatchId: yellowPaintMatch.id,
+    coverage: 0.24,
+    matches: [yellowPaintMatch]
+  }),
+  projectPaintColor({
+    id: "manual-3-f1c7a5",
+    hex: "#f1c7a5",
+    label: "Skin tone",
+    note: "face and hands",
+    manualOverride: "Choose a peach skin tone",
+    matches: [peachPaintMatch],
+    locked: true,
+    source: "manual"
+  })
+];
+
 const pendingAiProposal = {
   status: "pending-review" as const,
   validationIssues: [],
@@ -88,7 +175,7 @@ const preservedProjectFields = {
   },
   editedDetailPngDataUrl: "data:image/png;base64,accepted-detail",
   manualStrokes: [{ id: "eye", points: [{ x: 12, y: 18 }, { x: 20, y: 24 }] }],
-  projectPalette: [{ id: "yellow", hex: "#facc15", label: "Raincoat" }],
+  projectPalette: defaultProjectPalette,
   workflowProgress: { activeStep: "colors", lineworkReviewed: true, colorsOutcome: "reviewed" },
   cleanupChecks: { cutline: true, remove: true, draw: true, export: false },
   referenceOpacity: 42,
@@ -251,10 +338,10 @@ const lifecycleProject = {
   projectName: "Coraline",
   settings,
   sourceImage: preservedProjectFields.sourceImage,
-  analysis,
+  analysis: analysisWithPalette,
   editedDetailPngDataUrl: preservedProjectFields.editedDetailPngDataUrl,
   manualStrokes: preservedProjectFields.manualStrokes,
-  projectPalette: preservedProjectFields.projectPalette,
+  projectPalette: defaultProjectPalette,
   workflowProgress: preservedProjectFields.workflowProgress,
   cleanupChecks: preservedProjectFields.cleanupChecks
 };
@@ -581,7 +668,11 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 
 {
   const session = createProjectSession(lifecycleProject);
-  const preparing = transitionProjectSession(session, { type: "begin-project-preparation", operation: "replace-source" });
+  const matching = transitionProjectSession(session, {
+    type: "begin-project-paint-match",
+    id: session.project.projectPalette[0].id
+  });
+  const preparing = transitionProjectSession(matching.session, { type: "begin-project-preparation", operation: "replace-source" });
   if (preparing.outcome.status !== "preparing") throw new Error("expected a preparation token");
   const replacementAnalysis = {
     ...analysis,
@@ -589,7 +680,15 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     outerCutPath: "M 5 5 L 105 5 L 105 155 L 5 155 Z",
     palette: [{ index: 0, hex: "#2563eb", weight: 1, matches: [] }]
   };
-  const replacementPalette = [{ id: "blue", hex: "#2563eb", label: "New source blue" }];
+  const replacementPalette = [
+    projectPaintColor({
+      id: "detected-1-2563eb",
+      hex: "#2563eb",
+      label: "New source blue",
+      coverage: 1,
+      matches: [bluePaintMatch]
+    })
+  ];
   const completed = transitionProjectSession(preparing.session, {
     type: "complete-source-analysis",
     token: preparing.outcome.token,
@@ -625,7 +724,15 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     export: false
   }, "replacement should reset source-dependent cleanup decisions");
   assertEqual(projectSessionView(completed.session).aiProposal.status, "idle", "replacement should clear transient proposal state");
+  assertEqual(projectSessionView(completed.session).paintMatch.status, "idle", "replacement should clear transient paint match state");
   assertEqual(completed.effects[0]?.type, "request-autosave", "replacement should request one Autosave");
+  const installedLabel = completed.session.project.projectPalette[0].label;
+  const installedMatchName = completed.session.project.projectPalette[0].matches[0].colorName;
+  replacementPalette[0].label = "Mutated after completion";
+  replacementPalette[0].matches[0].colorName = "Mutated match after completion";
+  assertEqual(completed.session.project.projectPalette[0].label, installedLabel, "source completion should snapshot incoming palette entries");
+  assertEqual(completed.session.project.projectPalette[0].matches[0].colorName, installedMatchName, "source completion should snapshot incoming paint matches");
+  assertEqual(completed.session.revision, 1, "external mutation after source completion should not create an untracked Project Revision");
 }
 
 {
@@ -640,7 +747,15 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     settings: { ...settings, detailCleanup: 72 },
     analysis: regeneratedAnalysis,
     initialDetailPngDataUrl: "data:image/png;base64,regenerated-imported-detail",
-    initialProjectPalette: [{ id: "yellow-2", hex: "#facc15", label: "Regenerated yellow" }]
+    initialProjectPalette: [
+      projectPaintColor({
+        id: "detected-2-facc15",
+        hex: "#facc15",
+        label: "Regenerated yellow",
+        coverage: 0.24,
+        matches: [yellowPaintMatch]
+      })
+    ]
   });
 
   assertEqual(completed.outcome.status, "successful", "same-source regeneration should expose successful status");
@@ -915,12 +1030,410 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     ...lifecycleProject,
     workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
   });
+  const added = transitionProjectSession(reviewed, {
+    type: "add-project-paint-color",
+    hex: "#123456",
+    label: "Trim",
+    note: "buttons"
+  });
+  assertEqual(added.outcome.status, "applied", "adding a manual paint color should apply through Project Session");
+  assertEqual(added.session.revision, reviewed.revision + 1, "adding a manual paint color should create one Project Revision");
+  assertEqual(added.effects.length, 1, "adding a manual paint color should request one Autosave");
+  assertEqual(added.session.project.workflowProgress?.colorsOutcome, "reviewed", "adding a manual paint color after Colors review should retain the milestone");
+  const addedColor = added.session.project.projectPalette.at(-1);
+  assert(addedColor, "a manual paint color should be appended");
+  assertEqual(
+    (added.outcome as { createdPaintColorId?: string }).createdPaintColorId,
+    addedColor.id,
+    "adding a manual paint color should report the created stable color identity"
+  );
+  assertEqual(addedColor.source, "manual", "added colors should be manual palette entries");
+  assertEqual(addedColor.hex, "#123456", "added colors should normalize their hex");
+
+  const removed = transitionProjectSession(added.session, {
+    type: "remove-project-paint-color",
+    id: addedColor.id
+  });
+  assertEqual(removed.outcome.status, "applied", "removing a paint color should apply");
+  assertEqual(removed.session.project.workflowProgress?.colorsOutcome, "reviewed", "removing a paint color after Colors review should retain the milestone");
+  assert(!removed.session.project.projectPalette.some((color) => color.id === addedColor.id), "removed colors should leave the palette");
+
+  const readded = transitionProjectSession(removed.session, {
+    type: "add-project-paint-color",
+    hex: "#123456",
+    label: "Trim",
+    note: "buttons"
+  });
+  const readdedColor = readded.session.project.projectPalette.at(-1);
+  assert(readdedColor, "re-adding should append a new color");
+  assert(readdedColor.id !== addedColor.id, "removing and re-adding a manual color should not reuse palette identity");
+
+  const invalidAdd = transitionProjectSession(reviewed, {
+    type: "add-project-paint-color",
+    hex: "#12",
+    label: "Broken"
+  });
+  assertEqual(invalidAdd.outcome.status, "rejected", "invalid manual paint hex should reject at the session seam");
+  if (invalidAdd.outcome.status !== "rejected") throw new Error("expected invalid add rejection");
+  assertEqual(invalidAdd.outcome.error.code, "invalid-paint-hex", "invalid manual paint hex should report a clear rejection code");
+  assertEqual(invalidAdd.outcome.error.message, "Enter a valid 3- or 6-digit hex color.", "invalid manual paint hex should report a clear rejection message");
+  assertEqual(invalidAdd.session, reviewed, "invalid manual paint hex should preserve the current session");
+  assertEqual(invalidAdd.effects.length, 0, "invalid manual paint hex should not request Autosave");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const updateTarget = reviewed.project.projectPalette[1];
+  const updated = transitionProjectSession(reviewed, {
+    type: "update-project-paint-color",
+    id: updateTarget.id,
+    patch: {
+      included: false,
+      label: "Blue coat",
+      hex: "#2563EB",
+      note: "trim and hood",
+      selectedMatchId: null,
+      manualOverride: "Choose in store",
+      locked: true
+    }
+  });
+  assertEqual(updated.outcome.status, "applied", "updating a targeted paint color should apply");
+  assertEqual(updated.session.project.projectPalette[1].included, false, "targeted updates should patch inclusion only on the requested color");
+  assertEqual(updated.session.project.projectPalette[1].label, "Blue coat", "targeted updates should patch label only on the requested color");
+  assertEqual(updated.session.project.projectPalette[1].hex, "#2563eb", "targeted updates should normalize the requested hex");
+  assertEqual(updated.session.project.projectPalette[1].manualOverride, "Choose in store", "targeted updates should patch manual override only on the requested color");
+  assertEqual(updated.session.project.projectPalette[1].locked, true, "targeted updates should patch lock state only on the requested color");
+  assertEqual(updated.session.project.projectPalette[0], reviewed.project.projectPalette[0], "targeted updates should preserve other palette entries");
+
+  const invalidUpdate = transitionProjectSession(reviewed, {
+    type: "update-project-paint-color",
+    id: updateTarget.id,
+    patch: { hex: "#1" }
+  });
+  assertEqual(invalidUpdate.outcome.status, "rejected", "invalid targeted paint hex should reject at the session seam");
+  if (invalidUpdate.outcome.status !== "rejected") throw new Error("expected invalid update rejection");
+  assertEqual(invalidUpdate.outcome.error.code, "invalid-paint-hex", "invalid targeted paint hex should report a clear rejection code");
+  assertEqual(invalidUpdate.outcome.error.message, "Enter a valid 3- or 6-digit hex color.", "invalid targeted paint hex should report a clear rejection message");
+  assertEqual(invalidUpdate.session, reviewed, "invalid targeted paint hex should preserve the current session");
+  assertEqual(invalidUpdate.effects.length, 0, "invalid targeted paint hex should not request Autosave");
+
+  const missingUpdate = transitionProjectSession(reviewed, {
+    type: "update-project-paint-color",
+    id: "missing-color",
+    patch: { label: "Missing" }
+  });
+  assertEqual(missingUpdate.outcome.status, "rejected", "missing paint color updates should reject instead of mutating a different color");
+  assertEqual(missingUpdate.session, reviewed, "rejected updates should preserve the whole session");
+
+  const missingRemove = transitionProjectSession(reviewed, {
+    type: "remove-project-paint-color",
+    id: "missing-color"
+  });
+  assertEqual(missingRemove.outcome.status, "rejected", "missing paint color removals should reject");
+  assertEqual(missingRemove.session, reviewed, "rejected removals should preserve the whole session");
+
+  const ambiguousMerge = transitionProjectSession(reviewed, {
+    type: "merge-project-paint-colors",
+    ids: [reviewed.project.projectPalette[0].id, reviewed.project.projectPalette[0].id]
+  });
+  assertEqual(ambiguousMerge.outcome.status, "rejected", "ambiguous merge requests should reject instead of mutating a different color");
+  assertEqual(ambiguousMerge.session, reviewed, "rejected merges should preserve the whole session");
+}
+
+{
+  const duplicateAnalysis = {
+    ...analysisWithPalette,
+    palette: [
+      ...detectedPalette,
+      { hex: "#e4cc24", coverage: 0.18, matches: [yellowPaintMatch] }
+    ]
+  };
+  const duplicatePalette = [
+    projectPaintColor({
+      id: "detected-1-0c143a",
+      hex: "#0c143a",
+      label: "Hair / outline",
+      note: "marker outline",
+      coverage: 0.32,
+      matches: [navyPaintMatch]
+    }),
+    projectPaintColor({
+      id: "detected-2-f1ce2d",
+      hex: "#f1ce2d",
+      label: "Raincoat yellow",
+      note: "main coat",
+      selectedMatchId: yellowPaintMatch.id,
+      coverage: 0.24,
+      matches: [yellowPaintMatch]
+    }),
+    projectPaintColor({
+      id: "detected-3-e4cc24",
+      hex: "#e4cc24",
+      label: "Raincoat yellow",
+      note: "hood",
+      selectedMatchId: yellowPaintMatch.id,
+      coverage: 0.18,
+      matches: [yellowPaintMatch]
+    }),
+    defaultProjectPalette[2]
+  ];
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    analysis: duplicateAnalysis,
+    projectPalette: duplicatePalette,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const merged = transitionProjectSession(reviewed, {
+    type: "merge-project-paint-colors",
+    ids: [duplicatePalette[1].id, duplicatePalette[2].id]
+  });
+  assertEqual(merged.outcome.status, "applied", "merging palette colors should apply");
+  assertEqual(merged.session.project.projectPalette.length, 3, "merging should collapse the selected colors into one durable entry");
+  assertEqual(merged.session.project.projectPalette[1].coverage, 0.42, "merging should preserve combined coverage");
+  assertEqual(merged.session.project.workflowProgress?.colorsOutcome, "reviewed", "merging after Colors review should retain the milestone");
+
+  const reset = transitionProjectSession(merged.session, { type: "reset-project-palette-from-analysis" });
+  assertEqual(reset.outcome.status, "applied", "resetting the palette from current detected analysis should apply");
+  assertEqual(reset.session.project.projectPalette.length, duplicateAnalysis.palette.length, "palette reset should restore the current detected colors");
+  assert(reset.session.project.projectPalette.every((color) => color.source === "detected"), "palette reset should clear manual colors");
+  assertEqual(reset.session.project.workflowProgress?.colorsOutcome, "reviewed", "palette reset after Colors review should retain the milestone");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const begin = transitionProjectSession(reviewed, {
+    type: "begin-project-paint-match",
+    id: reviewed.project.projectPalette[0].id
+  });
+  assertEqual(begin.outcome.status, "requesting-paint-match", "beginning a paint match should expose a transient request outcome");
+  assertEqual(begin.session.revision, reviewed.revision, "beginning a paint match should not advance the Project Revision");
+  assertEqual(projectSessionView(begin.session).paintMatch.status, "requesting", "beginning a paint match should expose transient requesting state");
+  assertEqual(projectSessionView(begin.session).paintMatch.token.revision, reviewed.revision, "paint match tokens should carry the originating Project Revision");
+  assertEqual(projectSessionView(begin.session).paintMatch.token.colorId, reviewed.project.projectPalette[0].id, "paint match tokens should carry the targeted color identity");
+  assertEqual(projectSessionView(begin.session).paintMatch.token.expectedHex, "#0c143a", "paint match tokens should carry the normalized expected hex");
+
+  const failed = transitionProjectSession(begin.session, {
+    type: "fail-project-paint-match",
+    token: projectSessionView(begin.session).paintMatch.token,
+    error: "Unable to match paint colors."
+  });
+  assertEqual(failed.outcome.status, "failed", "paint match failure should report transient failure");
+  assertEqual(failed.session.revision, reviewed.revision, "paint match failure should preserve the Project Revision");
+  assertEqual(failed.session.project, reviewed.project, "paint match failure should preserve the durable project state");
+  assertEqual(projectSessionView(failed.session).paintMatch.status, "failed", "paint match failure should remain visible only as transient session state");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const begin = transitionProjectSession(reviewed, {
+    type: "begin-project-paint-match",
+    id: reviewed.project.projectPalette[1].id
+  });
+  assert(begin.outcome.status === "requesting-paint-match", "paint match begin should return a request token");
+  const outOfOrder = transitionProjectSession(begin.session, {
+    type: "begin-project-paint-match",
+    id: reviewed.project.projectPalette[1].id
+  });
+  assert(outOfOrder.outcome.status === "requesting-paint-match", "a later paint match request should replace the older in-flight request");
+  const olderComplete = transitionProjectSession(outOfOrder.session, {
+    type: "complete-project-paint-match",
+    token: begin.outcome.token,
+    matches: [bluePaintMatch]
+  });
+  assertEqual(olderComplete.outcome.status, "stale", "older out-of-order paint match results should not win");
+
+  const completed = transitionProjectSession(outOfOrder.session, {
+    type: "complete-project-paint-match",
+    token: outOfOrder.outcome.token,
+    matches: [bluePaintMatch]
+  });
+  assertEqual(completed.outcome.status, "applied", "the current paint match result should apply as one durable transition");
+  assertEqual(completed.session.revision, reviewed.revision + 1, "the current paint match result should advance the Project Revision once");
+  assertEqual(completed.effects.length, 1, "the current paint match result should request one Autosave");
+  assertEqual(completed.session.project.projectPalette[1].matches[0].id, bluePaintMatch.id, "paint match completion should update only the targeted color suggestions");
+  assertEqual(completed.session.project.projectPalette[1].selectedMatchId, null, "paint match completion should clear stale selected matches that no longer exist");
+  assertEqual(projectSessionView(completed.session).paintMatch.status, "idle", "successful paint match completion should clear transient paint match state");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const begin = transitionProjectSession(reviewed, {
+    type: "begin-project-paint-match",
+    id: reviewed.project.projectPalette[0].id
+  });
+  assert(begin.outcome.status === "requesting-paint-match", "paint match begin should return a request token");
+  const malformed = transitionProjectSession(begin.session, {
+    type: "complete-project-paint-match",
+    token: begin.outcome.token,
+    matches: [
+      {
+        id: "broken-match",
+        brand: "Broken",
+        line: "Broken",
+        colorName: "Broken",
+        hex: "#0c143a",
+        finish: "matte",
+        outdoorRecommended: false,
+        retailer: "",
+        productUrl: "",
+        notes: "",
+        distance: 3,
+        confidence: "close match"
+      },
+      {
+        id: 42,
+        brand: "Broken",
+        line: "Broken",
+        colorName: "Broken",
+        hex: "#ffffff",
+        finish: "matte",
+        outdoorRecommended: false,
+        distance: 3,
+        confidence: "close match"
+      }
+    ] as never
+  });
+  assertEqual(malformed.outcome.status, "failed", "malformed paint match payloads should be treated as recoverable match failures");
+  assertEqual(malformed.session.revision, reviewed.revision, "malformed paint match payloads should not advance the revision");
+  assertEqual(malformed.session.project, reviewed.project, "malformed paint match payloads should preserve the durable palette state");
+  assertEqual(malformed.effects.length, 0, "malformed paint match payloads should not request Autosave");
+  assertEqual(projectSessionView(malformed.session).paintMatch.status, "failed", "malformed paint match payloads should remain transient failure state only");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const begin = transitionProjectSession(reviewed, {
+    type: "begin-project-paint-match",
+    id: reviewed.project.projectPalette[0].id
+  });
+  assert(begin.outcome.status === "requesting-paint-match", "paint match begin should return a request token");
+  const renamed = transitionProjectSession(begin.session, { type: "rename-project", projectName: "Coraline Revised" });
+  assertEqual(projectSessionView(renamed.session).paintMatch.status, "idle", "later durable revisions should clear stale in-flight paint match state");
+  const staleAfterRename = transitionProjectSession(renamed.session, {
+    type: "complete-project-paint-match",
+    token: begin.outcome.token,
+    matches: [bluePaintMatch]
+  });
+  assertEqual(staleAfterRename.outcome.status, "stale", "later unrelated durable revisions should stale older paint match results");
+
+  const beginAgain = transitionProjectSession(reviewed, {
+    type: "begin-project-paint-match",
+    id: reviewed.project.projectPalette[0].id
+  });
+  assert(beginAgain.outcome.status === "requesting-paint-match", "paint match begin should return a request token");
+  const recolored = transitionProjectSession(beginAgain.session, {
+    type: "update-project-paint-color",
+    id: reviewed.project.projectPalette[0].id,
+    patch: { hex: "#123456" }
+  });
+  const staleAfterHexChange = transitionProjectSession(recolored.session, {
+    type: "complete-project-paint-match",
+    token: beginAgain.outcome.token,
+    matches: [bluePaintMatch]
+  });
+  assertEqual(staleAfterHexChange.outcome.status, "stale", "paint match results should reject when the target color hex has changed");
+
+  const beginBeforeReset = transitionProjectSession(reviewed, {
+    type: "begin-project-paint-match",
+    id: reviewed.project.projectPalette[0].id
+  });
+  assert(beginBeforeReset.outcome.status === "requesting-paint-match", "paint match begin should return a request token");
+  const reset = transitionProjectSession(beginBeforeReset.session, { type: "reset-project-palette-from-analysis" });
+  assertEqual(projectSessionView(reset.session).paintMatch.status, "idle", "palette reset should clear transient paint match state");
+
+  const beginBeforeNewProject = transitionProjectSession(reviewed, {
+    type: "begin-project-paint-match",
+    id: reviewed.project.projectPalette[0].id
+  });
+  assert(beginBeforeNewProject.outcome.status === "requesting-paint-match", "paint match begin should return a request token");
+  const emptyProject = {
+    projectName: "Cutout Project",
+    settings,
+    sourceImage: null,
+    analysis: null,
+    editedDetailPngDataUrl: null,
+    manualStrokes: [],
+    projectPalette: [],
+    workflowProgress: { activeStep: "upload" as const, lineworkReviewed: false, colorsOutcome: "incomplete" as const },
+    cleanupChecks: { cutline: false, remove: false, draw: false, export: false }
+  };
+  const confirmedNewProject = transitionProjectSession(beginBeforeNewProject.session, {
+    type: "confirm-new-project",
+    project: emptyProject
+  });
+  assertEqual(projectSessionView(confirmedNewProject.session).paintMatch.status, "idle", "new-project confirmation should clear transient paint match state");
+}
+
+{
+  const duplicatePaletteProject = {
+    ...lifecycleProject,
+    projectPalette: [
+      projectPaintColor({ id: "shared", hex: "#0c143a", label: "Hair", matches: [navyPaintMatch] }),
+      projectPaintColor({ id: "shared", hex: "#f1ce2d", label: "Coat", matches: [yellowPaintMatch] })
+    ]
+  };
+  let duplicateCreateRejected = false;
+  try {
+    createProjectSession(duplicatePaletteProject);
+  } catch {
+    duplicateCreateRejected = true;
+  }
+  assert(duplicateCreateRejected, "session creation should reject duplicate restored palette IDs");
+
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const hydrateRejected = transitionProjectSession(reviewed, {
+    type: "hydrate-project",
+    project: duplicatePaletteProject
+  });
+  assertEqual(hydrateRejected.outcome.status, "rejected", "hydrating duplicate palette IDs should be rejected");
+  assertEqual(hydrateRejected.outcome.error.code, "invalid-project-file", "duplicate palette IDs should report invalid project data");
+  assertEqual(hydrateRejected.session, reviewed, "rejected hydration should preserve the current session");
+
+  const restorePreparing = transitionProjectSession(reviewed, { type: "begin-project-preparation", operation: "restore-project" });
+  if (restorePreparing.outcome.status !== "preparing") throw new Error("expected restore token");
+  const restoreRejected = transitionProjectSession(restorePreparing.session, {
+    type: "complete-project-restore",
+    token: restorePreparing.outcome.token,
+    project: duplicatePaletteProject,
+    requestAutosave: true
+  });
+  assertEqual(restoreRejected.outcome.status, "failed", "restoring duplicate palette IDs should fail safely");
+  assertEqual(restoreRejected.session.project, reviewed.project, "failed restore should preserve the current active project");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
   const changedColors = transitionProjectSession(reviewed, {
-    type: "update-project-palette",
-    projectPalette: [{ id: "blue", hex: "#2563eb", label: "Coat" }]
+    type: "update-project-paint-color",
+    id: reviewed.project.projectPalette[0].id,
+    patch: { label: "Blue coat", note: "trim", included: false, hex: "#2563eb", locked: true }
   });
   assertEqual(changedColors.session.project.workflowProgress?.colorsOutcome, "reviewed", "ordinary color edits should retain completed review");
   assertEqual(changedColors.session.project.workflowProgress?.activeStep, "export", "ordinary color edits should retain Export availability");
+  assertEqual(changedColors.session.project.projectPalette[0].label, "Blue coat", "named color updates should patch only the targeted color");
+  assertEqual(changedColors.session.project.projectPalette[0].hex, "#2563eb", "named color updates should normalize the targeted hex");
+  assertEqual(changedColors.effects.length, 1, "one color edit should produce one Autosave opportunity");
 
   const restarted = transitionProjectSession(changedColors.session, { type: "restart-color-review" });
   assertDeepEqual(restarted.session.project.workflowProgress, {
@@ -928,6 +1441,33 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     lineworkReviewed: true,
     colorsOutcome: "incomplete"
   }, "explicit restart should revoke only the color milestone and return to Colors");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const originalLabel = reviewed.project.projectPalette[0].label;
+  const originalMatchName = reviewed.project.projectPalette[0].matches[0].colorName;
+  try {
+    (reviewed.project.projectPalette[0] as { label: string }).label = "Mutated directly";
+  } catch {}
+  try {
+    (reviewed.project.projectPalette[0].matches[0] as { colorName: string }).colorName = "Mutated match";
+  } catch {}
+  assertEqual(reviewed.project.projectPalette[0].label, originalLabel, "direct in-place palette mutation should not alter durable session color labels");
+  assertEqual(reviewed.project.projectPalette[0].matches[0].colorName, originalMatchName, "direct in-place match mutation should not alter durable session match suggestions");
+  assertEqual(reviewed.revision, 0, "direct palette mutation outside a transition should not create a Project Revision");
+
+  const named = transitionProjectSession(reviewed, {
+    type: "update-project-paint-color",
+    id: reviewed.project.projectPalette[0].id,
+    patch: { label: "Updated through action" }
+  });
+  assertEqual(named.outcome.status, "applied", "named paint actions should remain the supported way to change palette state");
+  assertEqual(named.session.revision, reviewed.revision + 1, "named paint actions should create one Project Revision");
+  assertEqual(named.effects.length, 1, "named paint actions should request one Autosave opportunity");
 }
 
 {
@@ -960,8 +1500,9 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   const requestingBypass = transitionProjectSession(requesting.session, { type: "complete-linework-review" });
   assertEqual(requestingBypass.outcome.status, "rejected", "a requesting proposal should reject Clean Lines completion through the same session policy");
   const requestingPalette = transitionProjectSession(requesting.session, {
-    type: "update-project-palette",
-    projectPalette: [{ id: "blocked-requesting", hex: "#111111", label: "Blocked" }]
+    type: "update-project-paint-color",
+    id: requesting.session.project.projectPalette[0].id,
+    patch: { label: "Blocked" }
   });
   assertEqual(requestingPalette.outcome.status, "rejected", "a requesting proposal should reject Colors mutations through the same session policy");
   assertEqual(requestingPalette.session.project.projectPalette, requesting.session.project.projectPalette, "a requesting proposal should preserve paint work when Colors mutations are rejected");
@@ -978,8 +1519,9 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   const bypassedLineworkReview = transitionProjectSession(blocked.session, { type: "complete-linework-review" });
   assertEqual(bypassedLineworkReview.outcome.status, "rejected", "pending-proposal review should reject Clean Lines completion through the same session policy");
   const blockedPalette = transitionProjectSession(blocked.session, {
-    type: "update-project-palette",
-    projectPalette: [{ id: "blocked-ready", hex: "#222222", label: "Blocked ready" }]
+    type: "add-project-paint-color",
+    hex: "#222222",
+    label: "Blocked ready"
   });
   assertEqual(blockedPalette.outcome.status, "rejected", "a pending proposal review should reject Colors mutations through the same session policy");
   assertEqual(blockedPalette.session.project.projectPalette, blocked.session.project.projectPalette, "a pending proposal review should preserve paint work when Colors mutations are rejected");
@@ -1053,7 +1595,11 @@ const persistedWorkspace = {
 
 {
   const session = createProjectSession({ ...lifecycleProject, ...persistedWorkspace });
-  const preparing = transitionProjectSession(session, { type: "begin-project-preparation", operation: "restore-project" });
+  const matching = transitionProjectSession(session, {
+    type: "begin-project-paint-match",
+    id: session.project.projectPalette[0].id
+  });
+  const preparing = transitionProjectSession(matching.session, { type: "begin-project-preparation", operation: "restore-project" });
   assertEqual(preparing.outcome.status, "preparing", "project open should begin controlled preparation");
   if (preparing.outcome.status !== "preparing") throw new Error("expected restore token");
 
@@ -1090,6 +1636,7 @@ const persistedWorkspace = {
     lineworkReviewed: false,
     colorsOutcome: "incomplete"
   }, "restore should normalize malformed Workflow Progress against artifacts");
+  assertEqual(projectSessionView(restored.session).paintMatch.status, "idle", "restore should clear transient paint match state");
   assertEqual(restored.effects.length, 1, "opening a valid Project File should create one Autosave opportunity");
 }
 

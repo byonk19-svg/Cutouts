@@ -119,6 +119,7 @@ export function resizeAnalysisForFinishedHeight(
 
 export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): CutoutProject {
   const projectPalette = cloneProjectPalette(input.projectPalette ?? seedProjectPaletteFromDetected(input.analysis.palette, input.paintGuideEdits ?? []));
+  assertProjectPalette(projectPalette);
   return {
     schemaVersion: CUTOUT_PROJECT_SCHEMA_VERSION,
     projectName: input.projectName.trim() || "Cutout Project",
@@ -373,9 +374,14 @@ function assertPaintGuideEdits(value: unknown): asserts value is PaintGuideEdit[
 
 function assertProjectPalette(value: unknown): asserts value is ProjectPaintColor[] {
   if (!Array.isArray(value)) throw new Error("Project paint palette is invalid.");
+  const seenIds = new Set<string>();
   for (const color of value) {
     if (!isRecord(color)) throw new Error("Project paint palette color is invalid.");
     assertString(color.id, "projectPalette.id");
+    const trimmedId = color.id.trim();
+    if (!trimmedId || seenIds.has(trimmedId)) throw new Error("Project projectPalette.id is invalid.");
+    color.id = trimmedId;
+    seenIds.add(trimmedId);
     assertString(color.hex, "projectPalette.hex");
     if (typeof color.label !== "string") throw new Error("Project projectPalette.label is invalid.");
     if (typeof color.note !== "string") throw new Error("Project projectPalette.note is invalid.");

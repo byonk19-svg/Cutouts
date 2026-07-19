@@ -16,6 +16,7 @@ import {
   createProjectSession,
   projectSessionView,
   transitionProjectSession,
+  validateCraftPaintMatches,
   type ProjectSession,
   type ProjectSessionAction,
   type ProjectSessionAiProposalResult,
@@ -35,20 +36,16 @@ import {
 } from "./editorTransactions.ts";
 import { type AiProposalReview, type AiProposalReviewView } from "./aiLineworkReview";
 import {
-  addProjectPaintColor,
   filterPaintGuideEntries,
   groupShoppingListItems,
   isValidHexColor,
   matchConfidenceLabel,
   matchDisplayName,
-  mergeProjectPaintColors,
   paintGuideEditsFromProjectPalette,
   paintGuideEntriesForProjectPalette,
   paintSanityWarnings,
-  removeProjectPaintColor,
   seedProjectPaletteFromDetected,
   shoppingListText,
-  updateProjectPaintColor,
   type PaintGuideEntry,
   type PaintReviewFilter,
   type ProjectPaintColor
@@ -302,13 +299,6 @@ function App() {
       manualStrokes: resolveStateAction(action, current)
     });
   };
-  const setProjectPalette = (action: SetStateAction<ProjectPaintColor[]>) => {
-    const current = projectSessionRef.current.project.projectPalette;
-    applyProjectSessionAction({
-      type: "update-project-palette",
-      projectPalette: resolveStateAction(action, current)
-    });
-  };
   const updateWorkspacePreferences = (
     preferences: Partial<Pick<AppProjectSessionProject, "traceMode" | "referenceOpacity" | "layerVisibility" | "traceViewport">>
   ) => applyProjectSessionAction({ type: "update-workspace-preferences", preferences });
@@ -356,6 +346,7 @@ function App() {
   const [selectionFeedback, setSelectionFeedback] = useState("");
   const [newPaintHex, setNewPaintHex] = useState("#f1c7a5");
   const [newPaintLabel, setNewPaintLabel] = useState("Skin tone");
+  const [paintHexDrafts, setPaintHexDrafts] = useState<Record<string, string>>({});
   const [selectedPaintColorIds, setSelectedPaintColorIds] = useState<string[]>([]);
   const [paintReviewFilter, setPaintReviewFilter] = useState<PaintReviewFilter>("all");
   const [colorDetailsOpen, setColorDetailsOpen] = useState(false);
@@ -511,6 +502,24 @@ function App() {
   useEffect(() => {
     setProjectNameDraft(projectName);
   }, [projectName]);
+
+  useEffect(() => {
+    setPaintHexDrafts((current) => {
+      const next: Record<string, string> = {};
+      let changed = false;
+      for (const entry of projectPalette) {
+        const draft = current[entry.id];
+        if (draft === undefined) continue;
+        if (normalizePaintHexDraft(draft) === entry.hex) {
+          changed = true;
+          continue;
+        }
+        next[entry.id] = draft;
+      }
+      if (!changed && Object.keys(next).length === Object.keys(current).length) return current;
+      return next;
+    });
+  }, [projectPalette]);
 
   useEffect(() => {
     const pendingEffects = projectSessionState.pendingEffects;
@@ -687,7 +696,6 @@ function App() {
       setEditedDetailDataUrl(importedSvgDetail);
       setSvgImportedDetailDataUrl(importedSvgDetail);
       if (preservedManualStrokes.length > 0) setManualStrokes(preservedManualStrokes);
-      setProjectPalette(initialProjectPalette);
       setSelectedPaintColorIds([]);
       setEditorOpen(openEditor || preservedManualStrokes.length > 0);
       setShowReference(openEditor);
@@ -1166,12 +1174,53 @@ function App() {
 
   function updatePaintGuideEntry(id: string, patch: Partial<Omit<ProjectPaintColor, "id" | "source">>) {
     const current = projectPalette.find((entry) => entry.id === id);
-    if (!current) return;
-    setProjectPalette((palette) => updateProjectPaintColor(palette, id, patch));
+    if (!current) return null;
+    const transition = applyProjectSessionAction({
+      type: "update-project-paint-color",
+      id,
+      patch
+    });
     setShoppingListStatus("");
-    if (typeof patch.hex === "string" && isValidHexColor(patch.hex)) {
-      void refreshPaintMatchesForColor(id, patch.hex);
+    return transition;
+  }
+
+  function setPaintHexDraft(id: string, value: string) {
+    setPaintHexDrafts((current) => current[id] === value ? current : { ...current, [id]: value });
+    setShoppingListStatus("");
+  }
+
+  function clearPaintHexDraft(id: string) {
+    setPaintHexDrafts((current) => {
+      if (!(id in current)) return current;
+      const { [id]: _removed, ...rest } = current;
+      return rest;
+    });
+  }
+
+  async function commitPaintHexDraft(id: string, draftValue: string) {
+    const current = projectSessionRef.current.project.projectPalette?.find((entry) => entry.id === id);
+    if (!current) {
+      clearPaintHexDraft(id);
+      return;
     }
+    const normalizedHex = normalizePaintHexDraft(draftValue);
+    if (!isValidSessionPaintHex(draftValue)) {
+      clearPaintHexDraft(id);
+      setShoppingListStatus("Enter a valid 3- or 6-digit hex color.");
+      return;
+    }
+    if (normalizedHex === current.hex) {
+      clearPaintHexDraft(id);
+      return;
+    }
+    const transition = updatePaintGuideEntry(id, { hex: normalizedHex });
+    if (transition?.outcome.status === "applied" || transition?.outcome.status === "unchanged") {
+      clearPaintHexDraft(id);
+      await refreshPaintMatchesForColor(id);
+      return;
+    }
+    clearPaintHexDraft(id);
+    setShoppingListStatus("Enter a valid 3- or 6-digit hex color.");
   }
 
   async function addManualPaintColor() {
@@ -1179,24 +1228,32 @@ function App() {
       setShoppingListStatus("Enter a valid hex color");
       return;
     }
-    const matches = await fetchPaintMatches(newPaintHex);
-    setProjectPalette((palette) => addProjectPaintColor(palette, {
+    const added = applyProjectSessionAction({
+      type: "add-project-paint-color",
       hex: newPaintHex,
-      label: newPaintLabel,
-      matches
-    }));
+      label: newPaintLabel
+    });
+    if (added.outcome.status !== "applied") return;
+    const createdPaintColorId = added.outcome.createdPaintColorId;
+    if (!createdPaintColorId) {
+      setShoppingListStatus("Unable to add color");
+      return;
+    }
     setNewPaintLabel("");
-    setShoppingListStatus("Color added");
+    await refreshPaintMatchesForColor(createdPaintColorId, {
+      successStatus: "Color added",
+      failureStatus: "Color added. Unable to refresh paint matches. Existing choices were kept."
+    });
   }
 
   function removePaintColor(id: string) {
-    setProjectPalette((palette) => removeProjectPaintColor(palette, id));
+    applyProjectSessionAction({ type: "remove-project-paint-color", id });
     setSelectedPaintColorIds((ids) => ids.filter((item) => item !== id));
     setShoppingListStatus("");
   }
 
   function mergeSelectedPaintColors() {
-    setProjectPalette((palette) => mergeProjectPaintColors(palette, selectedPaintColorIds));
+    applyProjectSessionAction({ type: "merge-project-paint-colors", ids: selectedPaintColorIds });
     setSelectedPaintColorIds([]);
     setShoppingListStatus("Colors merged");
   }
@@ -1205,14 +1262,13 @@ function App() {
     const ids = paintGuideEntries
       .filter((entry) => swatchNumbers.includes(entry.index))
       .map((entry) => entry.id);
-    setProjectPalette((palette) => mergeProjectPaintColors(palette, ids));
+    applyProjectSessionAction({ type: "merge-project-paint-colors", ids });
     setSelectedPaintColorIds([]);
     setShoppingListStatus("Colors merged");
   }
 
   function resetProjectPaletteFromDetected() {
-    if (!analysis) return;
-    setProjectPalette(seedProjectPaletteFromDetected(analysis.palette, []));
+    applyProjectSessionAction({ type: "reset-project-palette-from-analysis" });
     setSelectedPaintColorIds([]);
     setShoppingListStatus("Palette reset to detected colors");
   }
@@ -1221,21 +1277,57 @@ function App() {
     setSelectedPaintColorIds((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
   }
 
-  async function refreshPaintMatchesForColor(id: string, hex: string) {
-    const matches = await fetchPaintMatches(hex);
-    setProjectPalette((palette) => updateProjectPaintColor(palette, id, { matches }));
+  async function refreshPaintMatchesForColor(
+    id: string,
+    options?: {
+      successStatus?: string;
+      failureStatus?: string;
+    }
+  ) {
+    const request = applyProjectSessionAction({ type: "begin-project-paint-match", id });
+    if (request.outcome.status !== "requesting-paint-match") return;
+    try {
+      const matches = await requestPaintMatches(request.outcome.token.expectedHex);
+      const completed = applyProjectSessionAction({
+        type: "complete-project-paint-match",
+        token: request.outcome.token,
+        matches
+      });
+      if (completed.outcome.status === "stale") return;
+      if (completed.outcome.status === "applied" || completed.outcome.status === "successful") {
+        if (typeof options?.successStatus === "string") setShoppingListStatus(options.successStatus);
+      }
+    } catch {
+      const failed = applyProjectSessionAction({
+        type: "fail-project-paint-match",
+        token: request.outcome.token,
+        error: "Unable to refresh paint matches."
+      });
+      if (failed.outcome.status === "stale") return;
+      setShoppingListStatus(options?.failureStatus ?? "Unable to refresh paint matches. Existing choices were kept.");
+    }
   }
 
-  async function fetchPaintMatches(hex: string) {
-    if (!isValidHexColor(hex)) return [];
+  async function requestPaintMatches(hex: string) {
+    if (!isValidHexColor(hex)) throw new Error("Invalid hex color");
     const response = await fetch("/api/match-color", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hex })
     });
-    if (!response.ok) return [];
-    const body = await response.json();
-    return Array.isArray(body.matches) ? body.matches : [];
+    if (!response.ok) throw new Error("Unable to refresh paint matches.");
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new Error("Unable to refresh paint matches.");
+    }
+    if (!body || typeof body !== "object") {
+      throw new Error("Unable to refresh paint matches.");
+    }
+    const validated = validateCraftPaintMatches((body as { matches?: unknown }).matches);
+    if (!validated.ok) throw new Error(validated.message);
+    return validated.matches;
   }
 
   async function copyPaintShoppingList() {
@@ -2800,7 +2892,13 @@ function App() {
                                 <input
                                   type="color"
                                   value={isValidHexColor(entry.hex) ? entry.hex : "#000000"}
-                                  onChange={(event) => updatePaintGuideEntry(entry.id, { hex: event.target.value })}
+                                  onChange={(event) => {
+                                    const transition = updatePaintGuideEntry(entry.id, { hex: event.target.value });
+                                    if (transition?.outcome.status === "applied" || transition?.outcome.status === "unchanged") {
+                                      clearPaintHexDraft(entry.id);
+                                      void refreshPaintMatchesForColor(entry.id);
+                                    }
+                                  }}
                                   aria-label={`Color picker for ${entry.label}`}
                                 />
                               </label>
@@ -2808,10 +2906,10 @@ function App() {
                                 <span>Hex</span>
                                 <input
                                   type="text"
-                                  value={entry.hex}
-                                  onChange={(event) => updatePaintGuideEntry(entry.id, { hex: event.target.value })}
+                                  value={paintHexDrafts[entry.id] ?? entry.hex}
+                                  onChange={(event) => setPaintHexDraft(entry.id, event.target.value)}
                                   onBlur={(event) => {
-                                    if (isValidHexColor(event.target.value)) void refreshPaintMatchesForColor(entry.id, event.target.value);
+                                    void commitPaintHexDraft(entry.id, event.target.value);
                                   }}
                                 />
                               </label>
@@ -3085,6 +3183,20 @@ function paintSelectionPatch(entry: PaintGuideEntry, value: string): PaintGuideP
   }
   if (value === "") return { selectedMatchId: null, manualOverride: "" };
   return { selectedMatchId: value, manualOverride: "" };
+}
+
+function normalizePaintHexDraft(hex: string) {
+  const value = hex.trim().toLowerCase();
+  const prefixed = value.startsWith("#") ? value : `#${value}`;
+  if (/^#[0-9a-f]{3}$/i.test(prefixed)) {
+    const [hash, r, g, b] = prefixed;
+    return `${hash}${r}${r}${g}${g}${b}${b}`;
+  }
+  return prefixed;
+}
+
+function isValidSessionPaintHex(hex: string) {
+  return /^#?[0-9a-f]{3}$/i.test(hex.trim()) || /^#?[0-9a-f]{6}$/i.test(hex.trim());
 }
 
 function AiProposalCard({

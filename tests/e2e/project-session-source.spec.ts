@@ -158,7 +158,7 @@ async function fulfillAnalysis(route: Route, marker: number) {
       paintGuidePngDataUrl: sourceDataUrl,
       previewWidthPx: 400,
       previewHeightPx: 600,
-      palette: [{ index: 0, hex: marker === 1 ? "#facc15" : "#2563eb", weight: 1, matches: [] }]
+      palette: [{ index: 0, hex: marker === 1 ? "#facc15" : "#2563eb", weight: 1, coverage: 1, matches: [] }]
     })
   });
 }

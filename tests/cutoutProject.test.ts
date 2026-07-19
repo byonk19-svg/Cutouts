@@ -385,6 +385,91 @@ const analysis = {
 }
 
 {
+  const duplicatePaletteProject = JSON.parse(serializeCutoutProject(createCutoutProjectSnapshot({
+    projectName: "Duplicate ids",
+    createdAt: "2026-07-07T10:00:00.000Z",
+    updatedAt: "2026-07-07T10:00:00.000Z",
+    sourceImage: { name: "source.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,source" },
+    settings,
+    traceMode: "manual",
+    analysis,
+    manualStrokes: [],
+    referenceOpacity: 35,
+    layerVisibility: {
+      showReference: false,
+      showCutline: true,
+      showManualLines: true,
+      showSuggestions: false,
+      printPreview: false
+    },
+    traceViewport: DEFAULT_TRACE_VIEWPORT
+  })));
+  duplicatePaletteProject.projectPalette = [
+    { ...duplicatePaletteProject.projectPalette[0], id: "shared-id" },
+    {
+      ...duplicatePaletteProject.projectPalette[0],
+      id: "shared-id",
+      hex: "#0c143a",
+      label: "Hair",
+      selectedMatchId: null,
+      manualOverride: "",
+      source: "manual"
+    }
+  ];
+
+  let duplicateRestoreRejected = false;
+  try {
+    restoreCutoutProject(duplicatePaletteProject);
+  } catch {
+    duplicateRestoreRejected = true;
+  }
+  assert(duplicateRestoreRejected, "restore should reject duplicate palette IDs");
+}
+
+{
+  let blankIdRejected = false;
+  try {
+    createCutoutProjectSnapshot({
+      projectName: "Blank ids",
+      createdAt: "2026-07-07T10:00:00.000Z",
+      updatedAt: "2026-07-07T10:00:00.000Z",
+      sourceImage: { name: "source.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,source" },
+      settings,
+      traceMode: "manual",
+      analysis,
+      manualStrokes: [],
+      projectPalette: [
+        {
+          id: "   ",
+          hex: "#f1ce2d",
+          label: "Coat",
+          note: "",
+          included: true,
+          selectedMatchId: null,
+          manualOverride: "",
+          coverage: 0.22,
+          matches: [],
+          locked: false,
+          source: "detected"
+        }
+      ],
+      referenceOpacity: 35,
+      layerVisibility: {
+        showReference: false,
+        showCutline: true,
+        showManualLines: true,
+        showSuggestions: false,
+        printPreview: false
+      },
+      traceViewport: DEFAULT_TRACE_VIEWPORT
+    });
+  } catch {
+    blankIdRejected = true;
+  }
+  assert(blankIdRejected, "snapshot creation should reject blank palette IDs");
+}
+
+{
   assertEqual(projectFileName("Coraline test"), "coraline-test.cutout.json", "project filename should use cutout extension");
   assertEqual(projectFileName(""), "cutout-project.cutout.json", "empty project names should use a safe fallback");
   assertEqual(

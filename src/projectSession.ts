@@ -13,6 +13,15 @@ import {
 } from "./cutoutProject.ts";
 import type { EditorTransaction } from "./editorTransactions.ts";
 import {
+  addProjectPaintColor,
+  mergeProjectPaintColors,
+  removeProjectPaintColor,
+  seedProjectPaletteFromDetected,
+  updateProjectPaintColor,
+  type CraftPaintMatch,
+  type ProjectPaintColor
+} from "./paintGuide.ts";
+import {
   DEFAULT_WORKFLOW_PROGRESS,
   completeColorReview,
   completeLineworkReview,
@@ -39,7 +48,7 @@ export type ProjectSessionProject = {
   inputReadiness?: ProjectSessionInputReadiness;
   editedDetailPngDataUrl?: string | null;
   manualStrokes?: readonly unknown[];
-  projectPalette?: readonly unknown[];
+  projectPalette?: readonly ProjectPaintColor[];
   workflowProgress?: WorkflowProgress;
   createdAt?: string | null;
   traceMode?: unknown;
@@ -76,6 +85,17 @@ export type ProjectSessionAiProposalToken = {
   requestId: number;
 };
 
+export type ProjectSessionPaintMatchToken = {
+  revision: number;
+  colorId: string;
+  expectedHex: string;
+  requestId: number;
+};
+
+export type CraftPaintMatchValidation =
+  | { ok: true; matches: readonly CraftPaintMatch[] }
+  | { ok: false; message: string };
+
 export type ProjectSessionAiProposalResult = {
   status: "pending-review" | "review-only";
   validationIssues: readonly string[];
@@ -98,6 +118,11 @@ export type ProjectSessionAiProposalState =
   | { status: "failed"; error: string }
   | { status: "ready"; proposal: ProjectSessionAiProposalResult; review: AiProposalReview };
 
+export type ProjectSessionPaintMatchState =
+  | { status: "idle" }
+  | { status: "requesting"; token: ProjectSessionPaintMatchToken }
+  | { status: "failed"; token: ProjectSessionPaintMatchToken; error: string };
+
 export type ProjectOperationStatus =
   | { status: "idle" }
   | { status: "preparing"; token: ProjectPreparationToken }
@@ -116,9 +141,12 @@ export type ProjectSession<TProject extends ProjectSessionProject = ProjectSessi
   project: TProject;
   operation: ProjectOperationStatus;
   nextOperationId: number;
+  nextPaintColorId: number;
   proposalRevision: number;
   nextAiProposalRequestId: number;
+  nextPaintMatchRequestId: number;
   aiProposal: ProjectSessionAiProposalState;
+  paintMatch: ProjectSessionPaintMatchState;
   persistence: ProjectPersistenceHealth;
 };
 
@@ -142,6 +170,10 @@ export type AiProposalCapabilities = {
   readonly canReject: boolean;
 };
 
+export type PaintCapabilities = {
+  readonly canMutate: boolean;
+};
+
 export type ProjectCapabilities = {
   readonly renameProject: boolean;
   readonly changeFinishedSize: boolean;
@@ -151,6 +183,7 @@ export type ProjectCapabilities = {
   readonly startNewProject: boolean;
   readonly exportProject: boolean;
   readonly aiProposal: AiProposalCapabilities;
+  readonly paint: PaintCapabilities;
   readonly guidedWorkflow: GuidedWorkflowCapabilities;
 };
 
@@ -172,6 +205,18 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
   | { type: "complete-linework-review" }
   | { type: "complete-color-review"; outcome: Exclude<ColorsOutcome, "incomplete"> }
   | { type: "restart-color-review" }
+  | { type: "add-project-paint-color"; hex: string; label: string; note?: string }
+  | {
+      type: "update-project-paint-color";
+      id: string;
+      patch: Partial<Pick<ProjectPaintColor, "hex" | "label" | "note" | "included" | "selectedMatchId" | "manualOverride" | "locked">>;
+    }
+  | { type: "remove-project-paint-color"; id: string }
+  | { type: "merge-project-paint-colors"; ids: readonly string[] }
+  | { type: "reset-project-palette-from-analysis" }
+  | { type: "begin-project-paint-match"; id: string }
+  | { type: "complete-project-paint-match"; token: ProjectSessionPaintMatchToken; matches: readonly CraftPaintMatch[] }
+  | { type: "fail-project-paint-match"; token: ProjectSessionPaintMatchToken; error: string }
   | {
       type: "commit-accepted-linework";
       editedDetailPngDataUrl: string | null;
@@ -184,7 +229,6 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
         manualStrokes: readonly unknown[];
       };
     }
-  | { type: "update-project-palette"; projectPalette: readonly unknown[] }
   | { type: "update-workspace-preferences"; preferences: Partial<Pick<ProjectSessionProject, "traceMode" | "referenceOpacity" | "layerVisibility" | "traceViewport">> }
   | { type: "set-color-guide-included"; included: boolean }
   | { type: "request-export" }
@@ -204,7 +248,7 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
       settings: Settings;
       analysis: CutoutProjectAnalysis;
       initialDetailPngDataUrl: string | null;
-      initialProjectPalette: readonly unknown[];
+      initialProjectPalette: readonly ProjectPaintColor[];
       createdAt?: string;
     }
   | { type: "complete-project-restore"; token: ProjectPreparationToken; project: TProject; requestAutosave: boolean }
@@ -220,10 +264,11 @@ export type ProjectSessionTransition<TProject extends ProjectSessionProject> = {
   session: ProjectSession<TProject>;
   capabilities: ProjectCapabilities;
   outcome:
-    | { status: "applied" }
+    | { status: "applied"; createdPaintColorId?: string }
     | { status: "unchanged" }
     | { status: "preparing"; token: ProjectPreparationToken }
     | { status: "requesting"; token: ProjectSessionAiProposalToken }
+    | { status: "requesting-paint-match"; token: ProjectSessionPaintMatchToken }
     | { status: "failed"; error: string }
     | { status: "successful" }
     | { status: "stale" }
@@ -237,6 +282,7 @@ export type ProjectSessionTransition<TProject extends ProjectSessionProject> = {
 export type ProjectSessionRejectionCode =
   | "invalid-project-name"
   | "invalid-project-file"
+  | "invalid-paint-hex"
   | "invalid-finished-size"
   | "analysis-size-mismatch"
   | "locked-workflow-step"
@@ -246,6 +292,8 @@ export type ProjectSessionRejectionCode =
   | "ai-proposal-unavailable"
   | "ai-proposal-confirmation-required"
   | "ai-proposal-acceptance-unavailable"
+  | "paint-color-target-missing"
+  | "paint-color-target-ambiguous"
   | "workflow-blocked";
 
 export type ProjectSessionEffectAdapter<TProject extends ProjectSessionProject = ProjectSessionProject> = {
@@ -257,14 +305,20 @@ export type ProjectSessionEffectAdapter<TProject extends ProjectSessionProject =
 export function createProjectSession<TProject extends ProjectSessionProject>(
   project: TProject
 ): ProjectSession<TProject> {
+  const paletteValidation = validateStableProjectPaletteIds(project.projectPalette);
+  if (!paletteValidation.ok) throw new Error(paletteValidation.message);
+  const normalizedProject = normalizeProjectWorkflow(project);
   return {
     revision: 0,
-    project: normalizeProjectWorkflow(project),
+    project: normalizedProject,
     operation: { status: "idle" },
     nextOperationId: 1,
+    nextPaintColorId: deriveNextPaintColorId(normalizedProject.projectPalette),
     proposalRevision: 0,
     nextAiProposalRequestId: 1,
+    nextPaintMatchRequestId: 1,
     aiProposal: idleAiProposalState(),
+    paintMatch: idlePaintMatchState(),
     persistence: { status: "idle" }
   };
 }
@@ -277,6 +331,7 @@ export function projectSessionView<TProject extends ProjectSessionProject>(
     project: session.project,
     operation: session.operation,
     aiProposal: session.aiProposal,
+    paintMatch: session.paintMatch,
     capabilities: projectCapabilities(session)
   };
 }
@@ -516,6 +571,139 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     if (sameWorkflowProgress(progress, restarted)) return unchangedTransition(session);
     return applyProjectTransition(session, { ...session.project, workflowProgress: restarted } as TProject);
   }
+  if (action.type === "add-project-paint-color") {
+    if (isWorkflowBlockedByAiProposal(session)) {
+      return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
+    }
+    const hex = validatePaintHex(action.hex);
+    if (!hex.ok) return rejectedTransition(session, "invalid-paint-hex", "Enter a valid 3- or 6-digit hex color.");
+    const currentPalette = currentProjectPalette(session.project);
+    const nextId = nextManualPaintColorId(currentPalette, session.nextPaintColorId);
+    const nextPalette = addProjectPaintColor(currentPalette, {
+      id: nextId,
+      hex: hex.value,
+      label: action.label,
+      note: action.note
+    });
+    const added = applyPaintPaletteTransition(session, nextPalette);
+    return added.outcome.status === "applied"
+      ? { ...added, outcome: { status: "applied", createdPaintColorId: nextId } }
+      : added;
+  }
+  if (action.type === "update-project-paint-color") {
+    if (isWorkflowBlockedByAiProposal(session)) {
+      return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
+    }
+    let patch = action.patch;
+    if (typeof patch.hex === "string") {
+      const hex = validatePaintHex(patch.hex);
+      if (!hex.ok) return rejectedTransition(session, "invalid-paint-hex", "Enter a valid 3- or 6-digit hex color.");
+      patch = {
+        ...patch,
+        hex: hex.value
+      };
+    }
+    const current = findProjectPaintColor(session.project, action.id);
+    if (!current) {
+      return rejectedTransition(session, "paint-color-target-missing", "The requested paint color no longer exists.");
+    }
+    const nextPalette = updateProjectPaintColor(currentProjectPalette(session.project), action.id, patch);
+    const updated = nextPalette.find((color) => color.id === action.id);
+    if (!updated) {
+      return rejectedTransition(session, "paint-color-target-missing", "The requested paint color no longer exists.");
+    }
+    if (sameProjectPaintColor(current, updated)) return unchangedTransition(session);
+    return applyPaintPaletteTransition(session, nextPalette);
+  }
+  if (action.type === "remove-project-paint-color") {
+    if (isWorkflowBlockedByAiProposal(session)) {
+      return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
+    }
+    const current = findProjectPaintColor(session.project, action.id);
+    if (!current) {
+      return rejectedTransition(session, "paint-color-target-missing", "The requested paint color no longer exists.");
+    }
+    const nextPalette = removeProjectPaintColor(currentProjectPalette(session.project), action.id);
+    return applyPaintPaletteTransition(session, nextPalette);
+  }
+  if (action.type === "merge-project-paint-colors") {
+    if (isWorkflowBlockedByAiProposal(session)) {
+      return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
+    }
+    const distinctIds = [...new Set(action.ids)];
+    if (distinctIds.length < 2 || distinctIds.length !== action.ids.length) {
+      return rejectedTransition(session, "paint-color-target-ambiguous", "Choose at least two different paint colors to merge.");
+    }
+    const currentPalette = currentProjectPalette(session.project);
+    if (!distinctIds.every((id) => currentPalette.some((color) => color.id === id))) {
+      return rejectedTransition(session, "paint-color-target-missing", "One or more paint colors no longer exist.");
+    }
+    const nextPalette = mergeProjectPaintColors(currentPalette, distinctIds);
+    if (sameProjectPaintPalette(currentPalette, nextPalette)) return unchangedTransition(session);
+    return applyPaintPaletteTransition(session, nextPalette);
+  }
+  if (action.type === "reset-project-palette-from-analysis") {
+    if (isWorkflowBlockedByAiProposal(session)) {
+      return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
+    }
+    if (!session.project.analysis) return unchangedTransition(session);
+    const nextPalette = seedProjectPaletteFromDetected(session.project.analysis.palette);
+    if (sameProjectPaintPalette(currentProjectPalette(session.project), nextPalette)) return unchangedTransition(session);
+    return applyPaintPaletteTransition(session, nextPalette);
+  }
+  if (action.type === "begin-project-paint-match") {
+    if (isWorkflowBlockedByAiProposal(session)) {
+      return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
+    }
+    const target = findProjectPaintColor(session.project, action.id);
+    if (!target) {
+      return rejectedTransition(session, "paint-color-target-missing", "The requested paint color no longer exists.");
+    }
+    const token = Object.freeze({
+      revision: session.revision,
+      colorId: target.id,
+      expectedHex: normalizePaintHex(target.hex),
+      requestId: session.nextPaintMatchRequestId
+    } satisfies ProjectSessionPaintMatchToken);
+    const nextSession = {
+      ...session,
+      nextPaintMatchRequestId: session.nextPaintMatchRequestId + 1,
+      paintMatch: requestingPaintMatchState(token)
+    };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "requesting-paint-match", token },
+      effects: []
+    };
+  }
+  if (action.type === "fail-project-paint-match") {
+    if (!isCurrentPaintMatchRequest(session, action.token)) return stalePaintMatchTransition(session);
+    const nextSession = { ...session, paintMatch: failedPaintMatchState(action.token, action.error) };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "failed", error: action.error },
+      effects: []
+    };
+  }
+  if (action.type === "complete-project-paint-match") {
+    if (!isCurrentPaintMatchRequest(session, action.token)) return stalePaintMatchTransition(session);
+    const validatedMatches = validateCraftPaintMatches(action.matches);
+    if (!validatedMatches.ok) {
+      const nextSession = { ...session, paintMatch: failedPaintMatchState(action.token, validatedMatches.message) };
+      return {
+        session: nextSession,
+        capabilities: projectCapabilities(nextSession),
+        outcome: { status: "failed", error: validatedMatches.message },
+        effects: []
+      };
+    }
+    const nextPalette = updateProjectPaintColor(currentProjectPalette(session.project), action.token.colorId, {
+      matches: [...validatedMatches.matches]
+    });
+    return applyPaintPaletteTransition(session, nextPalette);
+  }
   if (action.type === "commit-accepted-linework" || action.type === "commit-editor-transaction") {
     const outcome = action.type === "commit-editor-transaction" ? action.outcome : action;
     if (
@@ -529,13 +717,6 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       workflowProgress: invalidateLineworkReview(normalizedWorkflowProgress(session.project)),
       cleanupChecks: emptyCleanupChecks()
     } as TProject, { proposalChange: "invalidate" });
-  }
-  if (action.type === "update-project-palette") {
-    if (isWorkflowBlockedByAiProposal(session)) {
-      return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
-    }
-    if (session.project.projectPalette === action.projectPalette) return unchangedTransition(session);
-    return applyProjectTransition(session, { ...session.project, projectPalette: action.projectPalette } as TProject);
   }
   if (action.type === "update-workspace-preferences") {
     const project = { ...session.project, ...action.preferences } as TProject;
@@ -606,14 +787,29 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     if (!isCurrentPreparation(session, action.token) || action.token.operation !== "restore-project") {
       return staleTransition(session, action.token);
     }
+    const paletteValidation = validateStableProjectPaletteIds(action.project.projectPalette);
+    if (!paletteValidation.ok) {
+      const nextSession = {
+        ...session,
+        operation: { status: "failed", operation: "restore-project", error: paletteValidation.message } as const
+      };
+      return {
+        session: nextSession,
+        capabilities: projectCapabilities(nextSession),
+        outcome: { status: "failed", error: paletteValidation.message },
+        effects: []
+      };
+    }
     const revision = session.revision + 1;
     const project = normalizeProjectWorkflow(action.project);
     const nextSession = {
       ...session,
       revision,
       project,
+      nextPaintColorId: reconcileNextPaintColorId(session.nextPaintColorId, project.projectPalette),
       proposalRevision: session.proposalRevision + 1,
       aiProposal: idleAiProposalState(),
+      paintMatch: idlePaintMatchState(),
       operation: { status: "successful", operation: "restore-project" } as const,
       persistence: action.requestAutosave
         ? { status: "pending", revision, mode: "autosave" } as const
@@ -645,6 +841,19 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
         effects: []
       };
     }
+    const paletteValidation = validateStableProjectPaletteIds(action.initialProjectPalette);
+    if (!paletteValidation.ok) {
+      const nextSession = {
+        ...session,
+        operation: { status: "failed", operation: action.mode, error: paletteValidation.message } as const
+      };
+      return {
+        session: nextSession,
+        capabilities: projectCapabilities(nextSession),
+        outcome: { status: "failed", error: paletteValidation.message },
+        effects: []
+      };
+    }
     const project = {
       ...session.project,
       ...(action.mode === "replace-source"
@@ -659,7 +868,7 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       inputReadiness: action.inputReadiness ?? deriveInputReadiness(action.analysis),
       editedDetailPngDataUrl: action.initialDetailPngDataUrl,
       manualStrokes: action.mode === "replace-source" ? [] : session.project.manualStrokes,
-      projectPalette: action.initialProjectPalette,
+      projectPalette: snapshotProjectPalette(action.initialProjectPalette),
       workflowProgress: { activeStep: "clean", lineworkReviewed: false, colorsOutcome: "incomplete" },
       cleanupChecks: { cutline: false, remove: false, draw: false, export: false }
     } as TProject;
@@ -668,8 +877,10 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       ...session,
       revision,
       project,
+      nextPaintColorId: reconcileNextPaintColorId(session.nextPaintColorId, project.projectPalette),
       proposalRevision: session.proposalRevision + 1,
       aiProposal: idleAiProposalState(),
+      paintMatch: idlePaintMatchState(),
       operation: { status: "successful", operation: action.mode } as const,
       persistence: { status: "pending", revision, mode: "autosave" } as const
     };
@@ -689,12 +900,19 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     };
   }
   if (action.type === "confirm-new-project") {
+    const paletteValidation = validateStableProjectPaletteIds(action.project.projectPalette);
+    if (!paletteValidation.ok) {
+      return rejectedTransition(session, "invalid-project-file", paletteValidation.message);
+    }
+    const project = normalizeProjectWorkflow(action.project);
     const nextSession = {
       ...session,
       revision: session.revision + 1,
-      project: normalizeProjectWorkflow(action.project),
+      project,
+      nextPaintColorId: reconcileNextPaintColorId(session.nextPaintColorId, project.projectPalette),
       proposalRevision: session.proposalRevision + 1,
       aiProposal: idleAiProposalState(),
+      paintMatch: idlePaintMatchState(),
       operation: { status: "successful", operation: "new-project" } as const,
       persistence: { status: "idle" } as const
     };
@@ -716,6 +934,12 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
   }
   if (action.type === "hydrate-project" && !isValidFinishedHeight(action.project.settings.finishedHeightIn)) {
     return rejectedTransition(session, "invalid-finished-size", "Finished Size must be between 6 and 96 inches.");
+  }
+  if (action.type === "hydrate-project") {
+    const paletteValidation = validateStableProjectPaletteIds(action.project.projectPalette);
+    if (!paletteValidation.ok) {
+      return rejectedTransition(session, "invalid-project-file", paletteValidation.message);
+    }
   }
   if (
     action.type === "replace-analysis" &&
@@ -914,6 +1138,17 @@ function staleAiProposalTransition<TProject extends ProjectSessionProject>(
   };
 }
 
+function stalePaintMatchTransition<TProject extends ProjectSessionProject>(
+  session: ProjectSession<TProject>
+): ProjectSessionTransition<TProject> {
+  return {
+    session,
+    capabilities: projectCapabilities(session),
+    outcome: { status: "stale" },
+    effects: []
+  };
+}
+
 function idleAiProposalState(): ProjectSessionAiProposalState {
   return Object.freeze({ status: "idle" });
 }
@@ -944,6 +1179,18 @@ function snapshotAiProposalResult(proposal: ProjectSessionAiProposalResult): Pro
   });
 }
 
+function idlePaintMatchState(): ProjectSessionPaintMatchState {
+  return Object.freeze({ status: "idle" });
+}
+
+function requestingPaintMatchState(token: ProjectSessionPaintMatchToken): ProjectSessionPaintMatchState {
+  return Object.freeze({ status: "requesting", token });
+}
+
+function failedPaintMatchState(token: ProjectSessionPaintMatchToken, error: string): ProjectSessionPaintMatchState {
+  return Object.freeze({ status: "failed", token, error });
+}
+
 function projectCapabilities<TProject extends ProjectSessionProject>(
   session: ProjectSession<TProject>
 ): ProjectCapabilities {
@@ -961,6 +1208,9 @@ function projectCapabilities<TProject extends ProjectSessionProject>(
       canConfirmRequest: session.aiProposal.status === "confirming" && canAiProposalRequestPrerequisites(session),
       canAccept: session.aiProposal.status === "ready" && canAcceptAiProposal(session.aiProposal.review),
       canReject: session.aiProposal.status === "ready" && session.aiProposal.review.decision === "pending"
+    }),
+    paint: Object.freeze({
+      canMutate: !isWorkflowBlockedByAiProposal(session)
     }),
     guidedWorkflow: guidedWorkflowCapabilities(session)
   });
@@ -987,10 +1237,14 @@ function guidedWorkflowCapabilities<TProject extends ProjectSessionProject>(
 function normalizeProjectWorkflow<TProject extends ProjectSessionProject>(project: TProject): TProject {
   const { unacceptedAiProposal: _legacyProposal, ...rest } = project as TProject & { unacceptedAiProposal?: unknown | null };
   const sanitized = rest as TProject;
-  const progress = normalizedWorkflowProgress(sanitized);
-  const current = sanitized.workflowProgress;
-  if (current && sameWorkflowProgress(current, progress)) return sanitized;
-  return { ...sanitized, workflowProgress: progress } as TProject;
+  const snappedProjectPalette = snapshotProjectPalette(sanitized.projectPalette);
+  const paletteNormalized = snappedProjectPalette === sanitized.projectPalette
+    ? sanitized
+    : { ...sanitized, projectPalette: snappedProjectPalette } as TProject;
+  const progress = normalizedWorkflowProgress(paletteNormalized);
+  const current = paletteNormalized.workflowProgress;
+  if (current && sameWorkflowProgress(current, progress)) return paletteNormalized;
+  return { ...paletteNormalized, workflowProgress: progress } as TProject;
 }
 
 function normalizedWorkflowProgress(project: ProjectSessionProject): WorkflowProgress {
@@ -1074,6 +1328,69 @@ function canBeginAiProposalRequest<TProject extends ProjectSessionProject>(sessi
     && !isWorkflowBlockedByAiProposal(session);
 }
 
+function currentProjectPalette(project: ProjectSessionProject) {
+  return [...(project.projectPalette ?? [])];
+}
+
+function findProjectPaintColor(project: ProjectSessionProject, id: string) {
+  return currentProjectPalette(project).find((color) => color.id === id) ?? null;
+}
+
+function snapshotProjectPalette(projectPalette: readonly ProjectPaintColor[] | undefined) {
+  if (!projectPalette) return projectPalette;
+  let changed = !Object.isFrozen(projectPalette);
+  const snapped = projectPalette.map((color) => {
+    const snapshot = snapshotProjectPaintColor(color);
+    if (snapshot !== color) changed = true;
+    return snapshot;
+  });
+  return changed ? Object.freeze(snapped) : projectPalette;
+}
+
+function snapshotProjectPaintColor(color: ProjectPaintColor): ProjectPaintColor {
+  const matches = snapshotCraftPaintMatches(color.matches);
+  const id = color.id.trim();
+  const hex = normalizePaintHex(color.hex);
+  const label = color.label.trim();
+  const note = color.note.trim();
+  const manualOverride = color.manualOverride.trim();
+  const selectedMatchId = color.selectedMatchId && matches.some((match) => match.id === color.selectedMatchId)
+    ? color.selectedMatchId
+    : null;
+  if (
+    Object.isFrozen(color)
+    && matches === color.matches
+    && id === color.id
+    && hex === color.hex
+    && label === color.label
+    && note === color.note
+    && manualOverride === color.manualOverride
+    && selectedMatchId === color.selectedMatchId
+  ) {
+    return color;
+  }
+  return Object.freeze({
+    ...color,
+    id,
+    hex,
+    label,
+    note,
+    manualOverride,
+    selectedMatchId,
+    matches
+  }) as ProjectPaintColor;
+}
+
+function snapshotCraftPaintMatches(matches: readonly CraftPaintMatch[]): ProjectPaintColor["matches"] {
+  let changed = !Object.isFrozen(matches);
+  const snapped = matches.map((match) => {
+    const snapshot = snapshotCraftPaintMatch(match);
+    if (snapshot !== match) changed = true;
+    return snapshot;
+  });
+  return (changed ? Object.freeze(snapped) : matches) as ProjectPaintColor["matches"];
+}
+
 function isCurrentAiProposalRequest<TProject extends ProjectSessionProject>(
   session: ProjectSession<TProject>,
   token: ProjectSessionAiProposalToken
@@ -1087,6 +1404,24 @@ function isCurrentAiProposalRequest<TProject extends ProjectSessionProject>(
 function isWorkflowBlockedByAiProposal<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
   return session.aiProposal.status === "requesting"
     || (session.aiProposal.status === "ready" && session.aiProposal.review.decision === "pending");
+}
+
+function isCurrentPaintMatchRequest<TProject extends ProjectSessionProject>(
+  session: ProjectSession<TProject>,
+  token: ProjectSessionPaintMatchToken
+) {
+  if (
+    session.paintMatch.status !== "requesting"
+    || session.paintMatch.token.requestId !== token.requestId
+    || session.paintMatch.token.revision !== token.revision
+    || session.paintMatch.token.colorId !== token.colorId
+    || session.paintMatch.token.expectedHex !== token.expectedHex
+    || session.revision !== token.revision
+  ) {
+    return false;
+  }
+  const target = findProjectPaintColor(session.project, token.colorId);
+  return target !== null && normalizePaintHex(target.hex) === token.expectedHex;
 }
 
 function canExportProject<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
@@ -1110,6 +1445,24 @@ function workflowStepName(step: WorkflowStep) {
   return "Export";
 }
 
+function applyPaintPaletteTransition<TProject extends ProjectSessionProject>(
+  session: ProjectSession<TProject>,
+  projectPalette: readonly ProjectPaintColor[]
+): ProjectSessionTransition<TProject> {
+  if (sameProjectPaintPalette(currentProjectPalette(session.project), projectPalette)) {
+    const nextSession = session.paintMatch.status === "idle"
+      ? session
+      : { ...session, paintMatch: idlePaintMatchState() };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: nextSession === session ? "unchanged" : "successful" },
+      effects: []
+    };
+  }
+  return applyProjectTransition(session, { ...session.project, projectPalette } as TProject);
+}
+
 function applyProjectTransition<TProject extends ProjectSessionProject>(
   session: ProjectSession<TProject>,
   project: TProject,
@@ -1120,16 +1473,19 @@ function applyProjectTransition<TProject extends ProjectSessionProject>(
   }
 ): ProjectSessionTransition<TProject> {
   const revision = session.revision + 1;
-  const persistable = isPersistableProject(project);
+  const normalizedProject = normalizeProjectWorkflow(project);
+  const persistable = isPersistableProject(normalizedProject);
   const proposalChange = options?.proposalChange ?? "preserve";
   const nextSession = {
     ...session,
     revision,
-    project: normalizeProjectWorkflow(project),
+    project: normalizedProject,
+    nextPaintColorId: reconcileNextPaintColorId(session.nextPaintColorId, normalizedProject.projectPalette),
     proposalRevision: proposalChange === "invalidate" ? session.proposalRevision + 1 : session.proposalRevision,
     aiProposal: proposalChange === "invalidate"
       ? idleAiProposalState()
       : options?.aiProposalOverride ?? session.aiProposal,
+    paintMatch: idlePaintMatchState(),
     persistence: persistable
       ? { status: "pending", revision, mode: "autosave" } as const
       : { status: "idle" } as const
@@ -1170,4 +1526,167 @@ function rejectedTransition<TProject extends ProjectSessionProject>(
     outcome: { status: "rejected", error: { code, message } },
     effects: []
   };
+}
+
+function normalizePaintHex(hex: string) {
+  const value = hex.trim().toLowerCase();
+  const prefixed = value.startsWith("#") ? value : `#${value}`;
+  if (/^#[0-9a-f]{3}$/i.test(prefixed)) {
+    const [hash, r, g, b] = prefixed;
+    return `${hash}${r}${r}${g}${g}${b}${b}`;
+  }
+  return prefixed;
+}
+
+function validatePaintHex(hex: string) {
+  const normalized = normalizePaintHex(hex);
+  return /^#[0-9a-f]{6}$/i.test(normalized)
+    ? { ok: true as const, value: normalized }
+    : { ok: false as const };
+}
+
+export function validateCraftPaintMatches(matches: unknown): CraftPaintMatchValidation {
+  if (!Array.isArray(matches)) {
+    return { ok: false, message: "Unable to refresh paint matches. Existing choices were kept." };
+  }
+  const normalized: CraftPaintMatch[] = [];
+  for (const match of matches) {
+    if (!isRecord(match)) {
+      return { ok: false, message: "Unable to refresh paint matches. Existing choices were kept." };
+    }
+    if (
+      typeof match.id !== "string"
+      || typeof match.brand !== "string"
+      || typeof match.line !== "string"
+      || typeof match.colorName !== "string"
+      || typeof match.hex !== "string"
+      || typeof match.finish !== "string"
+      || typeof match.outdoorRecommended !== "boolean"
+      || typeof match.distance !== "number"
+      || !Number.isFinite(match.distance)
+      || (match.confidence !== "close match"
+        && match.confidence !== "approximate match"
+        && match.confidence !== "poor match / manual check recommended")
+    ) {
+      return { ok: false, message: "Unable to refresh paint matches. Existing choices were kept." };
+    }
+    for (const key of ["retailer", "productUrl", "notes"] as const) {
+      if (key in match && match[key] !== undefined && typeof match[key] !== "string") {
+        return { ok: false, message: "Unable to refresh paint matches. Existing choices were kept." };
+      }
+    }
+    const hex = validatePaintHex(match.hex);
+    if (!hex.ok) {
+      return { ok: false, message: "Unable to refresh paint matches. Existing choices were kept." };
+    }
+    normalized.push(cloneCraftPaintMatch({
+      id: match.id,
+      brand: match.brand,
+      line: match.line,
+      colorName: match.colorName,
+      hex: hex.value,
+      finish: match.finish,
+      outdoorRecommended: match.outdoorRecommended,
+      retailer: typeof match.retailer === "string" ? match.retailer : undefined,
+      productUrl: typeof match.productUrl === "string" ? match.productUrl : undefined,
+      notes: typeof match.notes === "string" ? match.notes : undefined,
+      distance: match.distance,
+      confidence: match.confidence
+    }));
+  }
+  return { ok: true, matches: normalized };
+}
+
+function cloneCraftPaintMatch(match: CraftPaintMatch): CraftPaintMatch {
+  return {
+    ...match,
+    hex: normalizePaintHex(match.hex),
+    retailer: match.retailer,
+    productUrl: match.productUrl,
+    notes: match.notes
+  };
+}
+
+function snapshotCraftPaintMatch(match: CraftPaintMatch): CraftPaintMatch {
+  const hex = normalizePaintHex(match.hex);
+  if (Object.isFrozen(match) && hex === match.hex) return match;
+  return Object.freeze({
+    ...match,
+    hex
+  });
+}
+
+function nextManualPaintColorId(projectPalette: readonly ProjectPaintColor[], floor: number) {
+  let index = floor;
+  while (projectPalette.some((color) => color.id === `manual-${index}`)) index += 1;
+  return `manual-${index}`;
+}
+
+function validateStableProjectPaletteIds(projectPalette: readonly ProjectPaintColor[] | undefined) {
+  if (!projectPalette) return { ok: true as const };
+  const seen = new Set<string>();
+  for (const color of projectPalette) {
+    const id = color.id.trim();
+    if (!id || seen.has(id)) {
+      return { ok: false as const, message: "Project paint palette IDs must be non-blank and unique." };
+    }
+    seen.add(id);
+  }
+  return { ok: true as const };
+}
+
+function deriveNextPaintColorId(projectPalette: readonly ProjectPaintColor[] | undefined) {
+  const colors = projectPalette ?? [];
+  const numericSuffixes = colors.flatMap((color) => {
+    const match = /^manual-(\d+)(?:-|$)/.exec(color.id);
+    return match ? [Number(match[1])] : [];
+  });
+  return (numericSuffixes.length > 0 ? Math.max(...numericSuffixes) : 0) + 1;
+}
+
+function reconcileNextPaintColorId(current: number, projectPalette: readonly ProjectPaintColor[] | undefined) {
+  return Math.max(current, deriveNextPaintColorId(projectPalette));
+}
+
+function sameProjectPaintPalette(left: readonly ProjectPaintColor[], right: readonly ProjectPaintColor[]) {
+  return left.length === right.length && left.every((color, index) => sameProjectPaintColor(color, right[index]));
+}
+
+function sameProjectPaintColor(left: ProjectPaintColor | undefined, right: ProjectPaintColor | undefined) {
+  if (!left || !right) return false;
+  return left.id === right.id
+    && left.hex === right.hex
+    && left.label === right.label
+    && left.note === right.note
+    && left.included === right.included
+    && left.selectedMatchId === right.selectedMatchId
+    && left.manualOverride === right.manualOverride
+    && left.coverage === right.coverage
+    && left.locked === right.locked
+    && left.source === right.source
+    && sameCraftPaintMatches(left.matches, right.matches);
+}
+
+function sameCraftPaintMatches(left: readonly CraftPaintMatch[], right: readonly CraftPaintMatch[]) {
+  return left.length === right.length && left.every((match, index) => sameCraftPaintMatch(match, right[index]));
+}
+
+function sameCraftPaintMatch(left: CraftPaintMatch | undefined, right: CraftPaintMatch | undefined) {
+  if (!left || !right) return false;
+  return left.id === right.id
+    && left.brand === right.brand
+    && left.line === right.line
+    && left.colorName === right.colorName
+    && left.hex === right.hex
+    && left.finish === right.finish
+    && left.outdoorRecommended === right.outdoorRecommended
+    && left.retailer === right.retailer
+    && left.productUrl === right.productUrl
+    && left.notes === right.notes
+    && left.distance === right.distance
+    && left.confidence === right.confidence;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

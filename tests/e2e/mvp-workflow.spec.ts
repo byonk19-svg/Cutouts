@@ -121,6 +121,12 @@ test("project persistence keeps one coherent revision and recovers from a visibl
   await expect(editorTools.getByRole("button", { name: "Undo" })).toBeDisabled();
   await expect(editorTools.getByRole("button", { name: "Redo" })).toBeDisabled();
 
+  await expect.poll(async () => {
+    const raw = await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"));
+    return raw && raw !== serializedProject
+      ? JSON.parse(raw).layerVisibility.showReference
+      : null;
+  }).toBe(false);
   const autosaveBeforeInvalidOpen = await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"));
   await page.locator("input.hidden-project-input").setInputFiles({
     name: "unsupported.cutout.json",
