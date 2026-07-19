@@ -2,6 +2,52 @@ import { expect, test, type Download, type Locator, type Page } from "@playwrigh
 import { mkdirSync, readFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
+test("locked Guided Workflow requests stay rejected when disabled controls are bypassed", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+
+  const guidedWorkflow = page.getByLabel("Guided workflow");
+  const uploadButton = guidedWorkflow.getByRole("button", { name: /Upload/ });
+  const colorsButton = guidedWorkflow.getByRole("button", { name: /Colors/ });
+  await expect(colorsButton).toBeDisabled();
+  await colorsButton.evaluate((element) => {
+    element.removeAttribute("disabled");
+    (element as HTMLButtonElement).click();
+  });
+  await expect(uploadButton).toHaveAttribute("aria-current", "step");
+  await expect(page.getByLabel("Colors workspace")).toHaveCount(0);
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "capability-enforcement.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const cleanButton = guidedWorkflow.getByRole("button", { name: /Clean Lines/ });
+  const exportButton = guidedWorkflow.getByRole("button", { name: /Export/ });
+  await expect(cleanButton).toHaveAttribute("aria-current", "step");
+  await expect(exportButton).toBeDisabled();
+  await exportButton.evaluate((element) => {
+    element.removeAttribute("disabled");
+    (element as HTMLButtonElement).click();
+  });
+  await expect(cleanButton).toHaveAttribute("aria-current", "step");
+  await expect(page.getByLabel("Export workspace")).toHaveCount(0);
+
+  await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await expect(colorsButton).toHaveAttribute("aria-current", "step");
+  await cleanButton.click();
+  await expect(colorsButton).toBeDisabled();
+  await expect(colorsButton).toContainText("available");
+  await colorsButton.evaluate((element) => {
+    element.removeAttribute("disabled");
+    (element as HTMLButtonElement).click();
+  });
+  await expect(cleanButton).toHaveAttribute("aria-current", "step");
+});
+
 test("project name and Finished Size preserve reviewed project work", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
   await page.goto("/");
@@ -232,17 +278,18 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await colorsWorkspace.getByRole("button", { name: "Skip Paint Guide" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
   const exportWorkspace = page.getByLabel("Export workspace");
-  await expect(exportWorkspace.getByLabel("Include Color Guide")).not.toBeChecked();
+  const includeColorGuide = exportWorkspace.getByLabel("Include Color Guide");
+  await expect(includeColorGuide).not.toBeChecked();
   await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(false);
-  await exportWorkspace.getByLabel("Include Color Guide").check();
-  await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(true);
+  await includeColorGuide.click();
+  await expect(includeColorGuide).not.toBeChecked();
+  await expect(page.getByText("Complete color review before including the Color Guide.")).toBeVisible();
   await expect.poll(() => savedProjectColorsOutcome(page)).toBe("skipped");
-  await exportWorkspace.getByLabel("Include Color Guide").uncheck();
-  await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(false);
   await guidedWorkflow.getByRole("button", { name: /Colors/ }).click();
   await expect(editColorDetails.getByLabel("Paint Palette Editor")).toBeVisible();
   await colorsWorkspace.getByRole("button", { name: "Continue to Export" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
+  await expect(page.getByText("Complete color review before including the Color Guide.")).toHaveCount(0);
   await expect(exportWorkspace.getByLabel("Include Color Guide")).toBeChecked();
   await exportWorkspace.getByLabel("Include Color Guide").uncheck();
   await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(false);

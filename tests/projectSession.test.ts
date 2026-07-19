@@ -415,4 +415,192 @@ const lifecycleProject = {
   assertDeepEqual(confirmed.effects, [{ type: "clear-autosave" }], "confirmed new project should clear only the old Autosave");
 }
 
+{
+  const session = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "clean" as const, lineworkReviewed: false, colorsOutcome: "incomplete" as const }
+  });
+  const workflow = projectSessionView(session).capabilities.guidedWorkflow;
+
+  assertEqual(workflow.progress.activeStep, "clean", "the session should expose normalized current workflow progress");
+  assertEqual(workflow.steps.find((item) => item.step === "upload")?.status, "completed", "Upload should be completed after analysis");
+  assertEqual(workflow.steps.find((item) => item.step === "clean")?.status, "current", "Clean Lines should be current");
+  assertEqual(workflow.steps.find((item) => item.step === "colors")?.status, "locked", "Colors should be locked before linework review");
+
+  const bypassed = transitionProjectSession(session, { type: "navigate-workflow", target: "colors" });
+  assertEqual(bypassed.outcome.status, "rejected", "a locked-step request should be rejected at the public seam");
+  assertEqual(bypassed.session, session, "a rejected locked-step request should preserve the session");
+  assertEqual(bypassed.effects.length, 0, "a rejected locked-step request should not request persistence");
+}
+
+{
+  const invalidCutLine = createProjectSession({
+    ...lifecycleProject,
+    analysis: { ...analysis, outerCutPath: "   " },
+    workflowProgress: { activeStep: "clean" as const, lineworkReviewed: false, colorsOutcome: "incomplete" as const }
+  });
+  const rejected = transitionProjectSession(invalidCutLine, { type: "complete-linework-review" });
+  assertEqual(rejected.outcome.status, "rejected", "linework review should require a valid Cut Line");
+  assertEqual(rejected.session, invalidCutLine, "invalid linework review should not partially record a milestone");
+
+  const valid = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "clean" as const, lineworkReviewed: false, colorsOutcome: "incomplete" as const },
+    cleanupChecks: { cutline: false, remove: false, draw: false, export: false }
+  });
+  const reviewed = transitionProjectSession(valid, { type: "complete-linework-review" });
+  assertEqual(reviewed.outcome.status, "applied", "valid linework review should apply");
+  assertDeepEqual(reviewed.session.project.workflowProgress, {
+    activeStep: "colors",
+    lineworkReviewed: true,
+    colorsOutcome: "incomplete"
+  }, "linework review should record the milestone and navigation atomically");
+  assertDeepEqual(reviewed.session.project.cleanupChecks, {
+    cutline: true,
+    remove: true,
+    draw: true,
+    export: false
+  }, "linework review should retain the existing cleanup decision fields");
+}
+
+{
+  const blocked = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "clean" as const, lineworkReviewed: false, colorsOutcome: "incomplete" as const }
+  });
+  const rejected = transitionProjectSession(blocked, { type: "complete-color-review", outcome: "reviewed" });
+  assertEqual(rejected.outcome.status, "rejected", "color review should require linework review");
+  assertEqual(rejected.session, blocked, "rejected color review should not change paint settings or progress");
+
+  const reviewedLinework = transitionProjectSession(blocked, { type: "complete-linework-review" });
+  const skipped = transitionProjectSession(reviewedLinework.session, { type: "complete-color-review", outcome: "skipped" });
+  assertEqual(skipped.outcome.status, "applied", "skipping color review should apply after linework review");
+  assertEqual(skipped.session.project.workflowProgress?.activeStep, "export", "a color decision should advance to Export");
+  assertEqual(skipped.session.project.workflowProgress?.colorsOutcome, "skipped", "the skipped outcome should be durable");
+  assertEqual(skipped.session.project.settings.includePaintGuidePage, false, "skipping should disable the Color Guide atomically");
+
+  const bypassedColorGuide = transitionProjectSession(skipped.session, { type: "set-color-guide-included", included: true });
+  assertEqual(bypassedColorGuide.outcome.status, "rejected", "a skipped Colors milestone should reject silently re-enabling the Color Guide");
+  assertEqual(bypassedColorGuide.session.project.settings.includePaintGuidePage, false, "rejected Color Guide enablement should preserve the skipped export setting");
+  const bypassedGenericSettings = transitionProjectSession(skipped.session, {
+    type: "update-non-size-settings",
+    settings: { ...skipped.session.project.settings, includePaintGuidePage: true }
+  });
+  assertEqual(bypassedGenericSettings.session.project.settings.includePaintGuidePage, false, "generic settings updates should not bypass the color-review policy");
+
+  const revisited = transitionProjectSession(skipped.session, { type: "navigate-workflow", target: "colors" });
+  const completedLater = transitionProjectSession(revisited.session, { type: "complete-color-review", outcome: "reviewed" });
+  const ordinaryExportEdit = transitionProjectSession(completedLater.session, { type: "set-color-guide-included", included: false });
+  assertEqual(ordinaryExportEdit.outcome.status, "applied", "a reviewed Color Guide should remain an editable export option");
+  assertEqual(ordinaryExportEdit.session.project.workflowProgress?.colorsOutcome, "reviewed", "ordinary Color Guide edits should retain completed review");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const paintSelections = reviewed.project.projectPalette;
+  const mutated = transitionProjectSession(reviewed, {
+    type: "commit-accepted-linework",
+    editedDetailPngDataUrl: "data:image/png;base64,changed-detail",
+    manualStrokes: [{ id: "mouth", points: [{ x: 30, y: 40 }] }]
+  });
+
+  assertEqual(mutated.outcome.status, "applied", "accepted-linework mutation should apply");
+  assertDeepEqual(mutated.session.project.workflowProgress, {
+    activeStep: "clean",
+    lineworkReviewed: false,
+    colorsOutcome: "incomplete"
+  }, "accepted-linework mutation should revoke both milestones and return to Clean Lines");
+  assertEqual(mutated.session.project.projectPalette, paintSelections, "accepted-linework mutation should preserve paint selections");
+  assertEqual(mutated.session.project.editedDetailPngDataUrl, "data:image/png;base64,changed-detail", "accepted Detail Lines should update atomically");
+}
+
+{
+  const empty = createProjectSession({
+    ...lifecycleProject,
+    editedDetailPngDataUrl: null,
+    manualStrokes: [],
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const unchanged = transitionProjectSession(empty, {
+    type: "commit-accepted-linework",
+    editedDetailPngDataUrl: null,
+    manualStrokes: []
+  });
+  assertEqual(unchanged.outcome.status, "unchanged", "a semantically identical empty linework write should not revoke milestones");
+  assertEqual(unchanged.session, empty, "an identical linework write should preserve revision and progress");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const changedColors = transitionProjectSession(reviewed, {
+    type: "update-project-palette",
+    projectPalette: [{ id: "blue", hex: "#2563eb", label: "Coat" }]
+  });
+  assertEqual(changedColors.session.project.workflowProgress?.colorsOutcome, "reviewed", "ordinary color edits should retain completed review");
+  assertEqual(changedColors.session.project.workflowProgress?.activeStep, "export", "ordinary color edits should retain Export availability");
+
+  const restarted = transitionProjectSession(changedColors.session, { type: "restart-color-review" });
+  assertDeepEqual(restarted.session.project.workflowProgress, {
+    activeStep: "colors",
+    lineworkReviewed: true,
+    colorsOutcome: "incomplete"
+  }, "explicit restart should revoke only the color milestone and return to Colors");
+}
+
+{
+  const malformedWithoutCutLine = createProjectSession({
+    ...lifecycleProject,
+    analysis: { ...analysis, outerCutPath: "" },
+    workflowProgress: { activeStep: "export", lineworkReviewed: true, colorsOutcome: "reviewed" }
+  });
+  assertDeepEqual(malformedWithoutCutLine.project.workflowProgress, {
+    activeStep: "clean",
+    lineworkReviewed: false,
+    colorsOutcome: "incomplete"
+  }, "restored progress should be clamped to artifacts when the Cut Line is missing");
+
+  const malformedStep = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "unknown", lineworkReviewed: true, colorsOutcome: "reviewed" } as never
+  });
+  assertEqual(malformedStep.project.workflowProgress?.activeStep, "export", "a malformed active step should normalize to the furthest artifact-supported step");
+}
+
+{
+  const session = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "clean" as const, lineworkReviewed: true, colorsOutcome: "incomplete" as const }
+  });
+  const blocked = transitionProjectSession(session, { type: "set-guided-workflow-blocked", blocked: true });
+  const workflow = projectSessionView(blocked.session).capabilities.guidedWorkflow;
+  assertEqual(workflow.steps.find((item) => item.step === "colors")?.status, "locked", "a pending proposal should be represented by session capabilities");
+  const bypassed = transitionProjectSession(blocked.session, { type: "navigate-workflow", target: "colors" });
+  assertEqual(bypassed.outcome.status, "rejected", "pending-proposal navigation should be rejected by the same session policy");
+  const bypassedColorReview = transitionProjectSession(blocked.session, { type: "complete-color-review", outcome: "reviewed" });
+  assertEqual(bypassedColorReview.outcome.status, "rejected", "pending-proposal color completion should be rejected by the same session policy");
+  const bypassedRestart = transitionProjectSession(blocked.session, { type: "restart-color-review" });
+  assertEqual(bypassedRestart.outcome.status, "rejected", "pending-proposal color restart should be rejected by the same session policy");
+  assertEqual(workflow.canCompleteColorReview, false, "displayed color-review capability should match blocked enforcement");
+}
+
+{
+  const colors = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "colors" as const, lineworkReviewed: true, colorsOutcome: "incomplete" as const }
+  });
+  const clean = transitionProjectSession(colors, { type: "navigate-workflow", target: "clean" });
+  const availableColors = projectSessionView(clean.session).capabilities.guidedWorkflow.steps.find((item) => item.step === "colors");
+  assertEqual(availableColors?.status, "available", "Colors should display as an available forward step after backward navigation");
+  assertEqual(availableColors?.clickable, false, "available forward steps should remain disabled in the step header");
+  const bypassed = transitionProjectSession(clean.session, { type: "navigate-workflow", target: "colors" });
+  assertEqual(bypassed.outcome.status, "rejected", "a disabled available-step request should be rejected at the public seam");
+  assertEqual(bypassed.session, clean.session, "available-step bypass should preserve the current Clean Lines state");
+}
+
 console.log("project session tests passed");
