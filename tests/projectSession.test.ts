@@ -524,6 +524,64 @@ const lifecycleProject = {
 }
 
 {
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const paintSelections = reviewed.project.projectPalette;
+  const committed = transitionProjectSession(reviewed, {
+    type: "commit-editor-transaction",
+    outcome: {
+      editedDetailPngDataUrl: "data:image/png;base64,editor-detail",
+      manualStrokes: [{ id: "feature-line", points: [{ x: 12, y: 18 }] }]
+    }
+  });
+
+  assertEqual(committed.outcome.status, "applied", "a committed Editor Transaction outcome should apply through Project Session");
+  assertEqual(committed.session.revision, reviewed.revision + 1, "one Editor Transaction should create one Project Revision");
+  assertEqual(committed.effects.length, 1, "one Editor Transaction should request one Autosave");
+  assertDeepEqual(committed.session.project.workflowProgress, {
+    activeStep: "clean",
+    lineworkReviewed: false,
+    colorsOutcome: "incomplete"
+  }, "an Editor Transaction should atomically revoke stale milestones");
+  assertEqual(committed.session.project.projectPalette, paintSelections, "an Editor Transaction should preserve paint selections");
+
+  const saved = transitionProjectSession(committed.session, {
+    type: "persistence-succeeded",
+    revision: committed.session.revision,
+    mode: "autosave"
+  });
+  const proposalPending = transitionProjectSession(saved.session, { type: "set-guided-workflow-blocked", blocked: true });
+  const undone = transitionProjectSession(proposalPending.session, {
+    type: "commit-editor-transaction",
+    outcome: {
+      editedDetailPngDataUrl: lifecycleProject.editedDetailPngDataUrl,
+      manualStrokes: lifecycleProject.manualStrokes
+    }
+  });
+
+  assertEqual(undone.session.project.editedDetailPngDataUrl, lifecycleProject.editedDetailPngDataUrl, "Undo outcome should restore the prior editable artifact");
+  assertDeepEqual(undone.session.project.workflowProgress, {
+    activeStep: "clean",
+    lineworkReviewed: false,
+    colorsOutcome: "incomplete"
+  }, "Undo should not restore revoked Review Milestones or workflow navigation");
+  assertEqual(undone.session.guidedWorkflowBlocked, true, "Undo should not restore proposal-review status");
+  assertEqual(undone.session.persistence.status, "pending", "Undo should create a new unsaved revision rather than restore saved status");
+
+  const redone = transitionProjectSession(undone.session, {
+    type: "commit-editor-transaction",
+    outcome: {
+      editedDetailPngDataUrl: committed.session.project.editedDetailPngDataUrl,
+      manualStrokes: committed.session.project.manualStrokes
+    }
+  });
+  assertEqual(redone.session.project.editedDetailPngDataUrl, "data:image/png;base64,editor-detail", "Redo outcome should reapply the edited artifact");
+  assertEqual(redone.session.project.workflowProgress?.lineworkReviewed, false, "Redo should not restore Review Milestones");
+}
+
+{
   const empty = createProjectSession({
     ...lifecycleProject,
     editedDetailPngDataUrl: null,

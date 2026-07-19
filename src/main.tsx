@@ -24,6 +24,13 @@ import {
 } from "./projectSession.ts";
 import { previewDetailSegment, previewFirstDetailSegment, removeDetailSegmentPreview, type DetailSegmentPreview } from "./detailEditor";
 import {
+  createEditorTransactionHistory,
+  recordEditorTransaction,
+  redoEditorTransaction,
+  undoEditorTransaction,
+  type EditorTransactionHistory
+} from "./editorTransactions.ts";
+import {
   acceptAiProposalReview,
   applyAcceptedAiProposal,
   beginAiProposalReview,
@@ -167,6 +174,7 @@ type StrokeDragState = {
   pointIndex?: number;
   startPoint: TracePoint;
   originalStrokes: TraceStroke[];
+  previewStrokes?: TraceStroke[];
   moved: boolean;
 };
 
@@ -366,10 +374,12 @@ function App() {
   const [paintReviewFilter, setPaintReviewFilter] = useState<PaintReviewFilter>("all");
   const [colorDetailsOpen, setColorDetailsOpen] = useState(false);
   const [shoppingListStatus, setShoppingListStatus] = useState("");
-  const [manualHistory, setManualHistory] = useState<TraceStroke[][]>([]);
-  const [manualRedoHistory, setManualRedoHistory] = useState<TraceStroke[][]>([]);
-  const [history, setHistory] = useState<string[]>([]);
-  const [redoHistory, setRedoHistory] = useState<string[]>([]);
+  const [featureLineHistory, setFeatureLineHistory] = useState<EditorTransactionHistory<TraceStroke[]>>(
+    createEditorTransactionHistory
+  );
+  const [detailLineHistory, setDetailLineHistory] = useState<EditorTransactionHistory<string>>(
+    createEditorTransactionHistory
+  );
   const [svgSourceInkDataUrl, setSvgSourceInkDataUrl] = useState<string | null>(null);
   const [svgImportedDetailDataUrl, setSvgImportedDetailDataUrl] = useState<string | null>(null);
   const [svgLineworkDetected, setSvgLineworkDetected] = useState(false);
@@ -396,6 +406,7 @@ function App() {
   const lastPointRef = useRef<TracePoint | null>(null);
   const smoothAnchorRef = useRef<TracePoint | null>(null);
   const draftStrokeRef = useRef<TraceStroke | null>(null);
+  const rasterTransactionBeforeRef = useRef<string | null>(null);
   const strokeDragRef = useRef<StrokeDragState | null>(null);
   const strokeIdRef = useRef(0);
   const pendingContentFitRef = useRef(false);
@@ -436,8 +447,8 @@ function App() {
   const traceStudioOpen = traceMode === "manual";
   const selectedStroke = selectedStrokeId ? manualStrokes.find((stroke) => stroke.id === selectedStrokeId) ?? null : null;
   const selectedStrokeSummary = selectedTraceStrokeSummary(manualStrokes, selectedStrokeId);
-  const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
-  const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
+  const undoDisabled = traceStudioOpen ? featureLineHistory.undo.length === 0 : detailLineHistory.undo.length === 0;
+  const redoDisabled = traceStudioOpen ? featureLineHistory.redo.length === 0 : detailLineHistory.redo.length === 0;
   const primaryTraceActionLabel = traceActionLabel({ image: selectedImage, analysis, busy, traceMode });
   const paintGuideEntries = paintGuideEntriesForProjectPalette(projectPalette);
   const paintWarnings = paintSanityWarnings(paintGuideEntries);
@@ -489,12 +500,10 @@ function App() {
 
   function resetEditorState() {
     clearRemovalPreview();
-    setHistory([]);
-    setRedoHistory([]);
+    setDetailLineHistory(createEditorTransactionHistory());
     setEditedDetailDataUrl(null);
     setManualStrokes([]);
-    setManualHistory([]);
-    setManualRedoHistory([]);
+    setFeatureLineHistory(createEditorTransactionHistory());
     setSelectedStrokeId(null);
     setDimUnselectedStrokes(false);
     setSelectionFeedback("");
@@ -781,11 +790,9 @@ function App() {
     const applied = applyAcceptedAiProposal({
       currentDetailDataUrl: currentDetail,
       proposalDetailDataUrl: aiProposal.proposalDetailPngDataUrl,
-      history
+      history: detailLineHistory.undo.map((transaction) => transaction.before)
     });
-    setHistory(applied.history);
-    setRedoHistory([]);
-    setEditedDetailDataUrl(applied.acceptedDetailDataUrl);
+    commitDetailLineTransaction(currentDetail, applied.acceptedDetailDataUrl);
     loadDetailCanvas(applied.acceptedDetailDataUrl);
     setAiProposalReview(acceptedReview);
     applyProjectSessionAction({ type: "set-guided-workflow-blocked", blocked: false });
@@ -1063,10 +1070,8 @@ function App() {
     setSelectedStrokeId(null);
     setDimUnselectedStrokes(false);
     setSelectionFeedback("");
-    setManualHistory([]);
-    setManualRedoHistory([]);
-    setHistory([]);
-    setRedoHistory([]);
+    setFeatureLineHistory(createEditorTransactionHistory());
+    setDetailLineHistory(createEditorTransactionHistory());
     setError(null);
     setProjectStatus(status);
     strokeIdRef.current = highestStrokeNumber(project.manualStrokes);
@@ -1146,7 +1151,7 @@ function App() {
 
   async function applyDetailPreset(preset: DetailPreset) {
     const next = detailPresetSettings(preset, settings);
-    if (analysis && (editedDetailDataUrl !== null || history.length > 0)) {
+    if (analysis && (editedDetailDataUrl !== null || detailLineHistory.undo.length > 0)) {
       const shouldReplace = window.confirm("Change detail strength? This will replace your edited starter-line cleanup with a newly generated layer.");
       if (!shouldReplace) return;
     }
@@ -1162,9 +1167,7 @@ function App() {
   function switchToBlankTraceStudio() {
     applyTraceModeUiState("manual");
     setSettings((current) => traceModeSettings("manual", current));
-    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-    setManualRedoHistory([]);
-    setManualStrokes([]);
+    commitFeatureLineTransaction(manualStrokes, []);
     setSelectedStrokeId(null);
     setSelectionFeedback("Switched to blank Trace Studio");
     setEditorOpen(true);
@@ -1308,11 +1311,28 @@ function App() {
     return canvas.toDataURL("image/png");
   }
 
-  function saveHistorySnapshot() {
-    const current = currentDetailDataUrl();
-    if (!current) return;
-    setHistory((items) => [...items.slice(-19), current]);
-    setRedoHistory([]);
+  function applyEditorTransactionArtifacts(
+    editedDetailPngDataUrl: string | null,
+    nextManualStrokes: TraceStroke[]
+  ) {
+    return applyProjectSessionAction({
+      type: "commit-editor-transaction",
+      outcome: { editedDetailPngDataUrl, manualStrokes: nextManualStrokes }
+    });
+  }
+
+  function commitDetailLineTransaction(before: string, after: string) {
+    if (before === after) return false;
+    setDetailLineHistory((current) => recordEditorTransaction(current, { before, after }));
+    applyEditorTransactionArtifacts(after, projectSessionRef.current.project.manualStrokes);
+    return true;
+  }
+
+  function commitFeatureLineTransaction(before: TraceStroke[], after: TraceStroke[]) {
+    if (before.length === after.length && before.every((stroke, index) => stroke === after[index])) return false;
+    setFeatureLineHistory((current) => recordEditorTransaction(current, { before, after }));
+    applyEditorTransactionArtifacts(projectSessionRef.current.project.editedDetailPngDataUrl, after);
+    return true;
   }
 
   function setDetailExtractionMode(mode: DetailExtractionMode) {
@@ -1322,57 +1342,49 @@ function App() {
 
   function undoDetailEdit() {
     if (traceStudioOpen) {
-      const previous = manualHistory[manualHistory.length - 1];
-      if (!previous) return;
-      setManualHistory((items) => items.slice(0, -1));
-      setManualRedoHistory((items) => [...items.slice(-19), manualStrokes]);
-      setManualStrokes(previous);
+      const replay = undoEditorTransaction(featureLineHistory);
+      if (!replay.changed) return;
+      setFeatureLineHistory(replay.history);
+      applyEditorTransactionArtifacts(editedDetailDataUrl, replay.artifact);
       setSelectedStrokeId(null);
       setSelectionFeedback("Undid stroke edit");
       return;
     }
-    const current = currentDetailDataUrl();
-    const previous = history[history.length - 1];
-    if (!previous) return;
-    setHistory((items) => items.slice(0, -1));
-    if (current) setRedoHistory((items) => [...items.slice(-19), current]);
-    setEditedDetailDataUrl(previous);
-    loadDetailCanvas(previous);
+    const replay = undoEditorTransaction(detailLineHistory);
+    if (!replay.changed) return;
+    setDetailLineHistory(replay.history);
+    applyEditorTransactionArtifacts(replay.artifact, manualStrokes);
+    loadDetailCanvas(replay.artifact);
   }
 
   function redoDetailEdit() {
     if (traceStudioOpen) {
-      const next = manualRedoHistory[manualRedoHistory.length - 1];
-      if (!next) return;
-      setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-      setManualRedoHistory((items) => items.slice(0, -1));
-      setManualStrokes(next);
+      const replay = redoEditorTransaction(featureLineHistory);
+      if (!replay.changed) return;
+      setFeatureLineHistory(replay.history);
+      applyEditorTransactionArtifacts(editedDetailDataUrl, replay.artifact);
       setSelectedStrokeId(null);
       setSelectionFeedback("Redid stroke edit");
       return;
     }
-    const current = currentDetailDataUrl();
-    const next = redoHistory[redoHistory.length - 1];
-    if (!next) return;
-    if (current) setHistory((items) => [...items.slice(-19), current]);
-    setRedoHistory((items) => items.slice(0, -1));
-    setEditedDetailDataUrl(next);
-    loadDetailCanvas(next);
+    const replay = redoEditorTransaction(detailLineHistory);
+    if (!replay.changed) return;
+    setDetailLineHistory(replay.history);
+    applyEditorTransactionArtifacts(replay.artifact, manualStrokes);
+    loadDetailCanvas(replay.artifact);
   }
 
   function resetDetailLayer() {
     if (!analysis) return;
     if (traceStudioOpen) {
-      setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-      setManualRedoHistory([]);
-      setManualStrokes([]);
+      if (!commitFeatureLineTransaction(manualStrokes, [])) return;
       setSelectedStrokeId(null);
       setSelectionFeedback("Cleared manual strokes");
       return;
     }
-    saveHistorySnapshot();
+    const before = currentDetailDataUrl();
     const restoredDetail = svgImportedDetailDataUrl ?? analysis.detailLinePngDataUrl;
-    setEditedDetailDataUrl(restoredDetail);
+    if (before) commitDetailLineTransaction(before, restoredDetail);
     loadDetailCanvas(restoredDetail);
   }
 
@@ -1433,7 +1445,7 @@ function App() {
       return;
     }
     safelySetPointerCapture(event.currentTarget, event.pointerId);
-    saveHistorySnapshot();
+    rasterTransactionBeforeRef.current = currentDetailDataUrl();
     drawingRef.current = true;
     lastPointRef.current = point;
     smoothAnchorRef.current = point;
@@ -1452,8 +1464,8 @@ function App() {
         ? moveTraceStroke(drag.originalStrokes, drag.strokeId, { x: point.x - drag.startPoint.x, y: point.y - drag.startPoint.y })
         : updateTraceStrokePoint(drag.originalStrokes, drag.strokeId, drag.pointIndex ?? -1, point);
       if (result.changed) {
-        strokeDragRef.current = { ...drag, moved: true };
-        setManualStrokes(result.strokes);
+        strokeDragRef.current = { ...drag, moved: true, previewStrokes: result.strokes };
+        renderManualTraceLayer(result.strokes);
       }
       return;
     }
@@ -1497,9 +1509,8 @@ function App() {
       const drag = strokeDragRef.current;
       if (drag) {
         safelyReleasePointerCapture(event.currentTarget, event.pointerId);
-        if (drag.moved) {
-          setManualHistory((items) => [...items.slice(-19), drag.originalStrokes]);
-          setManualRedoHistory([]);
+        if (drag.moved && drag.previewStrokes) {
+          commitFeatureLineTransaction(drag.originalStrokes, drag.previewStrokes);
           setSelectionFeedback(drag.mode === "point" ? "Edited point" : "Moved stroke");
         }
         strokeDragRef.current = null;
@@ -1515,9 +1526,7 @@ function App() {
         safelyReleasePointerCapture(event.currentTarget, event.pointerId);
         const draft = draftStrokeRef.current;
         if (draft && draft.points.length > 0) {
-          setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-          setManualRedoHistory([]);
-          setManualStrokes((items) => [...items, draft]);
+          commitFeatureLineTransaction(manualStrokes, [...manualStrokes, draft]);
           setSelectedStrokeId(draft.id);
           setSelectionFeedback("Created stroke");
         }
@@ -1533,7 +1542,9 @@ function App() {
         drawStrokeSegment(smoothAnchorRef.current, lastPointRef.current);
       }
       safelyReleasePointerCapture(event.currentTarget, event.pointerId);
-      setEditedDetailDataUrl(event.currentTarget.toDataURL("image/png"));
+      const after = event.currentTarget.toDataURL("image/png");
+      const before = rasterTransactionBeforeRef.current;
+      if (before) commitDetailLineTransaction(before, after);
       const bounds = canvasContentBounds(event.currentTarget);
       setEditableDetailLinesPresent(bounds !== null);
       setDetailLineBounds(bounds);
@@ -1541,6 +1552,7 @@ function App() {
     drawingRef.current = false;
     lastPointRef.current = null;
     smoothAnchorRef.current = null;
+    rasterTransactionBeforeRef.current = null;
   }
 
   function canvasPoint(event: PointerEvent<HTMLCanvasElement>): TracePoint {
@@ -1615,9 +1627,9 @@ function App() {
     }
     const result = removeDetailSegmentPreview(imageData.data, canvas.width, preview);
     if (!result.changed) return;
-    saveHistorySnapshot();
+    const before = canvas.toDataURL("image/png");
     context.putImageData(imageData, 0, 0);
-    setEditedDetailDataUrl(canvas.toDataURL("image/png"));
+    commitDetailLineTransaction(before, canvas.toDataURL("image/png"));
     const bounds = canvasContentBounds(canvas);
     setEditableDetailLinesPresent(bounds !== null);
     setDetailLineBounds(bounds);
@@ -1675,9 +1687,9 @@ function App() {
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
     const result = removeDetailSegmentPreview(imageData.data, canvas.width, preview);
     if (!result.changed) return;
-    saveHistorySnapshot();
+    const before = canvas.toDataURL("image/png");
     context.putImageData(imageData, 0, 0);
-    setEditedDetailDataUrl(canvas.toDataURL("image/png"));
+    commitDetailLineTransaction(before, canvas.toDataURL("image/png"));
     const bounds = canvasContentBounds(canvas);
     setEditableDetailLinesPresent(bounds !== null);
     setDetailLineBounds(bounds);
@@ -1707,9 +1719,7 @@ function App() {
   function removeManualStrokeAt(point: TracePoint) {
     const result = eraseTraceStrokes(manualStrokes, point, brushPixels(brushSize));
     if (!result.changed) return;
-    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-    setManualRedoHistory([]);
-    setManualStrokes(result.strokes);
+    commitFeatureLineTransaction(manualStrokes, result.strokes);
     setSelectedStrokeId(null);
     setSelectionFeedback(result.removedStrokeIds.length === 1 ? "Deleted stroke" : `Deleted ${result.removedStrokeIds.length} strokes`);
   }
@@ -1721,9 +1731,7 @@ function App() {
 
   function commitManualStrokeEdit(result: StrokeEditResult, nextSelectedStrokeId = selectedStrokeId) {
     if (!result.changed) return;
-    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-    setManualRedoHistory([]);
-    setManualStrokes(result.strokes);
+    commitFeatureLineTransaction(manualStrokes, result.strokes);
     setSelectedStrokeId(result.selectedStrokeId ?? nextSelectedStrokeId ?? null);
   }
 
@@ -1731,9 +1739,7 @@ function App() {
     if (!selectedStrokeId) return;
     const result = deleteTraceStroke(manualStrokes, selectedStrokeId);
     if (!result.changed) return;
-    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-    setManualRedoHistory([]);
-    setManualStrokes(result.strokes);
+    commitFeatureLineTransaction(manualStrokes, result.strokes);
     setSelectedStrokeId(null);
     setSelectionFeedback("Deleted stroke");
   }

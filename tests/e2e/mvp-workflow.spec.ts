@@ -136,6 +136,81 @@ test("project persistence keeps one coherent revision and recovers from a visibl
   await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
 });
 
+test("Editor Transactions keep Undo and Redo artifact-only while preserving paint work", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "editor-transactions.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const guidedWorkflow = page.getByLabel("Guided workflow");
+  const cleanControls = page.getByLabel("Clean Lines primary controls");
+  await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  const colorDetails = page.getByLabel("Edit color details");
+  if (!await colorDetails.evaluate((element) => element instanceof HTMLDetailsElement && element.open)) {
+    await colorDetails.locator(":scope > summary").click();
+  }
+  await addProjectPaintColor(page, "#315c78", "Lifecycle paint");
+  await page.getByRole("button", { name: "Continue to Export" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
+
+  await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  const rasterBefore = await detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await cleanControls.getByRole("button", { name: "Add Missing Line" }).click();
+  await drawStroke(detailCanvas, [
+    [0.34, 0.31],
+    [0.44, 0.35],
+    [0.54, 0.35],
+    [0.64, 0.31]
+  ]);
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(rasterBefore);
+  const rasterAfter = await detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.projectPalette.some((color: { label: string }) => color.label === "Lifecycle paint")).toBe(true);
+
+  await cleanControls.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterBefore);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+
+  const moreTools = page.getByLabel("More Tools");
+  if (!await moreTools.evaluate((element) => element instanceof HTMLDetailsElement && element.open)) {
+    await moreTools.locator("summary").click();
+  }
+  await page.getByLabel("Template editor tools").getByRole("button", { name: "Redo" }).click();
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterAfter);
+
+  await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await page.getByRole("button", { name: "Continue to Export" }).click();
+  await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
+  if (!await moreTools.evaluate((element) => element instanceof HTMLDetailsElement && element.open)) {
+    await moreTools.locator("summary").click();
+  }
+  await page.getByLabel("Starter detail line guidance").getByRole("button", { name: "Use blank Trace Studio" }).click();
+  await cleanControls.getByRole("button", { name: "Add Missing Line" }).click();
+  await drawStroke(detailCanvas, [
+    [0.40, 0.42],
+    [0.48, 0.46],
+    [0.56, 0.46],
+    [0.64, 0.42]
+  ]);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.projectPalette.some((color: { label: string }) => color.label === "Lifecycle paint")).toBe(true);
+
+  await cleanControls.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(0);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+  await page.getByLabel("Template editor tools").getByRole("button", { name: "Redo" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+});
+
 test("project name and Finished Size preserve reviewed project work", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
   await page.goto("/");

@@ -110,6 +110,13 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
       editedDetailPngDataUrl: string | null;
       manualStrokes: readonly unknown[];
     }
+  | {
+      type: "commit-editor-transaction";
+      outcome: {
+        editedDetailPngDataUrl: string | null;
+        manualStrokes: readonly unknown[];
+      };
+    }
   | { type: "update-project-palette"; projectPalette: readonly unknown[] }
   | { type: "update-workspace-preferences"; preferences: Partial<Pick<ProjectSessionProject, "traceMode" | "referenceOpacity" | "layerVisibility" | "traceViewport">> }
   | { type: "set-color-guide-included"; included: boolean }
@@ -307,15 +314,16 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     if (sameWorkflowProgress(progress, restarted)) return unchangedTransition(session);
     return applyProjectTransition(session, { ...session.project, workflowProgress: restarted } as TProject);
   }
-  if (action.type === "commit-accepted-linework") {
+  if (action.type === "commit-accepted-linework" || action.type === "commit-editor-transaction") {
+    const outcome = action.type === "commit-editor-transaction" ? action.outcome : action;
     if (
-      session.project.editedDetailPngDataUrl === action.editedDetailPngDataUrl
-      && sameReadonlyArray(session.project.manualStrokes, action.manualStrokes)
+      session.project.editedDetailPngDataUrl === outcome.editedDetailPngDataUrl
+      && sameReadonlyArray(session.project.manualStrokes, outcome.manualStrokes)
     ) return unchangedTransition(session);
     return applyProjectTransition(session, {
       ...session.project,
-      editedDetailPngDataUrl: action.editedDetailPngDataUrl,
-      manualStrokes: action.manualStrokes,
+      editedDetailPngDataUrl: outcome.editedDetailPngDataUrl,
+      manualStrokes: outcome.manualStrokes,
       workflowProgress: invalidateLineworkReview(normalizedWorkflowProgress(session.project)),
       cleanupChecks: emptyCleanupChecks()
     } as TProject);
