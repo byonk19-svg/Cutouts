@@ -1,7 +1,17 @@
 import {
+  acceptAiProposalReview,
+  beginAiProposalReview,
+  canAcceptAiProposal,
+  rejectAiProposalReview,
+  reviewAiProposalView,
+  type AiProposalReview,
+  type AiProposalReviewView
+} from "./aiLineworkReview.ts";
+import {
   resizeAnalysisForFinishedHeight,
   type CutoutProjectAnalysis
 } from "./cutoutProject.ts";
+import type { EditorTransaction } from "./editorTransactions.ts";
 import {
   DEFAULT_WORKFLOW_PROGRESS,
   completeColorReview,
@@ -17,11 +27,16 @@ import {
 } from "./guidedWorkflow.ts";
 import type { Settings } from "./traceWorkflow.ts";
 
+const AI_PROPOSAL_ESTIMATE_USD = 0.10;
+
+export type ProjectSessionInputReadiness = "needs-simplification" | "ready-line-art";
+
 export type ProjectSessionProject = {
   projectName: string;
   settings: Settings;
   sourceImage?: ProjectSessionSourceImage | null;
   analysis: CutoutProjectAnalysis | null;
+  inputReadiness?: ProjectSessionInputReadiness;
   editedDetailPngDataUrl?: string | null;
   manualStrokes?: readonly unknown[];
   projectPalette?: readonly unknown[];
@@ -55,6 +70,34 @@ export type ProjectPreparationToken = {
   operation: ProjectPreparationOperation;
 };
 
+export type ProjectSessionAiProposalToken = {
+  revision: number;
+  proposalRevision: number;
+  requestId: number;
+};
+
+export type ProjectSessionAiProposalResult = {
+  status: "pending-review" | "review-only";
+  validationIssues: readonly string[];
+  canReplaceAcceptedDetail: false;
+  proposalPreviewPngDataUrl: string;
+  proposalDetailPngDataUrl: string;
+  inkCoverage: number;
+  suppressedPixelCount: number;
+  previewWidthPx: number;
+  previewHeightPx: number;
+  model: string;
+  provider: string;
+  estimatedCostUsd: number;
+};
+
+export type ProjectSessionAiProposalState =
+  | { status: "idle" }
+  | { status: "confirming"; estimatedCostUsd: number }
+  | { status: "requesting"; estimatedCostUsd: number; token: ProjectSessionAiProposalToken }
+  | { status: "failed"; error: string }
+  | { status: "ready"; proposal: ProjectSessionAiProposalResult; review: AiProposalReview };
+
 export type ProjectOperationStatus =
   | { status: "idle" }
   | { status: "preparing"; token: ProjectPreparationToken }
@@ -73,8 +116,15 @@ export type ProjectSession<TProject extends ProjectSessionProject = ProjectSessi
   project: TProject;
   operation: ProjectOperationStatus;
   nextOperationId: number;
-  guidedWorkflowBlocked: boolean;
+  proposalRevision: number;
+  nextAiProposalRequestId: number;
+  aiProposal: ProjectSessionAiProposalState;
   persistence: ProjectPersistenceHealth;
+};
+
+export type ProjectSessionEditableArtifact = {
+  editedDetailPngDataUrl: string | null;
+  manualStrokes: readonly unknown[];
 };
 
 export type GuidedWorkflowCapabilities = {
@@ -85,6 +135,13 @@ export type GuidedWorkflowCapabilities = {
   readonly canRestartColorReview: boolean;
 };
 
+export type AiProposalCapabilities = {
+  readonly canBeginRequest: boolean;
+  readonly canConfirmRequest: boolean;
+  readonly canAccept: boolean;
+  readonly canReject: boolean;
+};
+
 export type ProjectCapabilities = {
   readonly renameProject: boolean;
   readonly changeFinishedSize: boolean;
@@ -92,6 +149,8 @@ export type ProjectCapabilities = {
   readonly analyzeSource: boolean;
   readonly regenerateAnalysis: boolean;
   readonly startNewProject: boolean;
+  readonly exportProject: boolean;
+  readonly aiProposal: AiProposalCapabilities;
   readonly guidedWorkflow: GuidedWorkflowCapabilities;
 };
 
@@ -100,7 +159,15 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
   | { type: "change-finished-size"; finishedHeightIn: number }
   | { type: "hydrate-project"; project: TProject }
   | { type: "update-non-size-settings"; settings: Settings }
-  | { type: "replace-analysis"; analysis: CutoutProjectAnalysis | null }
+  | { type: "replace-analysis"; analysis: CutoutProjectAnalysis | null; inputReadiness?: ProjectSessionInputReadiness }
+  | { type: "begin-ai-proposal-request" }
+  | { type: "cancel-ai-proposal-request" }
+  | { type: "confirm-ai-proposal-request"; estimatedCostUsd: number; uploadConfirmed: boolean }
+  | { type: "complete-ai-proposal-request"; token: ProjectSessionAiProposalToken; proposal: ProjectSessionAiProposalResult }
+  | { type: "fail-ai-proposal-request"; token: ProjectSessionAiProposalToken; error: string }
+  | { type: "review-ai-proposal-view"; view: AiProposalReviewView }
+  | { type: "reject-ai-proposal" }
+  | { type: "accept-ai-proposal" }
   | { type: "navigate-workflow"; target: WorkflowStep }
   | { type: "complete-linework-review" }
   | { type: "complete-color-review"; outcome: Exclude<ColorsOutcome, "incomplete"> }
@@ -120,7 +187,7 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
   | { type: "update-project-palette"; projectPalette: readonly unknown[] }
   | { type: "update-workspace-preferences"; preferences: Partial<Pick<ProjectSessionProject, "traceMode" | "referenceOpacity" | "layerVisibility" | "traceViewport">> }
   | { type: "set-color-guide-included"; included: boolean }
-  | { type: "set-guided-workflow-blocked"; blocked: boolean }
+  | { type: "request-export" }
   | { type: "request-explicit-save" }
   | { type: "persistence-succeeded"; revision: number; mode: "autosave" | "explicit" }
   | { type: "persistence-failed"; revision: number; mode: "autosave" | "explicit"; error: string }
@@ -133,6 +200,7 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
       mode: ProjectSourcePreparationOperation;
       projectName?: string;
       sourceImage?: ProjectSessionSourceImage;
+      inputReadiness?: ProjectSessionInputReadiness;
       settings: Settings;
       analysis: CutoutProjectAnalysis;
       initialDetailPngDataUrl: string | null;
@@ -155,12 +223,14 @@ export type ProjectSessionTransition<TProject extends ProjectSessionProject> = {
     | { status: "applied" }
     | { status: "unchanged" }
     | { status: "preparing"; token: ProjectPreparationToken }
+    | { status: "requesting"; token: ProjectSessionAiProposalToken }
     | { status: "failed"; error: string }
     | { status: "successful" }
     | { status: "stale" }
     | { status: "cancelled" }
     | { status: "save-requested" }
     | { status: "rejected"; error: { code: ProjectSessionRejectionCode; message: string } };
+  editorTransaction?: EditorTransaction<ProjectSessionEditableArtifact>;
   effects: readonly ProjectSessionEffect<TProject>[];
 };
 
@@ -173,6 +243,9 @@ export type ProjectSessionRejectionCode =
   | "invalid-cut-line"
   | "linework-review-required"
   | "color-review-required"
+  | "ai-proposal-unavailable"
+  | "ai-proposal-confirmation-required"
+  | "ai-proposal-acceptance-unavailable"
   | "workflow-blocked";
 
 export type ProjectSessionEffectAdapter<TProject extends ProjectSessionProject = ProjectSessionProject> = {
@@ -189,7 +262,9 @@ export function createProjectSession<TProject extends ProjectSessionProject>(
     project: normalizeProjectWorkflow(project),
     operation: { status: "idle" },
     nextOperationId: 1,
-    guidedWorkflowBlocked: false,
+    proposalRevision: 0,
+    nextAiProposalRequestId: 1,
+    aiProposal: idleAiProposalState(),
     persistence: { status: "idle" }
   };
 }
@@ -201,6 +276,7 @@ export function projectSessionView<TProject extends ProjectSessionProject>(
     revision: session.revision,
     project: session.project,
     operation: session.operation,
+    aiProposal: session.aiProposal,
     capabilities: projectCapabilities(session)
   };
 }
@@ -209,6 +285,17 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
   session: ProjectSession<TProject>,
   action: ProjectSessionAction<TProject>
 ): ProjectSessionTransition<TProject> {
+  if (action.type === "request-export") {
+    if (!canExportProject(session)) {
+      return rejectedTransition(session, "workflow-blocked", "Export is unavailable for the current project state.");
+    }
+    return {
+      session,
+      capabilities: projectCapabilities(session),
+      outcome: { status: "applied" },
+      effects: []
+    };
+  }
   if (action.type === "request-explicit-save") {
     if (!isPersistableProject(session.project)) {
       return rejectedTransition(session, "invalid-project-file", "The project is not ready to save.");
@@ -246,15 +333,130 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       effects: []
     };
   }
-  if (action.type === "set-guided-workflow-blocked") {
-    if (session.guidedWorkflowBlocked === action.blocked) return unchangedTransition(session);
-    const nextSession = { ...session, guidedWorkflowBlocked: action.blocked };
+  if (action.type === "begin-ai-proposal-request") {
+    if (!canBeginAiProposalRequest(session)) {
+      return rejectedTransition(session, "ai-proposal-unavailable", "AI proposal requests are not available for the current project state.");
+    }
+    const nextSession = { ...session, aiProposal: confirmingAiProposalState() };
     return {
       session: nextSession,
       capabilities: projectCapabilities(nextSession),
       outcome: { status: "applied" },
       effects: []
     };
+  }
+  if (action.type === "cancel-ai-proposal-request") {
+    if (session.aiProposal.status !== "confirming") return unchangedTransition(session);
+    const nextSession = { ...session, aiProposal: idleAiProposalState() };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "applied" },
+      effects: []
+    };
+  }
+  if (action.type === "confirm-ai-proposal-request") {
+    if (session.aiProposal.status !== "confirming" || !canAiProposalRequestPrerequisites(session)) {
+      return rejectedTransition(session, "ai-proposal-unavailable", "AI proposal requests are not available for the current project state.");
+    }
+    if (action.estimatedCostUsd !== AI_PROPOSAL_ESTIMATE_USD || !action.uploadConfirmed) {
+      return rejectedTransition(session, "ai-proposal-confirmation-required", "Confirm the exact cost and upload before requesting an AI proposal.");
+    }
+    const token = Object.freeze({
+      revision: session.revision,
+      proposalRevision: session.proposalRevision,
+      requestId: session.nextAiProposalRequestId
+    } satisfies ProjectSessionAiProposalToken);
+    const nextSession = {
+      ...session,
+      nextAiProposalRequestId: session.nextAiProposalRequestId + 1,
+      aiProposal: requestingAiProposalState(token)
+    };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "requesting", token },
+      effects: []
+    };
+  }
+  if (action.type === "fail-ai-proposal-request") {
+    if (!isCurrentAiProposalRequest(session, action.token)) return staleAiProposalTransition(session);
+    const nextSession = { ...session, aiProposal: failedAiProposalState(action.error) };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "failed", error: action.error },
+      effects: []
+    };
+  }
+  if (action.type === "complete-ai-proposal-request") {
+    if (!isCurrentAiProposalRequest(session, action.token)) return staleAiProposalTransition(session);
+    const nextSession = {
+      ...session,
+      aiProposal: readyAiProposalState(action.proposal)
+    };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "successful" },
+      effects: []
+    };
+  }
+  if (action.type === "review-ai-proposal-view") {
+    if (session.aiProposal.status !== "ready") {
+      return rejectedTransition(session, "ai-proposal-unavailable", "There is no AI proposal ready for review.");
+    }
+    const review = reviewAiProposalView(session.aiProposal.review, action.view);
+    if (review === session.aiProposal.review) return unchangedTransition(session);
+    const nextSession = {
+      ...session,
+      aiProposal: readyAiProposalState(session.aiProposal.proposal, review)
+    };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "applied" },
+      effects: []
+    };
+  }
+  if (action.type === "reject-ai-proposal") {
+    if (session.aiProposal.status !== "ready") {
+      return rejectedTransition(session, "ai-proposal-unavailable", "There is no AI proposal ready to reject.");
+    }
+    const review = rejectAiProposalReview(session.aiProposal.review);
+    if (review === session.aiProposal.review) return unchangedTransition(session);
+    const nextSession = {
+      ...session,
+      aiProposal: readyAiProposalState(session.aiProposal.proposal, review)
+    };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "applied" },
+      effects: []
+    };
+  }
+  if (action.type === "accept-ai-proposal") {
+    if (session.aiProposal.status !== "ready" || !canAcceptAiProposal(session.aiProposal.review)) {
+      return rejectedTransition(session, "ai-proposal-acceptance-unavailable", "Review every required AI proposal view before accepting it.");
+    }
+    const before = editableArtifact(session.project);
+    const review = acceptAiProposalReview(session.aiProposal.review);
+    const after = {
+      editedDetailPngDataUrl: session.aiProposal.proposal.proposalDetailPngDataUrl,
+      manualStrokes: session.project.manualStrokes ?? []
+    } satisfies ProjectSessionEditableArtifact;
+    return applyProjectTransition(session, {
+      ...session.project,
+      editedDetailPngDataUrl: after.editedDetailPngDataUrl,
+      manualStrokes: after.manualStrokes,
+      workflowProgress: invalidateLineworkReview(normalizedWorkflowProgress(session.project)),
+      cleanupChecks: emptyCleanupChecks()
+    } as TProject, {
+      proposalChange: "preserve",
+      aiProposalOverride: readyAiProposalState(session.aiProposal.proposal, review),
+      editorTransaction: { before, after }
+    });
   }
   if (action.type === "navigate-workflow") {
     const capabilities = guidedWorkflowCapabilities(session);
@@ -270,7 +472,7 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     } as TProject);
   }
   if (action.type === "complete-linework-review") {
-    if (session.guidedWorkflowBlocked) {
+    if (isWorkflowBlockedByAiProposal(session)) {
       return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
     }
     if (!hasValidCutLine(session.project)) {
@@ -289,7 +491,7 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     } as TProject);
   }
   if (action.type === "complete-color-review") {
-    if (session.guidedWorkflowBlocked) {
+    if (isWorkflowBlockedByAiProposal(session)) {
       return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
     }
     const progress = normalizedWorkflowProgress(session.project);
@@ -303,7 +505,7 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     } as TProject);
   }
   if (action.type === "restart-color-review") {
-    if (session.guidedWorkflowBlocked) {
+    if (isWorkflowBlockedByAiProposal(session)) {
       return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before restarting Colors.");
     }
     const progress = normalizedWorkflowProgress(session.project);
@@ -326,9 +528,12 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       manualStrokes: outcome.manualStrokes,
       workflowProgress: invalidateLineworkReview(normalizedWorkflowProgress(session.project)),
       cleanupChecks: emptyCleanupChecks()
-    } as TProject);
+    } as TProject, { proposalChange: "invalidate" });
   }
   if (action.type === "update-project-palette") {
+    if (isWorkflowBlockedByAiProposal(session)) {
+      return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
+    }
     if (session.project.projectPalette === action.projectPalette) return unchangedTransition(session);
     return applyProjectTransition(session, { ...session.project, projectPalette: action.projectPalette } as TProject);
   }
@@ -340,6 +545,9 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     return applyProjectTransition(session, project);
   }
   if (action.type === "set-color-guide-included") {
+    if (isWorkflowBlockedByAiProposal(session)) {
+      return rejectedTransition(session, "workflow-blocked", "Finish reviewing the pending proposal before continuing.");
+    }
     const progress = normalizedWorkflowProgress(session.project);
     if (progress.colorsOutcome === "incomplete" || (progress.colorsOutcome === "skipped" && action.included)) {
       return rejectedTransition(session, "color-review-required", "Complete color review before including the Color Guide.");
@@ -404,7 +612,8 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       ...session,
       revision,
       project,
-      guidedWorkflowBlocked: false,
+      proposalRevision: session.proposalRevision + 1,
+      aiProposal: idleAiProposalState(),
       operation: { status: "successful", operation: "restore-project" } as const,
       persistence: action.requestAutosave
         ? { status: "pending", revision, mode: "autosave" } as const
@@ -447,18 +656,20 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
         : {}),
       settings: action.settings,
       analysis: action.analysis,
+      inputReadiness: action.inputReadiness ?? deriveInputReadiness(action.analysis),
       editedDetailPngDataUrl: action.initialDetailPngDataUrl,
       manualStrokes: action.mode === "replace-source" ? [] : session.project.manualStrokes,
       projectPalette: action.initialProjectPalette,
       workflowProgress: { activeStep: "clean", lineworkReviewed: false, colorsOutcome: "incomplete" },
-      cleanupChecks: { cutline: false, remove: false, draw: false, export: false },
-      unacceptedAiProposal: null
+      cleanupChecks: { cutline: false, remove: false, draw: false, export: false }
     } as TProject;
     const revision = session.revision + 1;
     const nextSession = {
       ...session,
       revision,
       project,
+      proposalRevision: session.proposalRevision + 1,
+      aiProposal: idleAiProposalState(),
       operation: { status: "successful", operation: action.mode } as const,
       persistence: { status: "pending", revision, mode: "autosave" } as const
     };
@@ -482,7 +693,8 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       ...session,
       revision: session.revision + 1,
       project: normalizeProjectWorkflow(action.project),
-      guidedWorkflowBlocked: false,
+      proposalRevision: session.proposalRevision + 1,
+      aiProposal: idleAiProposalState(),
       operation: { status: "successful", operation: "new-project" } as const,
       persistence: { status: "idle" } as const
     };
@@ -545,29 +757,27 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
           ? {
               ...session.project,
               settings: {
-              ...action.settings,
+                ...action.settings,
                 finishedHeightIn: session.project.settings.finishedHeightIn,
                 includePaintGuidePage: session.project.settings.includePaintGuidePage
               }
             } as TProject
-          : { ...session.project, analysis: action.analysis } as TProject;
-  const revision = session.revision + 1;
-  const persistable = isPersistableProject(project);
-  const nextSession = {
-    ...session,
-    revision,
-    project,
-    persistence: persistable
-      ? { status: "pending", revision, mode: "autosave" } as const
-      : { status: "idle" } as const
-  };
-
-  return {
-    session: nextSession,
-    capabilities: projectCapabilities(nextSession),
-    outcome: { status: "applied" },
-    effects: persistable ? [autosaveEffect(nextSession)] : []
-  };
+          : {
+              ...session.project,
+              analysis: action.analysis,
+              inputReadiness: action.analysis === null
+                ? undefined
+                : action.inputReadiness ?? deriveInputReadiness(action.analysis)
+            } as TProject;
+  return applyProjectTransition(session, project, {
+    proposalChange: (
+      action.type === "change-finished-size"
+      || action.type === "hydrate-project"
+      || action.type === "replace-analysis"
+    )
+      ? "invalidate"
+      : "preserve"
+  });
 }
 
 export function executeProjectSessionEffects<TProject extends ProjectSessionProject>(
@@ -693,6 +903,47 @@ function staleTransition<TProject extends ProjectSessionProject>(
   };
 }
 
+function staleAiProposalTransition<TProject extends ProjectSessionProject>(
+  session: ProjectSession<TProject>
+): ProjectSessionTransition<TProject> {
+  return {
+    session,
+    capabilities: projectCapabilities(session),
+    outcome: { status: "stale" },
+    effects: []
+  };
+}
+
+function idleAiProposalState(): ProjectSessionAiProposalState {
+  return Object.freeze({ status: "idle" });
+}
+
+function confirmingAiProposalState(): ProjectSessionAiProposalState {
+  return Object.freeze({ status: "confirming", estimatedCostUsd: AI_PROPOSAL_ESTIMATE_USD });
+}
+
+function requestingAiProposalState(token: ProjectSessionAiProposalToken): ProjectSessionAiProposalState {
+  return Object.freeze({ status: "requesting", estimatedCostUsd: AI_PROPOSAL_ESTIMATE_USD, token });
+}
+
+function failedAiProposalState(error: string): ProjectSessionAiProposalState {
+  return Object.freeze({ status: "failed", error });
+}
+
+function readyAiProposalState(
+  proposal: ProjectSessionAiProposalResult,
+  review = beginAiProposalReview(proposal.status)
+): ProjectSessionAiProposalState {
+  return Object.freeze({ status: "ready", proposal: snapshotAiProposalResult(proposal), review });
+}
+
+function snapshotAiProposalResult(proposal: ProjectSessionAiProposalResult): ProjectSessionAiProposalResult {
+  return Object.freeze({
+    ...proposal,
+    validationIssues: Object.freeze([...proposal.validationIssues])
+  });
+}
+
 function projectCapabilities<TProject extends ProjectSessionProject>(
   session: ProjectSession<TProject>
 ): ProjectCapabilities {
@@ -704,6 +955,13 @@ function projectCapabilities<TProject extends ProjectSessionProject>(
     analyzeSource: !preparing,
     regenerateAnalysis: !preparing && session.project.analysis !== null && session.project.sourceImage != null,
     startNewProject: true,
+    exportProject: canExportProject(session),
+    aiProposal: Object.freeze({
+      canBeginRequest: canBeginAiProposalRequest(session),
+      canConfirmRequest: session.aiProposal.status === "confirming" && canAiProposalRequestPrerequisites(session),
+      canAccept: session.aiProposal.status === "ready" && canAcceptAiProposal(session.aiProposal.review),
+      canReject: session.aiProposal.status === "ready" && session.aiProposal.review.decision === "pending"
+    }),
     guidedWorkflow: guidedWorkflowCapabilities(session)
   });
 }
@@ -713,24 +971,26 @@ function guidedWorkflowCapabilities<TProject extends ProjectSessionProject>(
 ): GuidedWorkflowCapabilities {
   const progress = normalizedWorkflowProgress(session.project);
   const steps = workflowStepItems(progress, { hasAnalysis: hasAnalysis(session.project) }).map((item) => (
-    session.guidedWorkflowBlocked && (item.step === "colors" || item.step === "export")
+    isWorkflowBlockedByAiProposal(session) && (item.step === "colors" || item.step === "export")
       ? { ...item, status: "locked" as const, clickable: false }
       : item
   ));
   return Object.freeze({
     progress: Object.freeze(progress),
     steps: Object.freeze(steps.map((item) => Object.freeze(item))),
-    canCompleteLineworkReview: hasValidCutLine(session.project) && !session.guidedWorkflowBlocked,
-    canCompleteColorReview: progress.lineworkReviewed && !session.guidedWorkflowBlocked,
-    canRestartColorReview: progress.lineworkReviewed && progress.colorsOutcome !== "incomplete" && !session.guidedWorkflowBlocked
+    canCompleteLineworkReview: hasValidCutLine(session.project) && !isWorkflowBlockedByAiProposal(session),
+    canCompleteColorReview: progress.lineworkReviewed && !isWorkflowBlockedByAiProposal(session),
+    canRestartColorReview: progress.lineworkReviewed && progress.colorsOutcome !== "incomplete" && !isWorkflowBlockedByAiProposal(session)
   });
 }
 
 function normalizeProjectWorkflow<TProject extends ProjectSessionProject>(project: TProject): TProject {
-  const progress = normalizedWorkflowProgress(project);
-  const current = project.workflowProgress;
-  if (current && sameWorkflowProgress(current, progress)) return project;
-  return { ...project, workflowProgress: progress } as TProject;
+  const { unacceptedAiProposal: _legacyProposal, ...rest } = project as TProject & { unacceptedAiProposal?: unknown | null };
+  const sanitized = rest as TProject;
+  const progress = normalizedWorkflowProgress(sanitized);
+  const current = sanitized.workflowProgress;
+  if (current && sameWorkflowProgress(current, progress)) return sanitized;
+  return { ...sanitized, workflowProgress: progress } as TProject;
 }
 
 function normalizedWorkflowProgress(project: ProjectSessionProject): WorkflowProgress {
@@ -769,6 +1029,13 @@ function sameReadonlyArray(left: readonly unknown[] | undefined, right: readonly
   return left.every((item, index) => item === right[index]);
 }
 
+function editableArtifact(project: ProjectSessionProject): ProjectSessionEditableArtifact {
+  return {
+    editedDetailPngDataUrl: project.editedDetailPngDataUrl ?? project.analysis?.detailLinePngDataUrl ?? null,
+    manualStrokes: project.manualStrokes ?? []
+  };
+}
+
 function hasAnalysis(project: ProjectSessionProject) {
   return project.analysis !== null;
 }
@@ -779,6 +1046,57 @@ function isPersistableProject(project: ProjectSessionProject) {
 
 function hasValidCutLine(project: ProjectSessionProject) {
   return Boolean(project.analysis?.outerCutPath.trim());
+}
+
+function needsAiSimplification(project: ProjectSessionProject) {
+  const inputReadiness = project.inputReadiness;
+  if (inputReadiness === "needs-simplification") return true;
+  if (inputReadiness === "ready-line-art") return false;
+  return project.analysis?.traceQuality?.detailExtractionModeUsed === "rendered";
+}
+
+function deriveInputReadiness(analysis: CutoutProjectAnalysis): ProjectSessionInputReadiness {
+  return analysis.traceQuality?.detailExtractionModeUsed === "rendered"
+    ? "needs-simplification"
+    : "ready-line-art";
+}
+
+function canAiProposalRequestPrerequisites<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
+  return needsAiSimplification(session.project)
+    && session.project.sourceImage != null
+    && hasValidCutLine(session.project)
+    && session.aiProposal.status !== "requesting";
+}
+
+function canBeginAiProposalRequest<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
+  return canAiProposalRequestPrerequisites(session)
+    && session.aiProposal.status !== "confirming"
+    && !isWorkflowBlockedByAiProposal(session);
+}
+
+function isCurrentAiProposalRequest<TProject extends ProjectSessionProject>(
+  session: ProjectSession<TProject>,
+  token: ProjectSessionAiProposalToken
+) {
+  return session.aiProposal.status === "requesting"
+    && session.aiProposal.token.requestId === token.requestId
+    && session.aiProposal.token.proposalRevision === token.proposalRevision
+    && session.proposalRevision === token.proposalRevision;
+}
+
+function isWorkflowBlockedByAiProposal<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
+  return session.aiProposal.status === "requesting"
+    || (session.aiProposal.status === "ready" && session.aiProposal.review.decision === "pending");
+}
+
+function canExportProject<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
+  const progress = normalizedWorkflowProgress(session.project);
+  return session.project.sourceImage != null
+    && hasValidCutLine(session.project)
+    && progress.activeStep === "export"
+    && progress.lineworkReviewed
+    && progress.colorsOutcome !== "incomplete"
+    && !isWorkflowBlockedByAiProposal(session);
 }
 
 function emptyCleanupChecks() {
@@ -794,14 +1112,24 @@ function workflowStepName(step: WorkflowStep) {
 
 function applyProjectTransition<TProject extends ProjectSessionProject>(
   session: ProjectSession<TProject>,
-  project: TProject
+  project: TProject,
+  options?: {
+    proposalChange?: "preserve" | "invalidate";
+    aiProposalOverride?: ProjectSessionAiProposalState;
+    editorTransaction?: EditorTransaction<ProjectSessionEditableArtifact>;
+  }
 ): ProjectSessionTransition<TProject> {
   const revision = session.revision + 1;
   const persistable = isPersistableProject(project);
+  const proposalChange = options?.proposalChange ?? "preserve";
   const nextSession = {
     ...session,
     revision,
     project: normalizeProjectWorkflow(project),
+    proposalRevision: proposalChange === "invalidate" ? session.proposalRevision + 1 : session.proposalRevision,
+    aiProposal: proposalChange === "invalidate"
+      ? idleAiProposalState()
+      : options?.aiProposalOverride ?? session.aiProposal,
     persistence: persistable
       ? { status: "pending", revision, mode: "autosave" } as const
       : { status: "idle" } as const
@@ -810,6 +1138,7 @@ function applyProjectTransition<TProject extends ProjectSessionProject>(
     session: nextSession,
     capabilities: projectCapabilities(nextSession),
     outcome: { status: "applied" },
+    ...(options?.editorTransaction ? { editorTransaction: options.editorTransaction } : {}),
     effects: persistable ? [autosaveEffect(nextSession)] : []
   };
 }

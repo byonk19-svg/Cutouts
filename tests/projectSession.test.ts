@@ -50,7 +50,34 @@ const analysis = {
   paintGuidePngDataUrl: "data:image/png;base64,paint",
   previewWidthPx: 400,
   previewHeightPx: 1000,
-  palette: []
+  palette: [],
+  traceQuality: {
+    subjectCoverage: 0.71,
+    fakeCheckerboardBackground: false,
+    detailExtractionModeUsed: "rendered" as const,
+    warnings: []
+  }
+};
+
+const pendingAiProposal = {
+  status: "pending-review" as const,
+  validationIssues: [],
+  canReplaceAcceptedDetail: false as const,
+  proposalPreviewPngDataUrl: "data:image/png;base64,proposal-preview",
+  proposalDetailPngDataUrl: "data:image/png;base64,proposal-detail",
+  inkCoverage: 0.21,
+  suppressedPixelCount: 18,
+  previewWidthPx: analysis.previewWidthPx,
+  previewHeightPx: analysis.previewHeightPx,
+  model: "wayfinder-test",
+  provider: "mock-provider",
+  estimatedCostUsd: 0.10
+};
+
+const reviewOnlyAiProposal = {
+  ...pendingAiProposal,
+  status: "review-only" as const,
+  validationIssues: ["duplicate silhouette"]
 };
 
 const preservedProjectFields = {
@@ -229,9 +256,296 @@ const lifecycleProject = {
   manualStrokes: preservedProjectFields.manualStrokes,
   projectPalette: preservedProjectFields.projectPalette,
   workflowProgress: preservedProjectFields.workflowProgress,
-  cleanupChecks: preservedProjectFields.cleanupChecks,
-  unacceptedAiProposal: { proposalDetailPngDataUrl: "data:image/png;base64,pending" }
+  cleanupChecks: preservedProjectFields.cleanupChecks
 };
+
+function requestAiProposal(session: ReturnType<typeof createProjectSession>) {
+  const confirming = transitionProjectSession(session, { type: "begin-ai-proposal-request" });
+  const requesting = transitionProjectSession(confirming.session, {
+    type: "confirm-ai-proposal-request",
+    estimatedCostUsd: 0.10,
+    uploadConfirmed: true
+  });
+  if (requesting.outcome.status !== "requesting") throw new Error("expected AI proposal request token");
+  return requesting;
+}
+
+function completePendingAiProposal(session: ReturnType<typeof createProjectSession>) {
+  const requesting = requestAiProposal(session);
+  const completed = transitionProjectSession(requesting.session, {
+    type: "complete-ai-proposal-request",
+    token: requesting.outcome.token,
+    proposal: pendingAiProposal
+  });
+  if (completed.outcome.status !== "successful") throw new Error("expected pending AI proposal completion");
+  return completed;
+}
+
+{
+  const readyLineArt = createProjectSession({
+    ...lifecycleProject,
+    analysis: {
+      ...analysis,
+      traceQuality: { ...analysis.traceQuality, detailExtractionModeUsed: "rendered" as const }
+    },
+    inputReadiness: "ready-line-art" as const
+  });
+  const missingCutLine = createProjectSession({
+    ...lifecycleProject,
+    analysis: { ...analysis, outerCutPath: "   " }
+  });
+  const missingSourceImage = createProjectSession({
+    ...lifecycleProject,
+    sourceImage: null
+  });
+  const eligible = createProjectSession(lifecycleProject);
+
+  assertDeepEqual(projectSessionView(readyLineArt).project.analysis, {
+    ...analysis,
+    traceQuality: { ...analysis.traceQuality, detailExtractionModeUsed: "rendered" as const }
+  }, "explicit input readiness should not alter the durable analysis shape");
+  assertEqual(projectSessionView(readyLineArt).capabilities.aiProposal.canBeginRequest, false, "Ready Line Art should not expose AI proposal request capability");
+  assertEqual(projectSessionView(missingCutLine).capabilities.aiProposal.canBeginRequest, false, "AI proposal request capability should require a valid Cut Line");
+  assertEqual(projectSessionView(missingSourceImage).capabilities.aiProposal.canBeginRequest, false, "AI proposal request capability should require a current Source Image");
+  assertEqual(projectSessionView(eligible).capabilities.aiProposal.canBeginRequest, true, "Needs Simplification should expose AI proposal request capability");
+
+  const beginRejected = transitionProjectSession(readyLineArt, { type: "begin-ai-proposal-request" });
+  assertEqual(beginRejected.outcome.status, "rejected", "Ready Line Art should reject AI proposal request attempts at the public seam");
+
+  const missingSourceBeginRejected = transitionProjectSession(missingSourceImage, { type: "begin-ai-proposal-request" });
+  assertEqual(missingSourceBeginRejected.outcome.status, "rejected", "missing Source Image should reject AI proposal request attempts at the public seam");
+
+  const forcedConfirming = {
+    ...readyLineArt,
+    aiProposal: { status: "confirming" as const, estimatedCostUsd: 0.10 }
+  };
+  const confirmRejected = transitionProjectSession(forcedConfirming, {
+    type: "confirm-ai-proposal-request",
+    estimatedCostUsd: 0.10,
+    uploadConfirmed: true
+  });
+  assertEqual(confirmRejected.outcome.status, "rejected", "Ready Line Art should reject AI proposal confirmation even if the view attempts it directly");
+
+  const forcedMissingSourceConfirming = {
+    ...missingSourceImage,
+    aiProposal: { status: "confirming" as const, estimatedCostUsd: 0.10 }
+  };
+  const missingSourceConfirmRejected = transitionProjectSession(forcedMissingSourceConfirming, {
+    type: "confirm-ai-proposal-request",
+    estimatedCostUsd: 0.10,
+    uploadConfirmed: true
+  });
+  assertEqual(missingSourceConfirmRejected.outcome.status, "rejected", "missing Source Image should reject AI proposal confirmation even if the view attempts it directly");
+}
+
+{
+  const session = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "colors" as const, lineworkReviewed: true, colorsOutcome: "incomplete" as const }
+  });
+  const confirming = transitionProjectSession(session, { type: "begin-ai-proposal-request" });
+
+  assertEqual(confirming.outcome.status, "applied", "beginning an AI proposal request should expose a transient applied outcome");
+  assertEqual(confirming.session.revision, session.revision, "beginning AI proposal confirmation should not advance the Project Revision");
+  assertEqual(projectSessionView(confirming.session).aiProposal.status, "confirming", "beginning an AI proposal request should enter confirmation state");
+  assertEqual(projectSessionView(confirming.session).capabilities.aiProposal.canConfirmRequest, true, "confirmation state should expose request confirmation capability");
+
+  const wrongCost = transitionProjectSession(confirming.session, {
+    type: "confirm-ai-proposal-request",
+    estimatedCostUsd: 0.11,
+    uploadConfirmed: true
+  });
+  assertEqual(wrongCost.outcome.status, "rejected", "request confirmation should require the exact disclosed cost");
+
+  const missingUploadConfirmation = transitionProjectSession(confirming.session, {
+    type: "confirm-ai-proposal-request",
+    estimatedCostUsd: 0.10,
+    uploadConfirmed: false
+  });
+  assertEqual(missingUploadConfirmation.outcome.status, "rejected", "request confirmation should require upload confirmation");
+
+  const requesting = transitionProjectSession(confirming.session, {
+    type: "confirm-ai-proposal-request",
+    estimatedCostUsd: 0.10,
+    uploadConfirmed: true
+  });
+  assertEqual(requesting.outcome.status, "requesting", "a valid confirmation should begin one AI proposal request");
+  assertEqual(projectSessionView(requesting.session).aiProposal.status, "requesting", "a valid confirmation should expose requesting state");
+  assertEqual(requesting.session.revision, session.revision, "requesting an AI proposal should not advance the Project Revision");
+  assertEqual(projectSessionView(requesting.session).capabilities.guidedWorkflow.steps.find((item) => item.step === "colors")?.status, "locked", "a requesting proposal should lock Colors through session capabilities");
+  assertEqual(projectSessionView(requesting.session).capabilities.guidedWorkflow.steps.find((item) => item.step === "export")?.status, "locked", "a requesting proposal should lock Export through session capabilities");
+
+  const duplicateRequest = transitionProjectSession(requesting.session, { type: "begin-ai-proposal-request" });
+  assertEqual(duplicateRequest.outcome.status, "rejected", "an in-flight proposal request should reject a duplicate request attempt");
+}
+
+{
+  const session = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "colors" as const, lineworkReviewed: true, colorsOutcome: "incomplete" as const }
+  });
+  const requesting = requestAiProposal(session);
+  const failed = transitionProjectSession(requesting.session, {
+    type: "fail-ai-proposal-request",
+    token: requesting.outcome.token,
+    error: "Unable to generate the AI proposal."
+  });
+
+  assertEqual(failed.outcome.status, "failed", "AI proposal request failure should report transient failure");
+  assertEqual(failed.session.revision, session.revision, "AI proposal request failure should preserve the Project Revision");
+  assertEqual(failed.session.project, session.project, "AI proposal request failure should preserve durable project state");
+  assertEqual(projectSessionView(failed.session).aiProposal.status, "failed", "AI proposal request failure should remain visible on the session");
+  assertEqual(failed.effects.length, 0, "AI proposal request failure should not request persistence or retries");
+}
+
+{
+  const session = createProjectSession({
+    ...lifecycleProject,
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const requesting = requestAiProposal(session);
+  assertEqual(projectSessionView(requesting.session).capabilities.exportProject, false, "a requesting proposal should remove Export capability even when Export was already active");
+  const requestingExport = transitionProjectSession(requesting.session, { type: "request-export" });
+  assertEqual(requestingExport.outcome.status, "rejected", "a requesting proposal should reject direct Export requests even when Export was already active");
+  const completed = transitionProjectSession(requesting.session, {
+    type: "complete-ai-proposal-request",
+    token: requesting.outcome.token,
+    proposal: pendingAiProposal
+  });
+  assertEqual(completed.outcome.status, "successful", "AI proposal completion should expose successful transient status");
+  assertEqual(projectSessionView(completed.session).aiProposal.status, "ready", "completed AI proposal requests should expose review-ready session state");
+  assertEqual(projectSessionView(completed.session).capabilities.exportProject, false, "a pending proposal review should keep Export capability unavailable on the active Export step");
+  const pendingExport = transitionProjectSession(completed.session, { type: "request-export" });
+  assertEqual(pendingExport.outcome.status, "rejected", "a pending proposal review should reject direct Export requests on the active Export step");
+  assertEqual(projectSessionView(completed.session).capabilities.aiProposal.canAccept, false, "acceptance should stay unavailable until all review views are recorded");
+
+  const overlayReviewed = transitionProjectSession(completed.session, { type: "review-ai-proposal-view", view: "original-overlay" });
+  const printReviewed = transitionProjectSession(overlayReviewed.session, { type: "review-ai-proposal-view", view: "print-preview" });
+  const reviewView = projectSessionView(printReviewed.session);
+  const bypassReview = projectSessionView(completed.session).aiProposal;
+  const originalReviewedProposalDetail = pendingAiProposal.proposalDetailPngDataUrl;
+  if (bypassReview.status !== "ready") throw new Error("expected ready AI proposal state");
+  (bypassReview.review.reviewedViews as { add?: (view: unknown) => void }).add?.("original-overlay");
+  (bypassReview.review.reviewedViews as { add?: (view: unknown) => void }).add?.("print-preview");
+  const bypassedAcceptance = transitionProjectSession(completed.session, { type: "accept-ai-proposal" });
+  const proposalMutationTarget = projectSessionView(printReviewed.session).aiProposal;
+  if (proposalMutationTarget.status !== "ready") throw new Error("expected ready AI proposal state");
+  try {
+    (proposalMutationTarget.proposal as { proposalDetailPngDataUrl: string }).proposalDetailPngDataUrl = "data:image/png;base64,injected-detail";
+  } catch (error) {
+    assert(error instanceof TypeError, "mutating a frozen proposal snapshot should throw a TypeError when strict-mode assignment is attempted");
+  }
+  const acceptedAfterProposalMutation = transitionProjectSession(printReviewed.session, { type: "accept-ai-proposal" });
+
+  assertEqual(reviewView.capabilities.aiProposal.canAccept, true, "all required review views should unlock proposal acceptance");
+  assertEqual(bypassedAcceptance.outcome.status, "rejected", "mutating leaked review state must not unlock direct proposal acceptance");
+  assertEqual(acceptedAfterProposalMutation.outcome.status, "applied", "a legitimately reviewed proposal should still be accepted");
+  assertEqual(acceptedAfterProposalMutation.session.project.editedDetailPngDataUrl, originalReviewedProposalDetail, "acceptance must use the original reviewed proposal detail snapshot");
+  assertEqual(acceptedAfterProposalMutation.editorTransaction?.after.editedDetailPngDataUrl, originalReviewedProposalDetail, "the editor transaction must also record the original reviewed proposal detail snapshot");
+  assertEqual(reviewView.capabilities.guidedWorkflow.steps.find((item) => item.step === "colors")?.status, "locked", "pending proposal review should lock Colors");
+
+  const bypassedNavigation = transitionProjectSession(completed.session, { type: "navigate-workflow", target: "colors" });
+  assertEqual(bypassedNavigation.outcome.status, "rejected", "pending proposal review should reject Colors navigation through the same session policy");
+  const bypassedColorReview = transitionProjectSession(completed.session, { type: "complete-color-review", outcome: "reviewed" });
+  assertEqual(bypassedColorReview.outcome.status, "rejected", "pending proposal review should reject color review completion through the same session policy");
+
+  const accepted = transitionProjectSession(printReviewed.session, { type: "accept-ai-proposal" });
+  const acceptedView = projectSessionView(accepted.session);
+  assertEqual(accepted.outcome.status, "applied", "accepting a fully reviewed proposal should apply");
+  assertEqual(accepted.session.revision, session.revision + 1, "accepting a proposal should create one Project Revision");
+  assertEqual(accepted.effects.length, 1, "accepting a proposal should request one Autosave");
+  assertEqual(accepted.session.project.editedDetailPngDataUrl, pendingAiProposal.proposalDetailPngDataUrl, "accepting a proposal should replace only accepted Detail Lines");
+  assertEqual(accepted.session.project.manualStrokes, session.project.manualStrokes, "accepting a proposal should preserve Feature Lines");
+  assertEqual(accepted.session.project.projectPalette, session.project.projectPalette, "accepting a proposal should preserve paint work");
+  assertDeepEqual(accepted.session.project.workflowProgress, {
+    activeStep: "clean",
+    lineworkReviewed: false,
+    colorsOutcome: "incomplete"
+  }, "accepting a proposal should revoke stale milestones and return to Clean Lines");
+  assertEqual(acceptedView.aiProposal.status, "ready", "accepting a proposal should preserve accepted review state at runtime");
+  if (acceptedView.aiProposal.status !== "ready") throw new Error("expected accepted ready AI proposal state");
+  assertEqual(acceptedView.aiProposal.review.decision, "accepted", "accepting a proposal should preserve the accepted review decision at runtime");
+  assertEqual(acceptedView.capabilities.aiProposal.canAccept, false, "accepted proposal state must not remain applicable twice");
+  assertEqual(acceptedView.capabilities.aiProposal.canBeginRequest, true, "accepted proposal state should allow another explicit attempt");
+  assertEqual(acceptedView.capabilities.guidedWorkflow.canCompleteLineworkReview, true, "accepted proposal state should not keep the workflow blocked");
+  assertEqual(accepted.editorTransaction?.before.editedDetailPngDataUrl, session.project.editedDetailPngDataUrl, "accepting a proposal should expose one editor transaction before state");
+  assertEqual(accepted.editorTransaction?.after.editedDetailPngDataUrl, pendingAiProposal.proposalDetailPngDataUrl, "accepting a proposal should expose one editor transaction after state");
+  const secondAccept = transitionProjectSession(accepted.session, { type: "accept-ai-proposal" });
+  assertEqual(secondAccept.outcome.status, "rejected", "accepted proposal state must reject a second direct acceptance attempt");
+}
+
+{
+  const session = createProjectSession({ ...lifecycleProject, editedDetailPngDataUrl: null });
+  const completed = completePendingAiProposal(session);
+  const overlayReviewed = transitionProjectSession(completed.session, { type: "review-ai-proposal-view", view: "original-overlay" });
+  const printReviewed = transitionProjectSession(overlayReviewed.session, { type: "review-ai-proposal-view", view: "print-preview" });
+  const accepted = transitionProjectSession(printReviewed.session, { type: "accept-ai-proposal" });
+
+  assertEqual(
+    accepted.editorTransaction?.before.editedDetailPngDataUrl,
+    analysis.detailLinePngDataUrl,
+    "accepting over an unedited starter layer should expose the visible starter Detail Lines as the Undo artifact"
+  );
+}
+
+{
+  const session = createProjectSession(lifecycleProject);
+  const requesting = requestAiProposal(session);
+  const reviewOnly = transitionProjectSession(requesting.session, {
+    type: "complete-ai-proposal-request",
+    token: requesting.outcome.token,
+    proposal: reviewOnlyAiProposal
+  });
+  const overlayReviewed = transitionProjectSession(reviewOnly.session, { type: "review-ai-proposal-view", view: "original-overlay" });
+  const printReviewed = transitionProjectSession(overlayReviewed.session, { type: "review-ai-proposal-view", view: "print-preview" });
+
+  assertEqual(projectSessionView(printReviewed.session).capabilities.aiProposal.canAccept, false, "review-only proposals must never expose acceptance");
+  const bypassedAcceptance = transitionProjectSession(printReviewed.session, { type: "accept-ai-proposal" });
+  assertEqual(bypassedAcceptance.outcome.status, "rejected", "review-only proposals should reject direct acceptance attempts");
+  assertEqual(bypassedAcceptance.session.project.editedDetailPngDataUrl, session.project.editedDetailPngDataUrl, "rejected review-only acceptance should preserve accepted Detail Lines");
+}
+
+{
+  const session = createProjectSession(lifecycleProject);
+  const pending = completePendingAiProposal(session);
+  const rejected = transitionProjectSession(pending.session, { type: "reject-ai-proposal" });
+
+  assertEqual(rejected.outcome.status, "applied", "rejecting a proposal should update only transient session state");
+  assertEqual(rejected.session.revision, session.revision, "rejecting a proposal should preserve the Project Revision");
+  assertEqual(rejected.session.project, session.project, "rejecting a proposal should preserve durable project state");
+  assertEqual(projectSessionView(rejected.session).aiProposal.status, "ready", "rejecting a proposal should remain visible only as transient review state");
+}
+
+{
+  const session = createProjectSession(lifecycleProject);
+  const requesting = requestAiProposal(session);
+  const renamed = transitionProjectSession(requesting.session, {
+    type: "rename-project",
+    projectName: "Coraline renamed"
+  });
+  const completedAfterRename = transitionProjectSession(renamed.session, {
+    type: "complete-ai-proposal-request",
+    token: requesting.outcome.token,
+    proposal: pendingAiProposal
+  });
+  assertEqual(completedAfterRename.outcome.status, "successful", "non-conflicting project changes should not stale an AI proposal result");
+
+  const requestingAgain = requestAiProposal(createProjectSession(lifecycleProject));
+  const conflictingLinework = transitionProjectSession(requestingAgain.session, {
+    type: "commit-editor-transaction",
+    outcome: {
+      editedDetailPngDataUrl: "data:image/png;base64,changed-before-complete",
+      manualStrokes: lifecycleProject.manualStrokes
+    }
+  });
+  const stale = transitionProjectSession(conflictingLinework.session, {
+    type: "complete-ai-proposal-request",
+    token: requestingAgain.outcome.token,
+    proposal: pendingAiProposal
+  });
+  assertEqual(stale.outcome.status, "stale", "accepted-linework changes should stale older AI proposal results");
+  assertEqual(projectSessionView(conflictingLinework.session).aiProposal.status, "idle", "accepted-linework changes should clear transient proposal state");
+}
 
 {
   const session = createProjectSession(lifecycleProject);
@@ -310,7 +624,7 @@ const lifecycleProject = {
     draw: false,
     export: false
   }, "replacement should reset source-dependent cleanup decisions");
-  assertEqual(completed.session.project.unacceptedAiProposal, null, "replacement should discard an unaccepted proposal");
+  assertEqual(projectSessionView(completed.session).aiProposal.status, "idle", "replacement should clear transient proposal state");
   assertEqual(completed.effects[0]?.type, "request-autosave", "replacement should request one Autosave");
 }
 
@@ -336,7 +650,7 @@ const lifecycleProject = {
   assertEqual(completed.session.project.editedDetailPngDataUrl, "data:image/png;base64,regenerated-imported-detail", "same-source regeneration should replace generated detail work");
   assertEqual(completed.session.project.workflowProgress.lineworkReviewed, false, "regeneration should invalidate stale linework review");
   assertEqual(completed.session.project.workflowProgress.colorsOutcome, "incomplete", "regeneration should invalidate stale color review");
-  assertEqual(completed.session.project.unacceptedAiProposal, null, "regeneration should discard a stale unaccepted proposal");
+  assertEqual(projectSessionView(completed.session).aiProposal.status, "idle", "regeneration should clear transient proposal state");
 }
 
 {
@@ -357,7 +671,7 @@ const lifecycleProject = {
     initialProjectPalette: []
   });
   assertEqual(stale.outcome.status, "stale", "an older out-of-order result should be rejected as stale");
-  assertEqual(stale.session.project, lifecycleProject, "an older out-of-order result should not overwrite the project");
+  assertEqual(stale.session.project, second.session.project, "an older out-of-order result should not overwrite the project");
   assertEqual(stale.session.operation.status, "preparing", "an older result should not hide the newer active preparation");
   assertEqual(stale.effects.length, 0, "a stale result should not request persistence");
 
@@ -391,8 +705,8 @@ const lifecycleProject = {
     initialDetailPngDataUrl: null,
     initialProjectPalette: []
   });
-  assertEqual(stale.outcome.status, "stale", "a result from an older Project Revision should be rejected");
-  assertEqual(stale.session.project.settings.threshold, 61, "a stale result should preserve the newer settings revision");
+  assertEqual(stale.outcome.status, "stale", "the existing preparation token should still reject results from an older Project Revision");
+  assertEqual(stale.session.project.settings.threshold, 61, "a stale preparation result should preserve the newer settings revision");
 }
 
 {
@@ -411,13 +725,12 @@ const lifecycleProject = {
     manualStrokes: [],
     projectPalette: [],
     workflowProgress: { activeStep: "upload" as const, lineworkReviewed: false, colorsOutcome: "incomplete" as const },
-    cleanupChecks: { cutline: false, remove: false, draw: false, export: false },
-    unacceptedAiProposal: null
+    cleanupChecks: { cutline: false, remove: false, draw: false, export: false }
   };
   const confirmed = transitionProjectSession(session, { type: "confirm-new-project", project: emptyProject });
   assertEqual(confirmed.outcome.status, "successful", "confirmed new project should expose successful status");
   assertEqual(confirmed.session.revision, 1, "confirmed new project should advance the Project Revision");
-  assertEqual(confirmed.session.project, emptyProject, "confirmed new project should atomically install the empty session");
+  assertDeepEqual(confirmed.session.project, emptyProject, "confirmed new project should atomically install the empty session");
   assertDeepEqual(confirmed.effects, [{ type: "clear-autosave" }], "confirmed new project should clear only the old Autosave");
 }
 
@@ -552,7 +865,7 @@ const lifecycleProject = {
     revision: committed.session.revision,
     mode: "autosave"
   });
-  const proposalPending = transitionProjectSession(saved.session, { type: "set-guided-workflow-blocked", blocked: true });
+  const proposalPending = completePendingAiProposal(saved.session);
   const undone = transitionProjectSession(proposalPending.session, {
     type: "commit-editor-transaction",
     outcome: {
@@ -567,7 +880,7 @@ const lifecycleProject = {
     lineworkReviewed: false,
     colorsOutcome: "incomplete"
   }, "Undo should not restore revoked Review Milestones or workflow navigation");
-  assertEqual(undone.session.guidedWorkflowBlocked, true, "Undo should not restore proposal-review status");
+  assertEqual(projectSessionView(undone.session).aiProposal.status, "idle", "Undo should not restore cleared proposal-review state after accepted-linework mutation");
   assertEqual(undone.session.persistence.status, "pending", "Undo should create a new unsaved revision rather than restore saved status");
 
   const redone = transitionProjectSession(undone.session, {
@@ -641,11 +954,38 @@ const lifecycleProject = {
     ...lifecycleProject,
     workflowProgress: { activeStep: "clean" as const, lineworkReviewed: true, colorsOutcome: "incomplete" as const }
   });
-  const blocked = transitionProjectSession(session, { type: "set-guided-workflow-blocked", blocked: true });
+  const requesting = requestAiProposal(session);
+  const requestingWorkflow = projectSessionView(requesting.session).capabilities.guidedWorkflow;
+  assertEqual(requestingWorkflow.canCompleteLineworkReview, false, "a requesting proposal should disable displayed Clean Lines completion");
+  const requestingBypass = transitionProjectSession(requesting.session, { type: "complete-linework-review" });
+  assertEqual(requestingBypass.outcome.status, "rejected", "a requesting proposal should reject Clean Lines completion through the same session policy");
+  const requestingPalette = transitionProjectSession(requesting.session, {
+    type: "update-project-palette",
+    projectPalette: [{ id: "blocked-requesting", hex: "#111111", label: "Blocked" }]
+  });
+  assertEqual(requestingPalette.outcome.status, "rejected", "a requesting proposal should reject Colors mutations through the same session policy");
+  assertEqual(requestingPalette.session.project.projectPalette, requesting.session.project.projectPalette, "a requesting proposal should preserve paint work when Colors mutations are rejected");
+  const requestingColorGuide = transitionProjectSession(requesting.session, { type: "set-color-guide-included", included: false });
+  assertEqual(requestingColorGuide.outcome.status, "rejected", "a requesting proposal should reject Export option mutations through the same session policy");
+  assertEqual(requestingColorGuide.session.project.settings.includePaintGuidePage, requesting.session.project.settings.includePaintGuidePage, "a requesting proposal should preserve export settings when rejected");
+
+  const blocked = completePendingAiProposal(session);
   const workflow = projectSessionView(blocked.session).capabilities.guidedWorkflow;
   assertEqual(workflow.steps.find((item) => item.step === "colors")?.status, "locked", "a pending proposal should be represented by session capabilities");
+  assertEqual(workflow.canCompleteLineworkReview, false, "a pending proposal review should disable displayed Clean Lines completion");
   const bypassed = transitionProjectSession(blocked.session, { type: "navigate-workflow", target: "colors" });
   assertEqual(bypassed.outcome.status, "rejected", "pending-proposal navigation should be rejected by the same session policy");
+  const bypassedLineworkReview = transitionProjectSession(blocked.session, { type: "complete-linework-review" });
+  assertEqual(bypassedLineworkReview.outcome.status, "rejected", "pending-proposal review should reject Clean Lines completion through the same session policy");
+  const blockedPalette = transitionProjectSession(blocked.session, {
+    type: "update-project-palette",
+    projectPalette: [{ id: "blocked-ready", hex: "#222222", label: "Blocked ready" }]
+  });
+  assertEqual(blockedPalette.outcome.status, "rejected", "a pending proposal review should reject Colors mutations through the same session policy");
+  assertEqual(blockedPalette.session.project.projectPalette, blocked.session.project.projectPalette, "a pending proposal review should preserve paint work when Colors mutations are rejected");
+  const blockedColorGuide = transitionProjectSession(blocked.session, { type: "set-color-guide-included", included: false });
+  assertEqual(blockedColorGuide.outcome.status, "rejected", "a pending proposal review should reject Export option mutations through the same session policy");
+  assertEqual(blockedColorGuide.session.project.settings.includePaintGuidePage, blocked.session.project.settings.includePaintGuidePage, "a pending proposal review should preserve export settings when rejected");
   const bypassedColorReview = transitionProjectSession(blocked.session, { type: "complete-color-review", outcome: "reviewed" });
   assertEqual(bypassedColorReview.outcome.status, "rejected", "pending-proposal color completion should be rejected by the same session policy");
   const bypassedRestart = transitionProjectSession(blocked.session, { type: "restart-color-review" });

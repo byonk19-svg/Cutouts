@@ -42,6 +42,9 @@ const requiredViews: AiProposalReviewView[] = ["ai-lines-only", "original-overla
   const review = beginAiProposalReview("pending-review");
 
   assertEqual(review.decision, "pending", "a valid proposal should begin pending explicit maker review");
+  assert(Object.isFrozen(review), "the public review state should be immutable");
+  assert(Object.isFrozen(review.reviewedViews), "the public reviewed-view state should be immutable");
+  assertEqual(typeof (review.reviewedViews as { add?: unknown }).add, "undefined", "reviewed views should not expose mutable Set methods");
   assert(review.reviewedViews.has("ai-lines-only"), "the initially visible AI-lines-only view should count as reviewed");
   assert(!canAcceptAiProposal(review), "acceptance should stay unavailable before all three views are reviewed");
 
