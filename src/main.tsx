@@ -14,10 +14,12 @@ import {
 import {
   createProjectSession,
   executeProjectSessionEffects,
+  projectSessionView,
   transitionProjectSession,
   type ProjectSession,
   type ProjectSessionAction,
-  type ProjectSessionEffect
+  type ProjectSessionEffect,
+  type ProjectSessionSourceImage
 } from "./projectSession.ts";
 import { previewDetailSegment, previewFirstDetailSegment, removeDetailSegmentPreview, type DetailSegmentPreview } from "./detailEditor";
 import {
@@ -77,7 +79,6 @@ import {
   completeLineworkReview,
   invalidateLineworkReview,
   navigateWorkflow,
-  resetWorkflowForSource,
   workflowStepItems,
   type WorkflowProgress,
   type WorkflowStep,
@@ -121,6 +122,7 @@ type Analysis = CutoutProjectAnalysis;
 type AppProjectSessionProject = {
   projectName: string;
   settings: Settings;
+  sourceImage: ProjectSessionSourceImage | null;
   analysis: Analysis | null;
 };
 type AppProjectSessionState = {
@@ -128,6 +130,14 @@ type AppProjectSessionState = {
   pendingEffects: readonly ProjectSessionEffect[];
 };
 type PaintGuidePatch = Partial<Omit<ProjectPaintColor, "id" | "source">>;
+type PreparedSourceCandidate = {
+  generation: number;
+  projectName: string;
+  file: File;
+  dataUrl: string;
+  sourceInkDataUrl: string | null;
+  lineworkDetected: boolean;
+};
 type AiProposalPhase = "idle" | "confirming" | "requesting" | "ready" | "failed";
 const AI_PROPOSAL_ESTIMATE_USD = 0.10;
 type AiProposalResponse = {
@@ -176,26 +186,33 @@ function App() {
     session: createProjectSession({
       projectName: "Cutout Project",
       settings: defaultSettings,
+      sourceImage: null,
       analysis: null
     }),
     pendingEffects: []
   }));
+  const projectSessionRef = useRef(projectSessionState.session);
   const projectSession = projectSessionState.session;
   const { projectName, settings, analysis } = projectSession.project;
+  const projectCapabilities = projectSessionView(projectSession).capabilities;
   const [projectNameDraft, setProjectNameDraft] = useState(projectName);
   const pendingProjectSessionAutosaveRevisionRef = useRef<number | null>(null);
-  const setSettings = (action: SetStateAction<Settings>) => setProjectSessionState((current) =>
-    reduceProjectSessionTransition(current, {
+  const setSettings = (action: SetStateAction<Settings>) => {
+    const currentSettings = projectSessionRef.current.project.settings;
+    applyProjectSessionAction({
       type: "update-non-size-settings",
-      settings: resolveStateAction(action, current.session.project.settings)
-    })
-  );
-  const setAnalysis = (action: SetStateAction<Analysis | null>) => setProjectSessionState((current) =>
-    reduceProjectSessionTransition(current, {
+      settings: resolveStateAction(action, currentSettings)
+    });
+  };
+  const setAnalysis = (action: SetStateAction<Analysis | null>) => {
+    const currentAnalysis = projectSessionRef.current.project.analysis;
+    applyProjectSessionAction({
       type: "replace-analysis",
-      analysis: resolveStateAction(action, current.session.project.analysis)
-    })
-  );
+      analysis: resolveStateAction(action, currentAnalysis)
+    });
+  };
+  const [sourceCandidate, setSourceCandidate] = useState<PreparedSourceCandidate | null>(null);
+  const [sourceReadPending, setSourceReadPending] = useState(false);
   const [projectCreatedAt, setProjectCreatedAt] = useState<string | null>(null);
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>("No saved project");
   const [autosavePaused, setAutosavePaused] = useState(false);
@@ -272,6 +289,7 @@ function App() {
   const viewportUserModifiedRef = useRef(false);
   const aiProposalRequestStartedRef = useRef(false);
   const aiProposalRequestGenerationRef = useRef(0);
+  const sourceSelectionGenerationRef = useRef(0);
   const traceContentBoundsRef = useRef<TraceBounds | null>(null);
   const reviewedLineworkRef = useRef<{
     manualStrokes: TraceStroke[];
@@ -281,7 +299,8 @@ function App() {
   const removalPreviewRef = useRef<DetailSegmentPreview | null>(null);
   const [removalPreviewCount, setRemovalPreviewCount] = useState(0);
 
-  const canAnalyze = image !== null && !busy;
+  const selectedImage = sourceCandidate?.file ?? image;
+  const canAnalyze = selectedImage !== null && !busy && !sourceReadPending && projectCapabilities.analyzeSource;
   const canExport = image !== null && analysis !== null && !busy;
   const canSaveProject = image !== null && sourceImageDataUrl !== null && analysis !== null && !busy;
   const canExportSvg = analysis !== null && analysis.outerCutPath.trim().length > 0 && !busy;
@@ -291,7 +310,7 @@ function App() {
   const selectedStrokeSummary = selectedTraceStrokeSummary(manualStrokes, selectedStrokeId);
   const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
   const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
-  const primaryTraceActionLabel = traceActionLabel({ image, analysis, busy, traceMode });
+  const primaryTraceActionLabel = traceActionLabel({ image: selectedImage, analysis, busy, traceMode });
   const paintGuideEntries = paintGuideEntriesForProjectPalette(projectPalette);
   const paintWarnings = paintSanityWarnings(paintGuideEntries);
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
@@ -420,7 +439,8 @@ function App() {
     executeProjectSessionEffects(pendingEffects, {
       requestAutosave: (revision) => {
         pendingProjectSessionAutosaveRevisionRef.current = revision;
-      }
+      },
+      clearAutosave: () => localStorage.removeItem(CUTOUT_AUTOSAVE_KEY)
     });
     setProjectSessionState((current) => current.pendingEffects === pendingEffects
       ? { ...current, pendingEffects: [] }
@@ -546,45 +566,81 @@ function App() {
   }, [printPreview]);
 
   async function generateTemplate(preset?: DetailPreset, settingsOverride?: Settings) {
-    if (!image) return;
+    const candidate = sourceCandidate;
+    const targetImage = candidate?.file ?? image;
+    if (!targetImage) return;
+    const targetSvgSourceInk = candidate ? candidate.sourceInkDataUrl : svgSourceInkDataUrl;
+    const mode = candidate ? "replace-source" as const : "regenerate-analysis" as const;
     const nextSettings = settingsOverride ?? (preset ? detailPresetSettings(preset, settings) : settings);
-    if (preset) {
-      setSettings(nextSettings);
-      applyTraceModeUiState(nextSettings.templateStyle);
-    }
-    const preservedManualStrokes = traceStudioOpen ? manualStrokes : [];
-    if (analysis && preservedManualStrokes.length > 0) {
+    const preservedManualStrokes = mode === "regenerate-analysis" && traceStudioOpen ? manualStrokes : [];
+    if (mode === "regenerate-analysis" && analysis && preservedManualStrokes.length > 0) {
       const shouldRegenerate = window.confirm("Regenerate the cutline? This may replace the cutline and starter lines. Your manual Trace Studio lines will be kept unless you reset details.");
       if (!shouldRegenerate) return;
     }
-    resetAiProposalState();
+    const preparing = applyProjectSessionAction({ type: "begin-project-preparation", operation: mode });
+    if (preparing.outcome.status !== "preparing") return;
+    const token = preparing.outcome.token;
     setBusy(true);
     setError(null);
     try {
       const payload = new FormData();
-      payload.append("image", image);
+      payload.append("image", targetImage);
       payload.append("settings", JSON.stringify(nextSettings));
       const response = await fetch("/api/analyze", { method: "POST", body: payload });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to analyze image.");
       const openEditor = opensEditorWithReference(nextSettings.templateStyle);
-      const importedSvgDetail = svgSourceInkDataUrl
+      const importedSvgDetail = targetSvgSourceInk
         ? await svgInkForPreview({
-            sourceInkDataUrl: svgSourceInkDataUrl,
+            sourceInkDataUrl: targetSvgSourceInk,
             subjectBoundsPx: body.subjectBoundsPx,
             previewWidthPx: body.previewWidthPx,
             previewHeightPx: body.previewHeightPx,
             outerLinePngDataUrl: body.outerLinePngDataUrl
           })
         : null;
+      const initialProjectPalette = seedProjectPaletteFromDetected(body.palette, []);
+      const completed = applyProjectSessionAction({
+        type: "complete-source-analysis",
+        token,
+        mode,
+        ...(candidate
+          ? {
+              projectName: projectNameDraft.trim() || candidate.projectName,
+              sourceImage: {
+                name: candidate.file.name,
+                type: candidate.file.type || "application/octet-stream",
+                dataUrl: candidate.dataUrl
+              }
+            }
+          : {}),
+        settings: nextSettings,
+        analysis: body,
+        initialDetailPngDataUrl: importedSvgDetail,
+        initialProjectPalette
+      });
+      if (completed.outcome.status === "stale") return;
+      if (completed.outcome.status !== "successful") {
+        throw new Error(completed.outcome.status === "failed" ? completed.outcome.error : "Unable to apply prepared analysis.");
+      }
+
+      resetAiProposalState();
       resetEditorState();
       setColorDetailsOpen(false);
-      setAnalysis(body);
+      applyTraceModeUiState(nextSettings.templateStyle);
+      if (candidate) {
+        setImage(candidate.file);
+        setSourceImageDataUrl(candidate.dataUrl);
+        setSvgSourceInkDataUrl(candidate.sourceInkDataUrl);
+        setSvgLineworkDetected(candidate.lineworkDetected);
+        setSourceCandidate((current) => current?.generation === candidate.generation ? null : current);
+        setProjectCreatedAt(new Date().toISOString());
+      }
       setEditedDetailDataUrl(importedSvgDetail);
       setSvgImportedDetailDataUrl(importedSvgDetail);
       setWorkflowProgress({ activeStep: "clean", lineworkReviewed: false, colorsOutcome: "incomplete" });
       if (preservedManualStrokes.length > 0) setManualStrokes(preservedManualStrokes);
-      setProjectPalette(seedProjectPaletteFromDetected(body.palette, []));
+      setProjectPalette(initialProjectPalette);
       setSelectedPaintColorIds([]);
       setEditorOpen(openEditor || preservedManualStrokes.length > 0);
       setShowReference(openEditor);
@@ -594,9 +650,11 @@ function App() {
       setEditorTool(defaultEditorToolForTraceMode(nextSettings.templateStyle));
       pendingContentFitRef.current = openEditor || preservedManualStrokes.length > 0;
       resetCleanupChecks();
+      setProjectStatus("Unsaved changes");
     } catch (err) {
-      setAnalysis(null);
-      setError(err instanceof Error ? err.message : "Unable to analyze image.");
+      const message = err instanceof Error ? err.message : "Unable to analyze image.";
+      const failed = applyProjectSessionAction({ type: "fail-project-preparation", token, error: message });
+      if (failed.outcome.status !== "stale") setError(message);
     } finally {
       setBusy(false);
     }
@@ -741,43 +799,51 @@ function App() {
   }
 
   async function handleImageUpload(file: File | null) {
-    resetAiProposalState();
-    setColorDetailsOpen(false);
-    setImage(null);
-    setAnalysis(null);
-    setError(null);
-    setSourceImageDataUrl(null);
-    setProjectPalette([]);
-    setSelectedPaintColorIds([]);
-    setPaintReviewFilter("all");
-    setShoppingListStatus("");
-    setProjectCreatedAt(null);
-    setWorkflowProgress((current) => resetWorkflowForSource(current));
-    setProjectStatus(file ? "Unsaved changes" : "No saved project");
-    setSvgSourceInkDataUrl(null);
-    setSvgImportedDetailDataUrl(null);
-    setSvgLineworkDetected(false);
+    const generation = sourceSelectionGenerationRef.current + 1;
+    sourceSelectionGenerationRef.current = generation;
     if (!file) {
-      setImage(null);
+      setSourceCandidate(null);
+      setSourceReadPending(false);
       return;
     }
 
+    const preparing = applyProjectSessionAction({ type: "begin-project-preparation", operation: "replace-source" });
+    if (preparing.outcome.status !== "preparing") return;
+    const token = preparing.outcome.token;
+    setSourceReadPending(true);
+    setError(null);
     try {
+      let candidate: PreparedSourceCandidate;
       if (isSvgFile(file)) {
         const prepared = await prepareSvgFastPathUpload(file);
-        setImage(prepared.sourceFile);
-        setSourceImageDataUrl(prepared.sourceDataUrl);
-        setSvgSourceInkDataUrl(prepared.sourceInkDataUrl);
-        setSvgLineworkDetected(prepared.sourceInkDataUrl !== null);
+        candidate = {
+          generation,
+          projectName: cleanedProjectNameFromFileName(file.name),
+          file: prepared.sourceFile,
+          dataUrl: prepared.sourceDataUrl,
+          sourceInkDataUrl: prepared.sourceInkDataUrl,
+          lineworkDetected: prepared.sourceInkDataUrl !== null
+        };
       } else {
-        setImage(file);
-        setSourceImageDataUrl(await readFileAsDataUrl(file));
+        candidate = {
+          generation,
+          projectName: cleanedProjectNameFromFileName(file.name),
+          file,
+          dataUrl: await readFileAsDataUrl(file),
+          sourceInkDataUrl: null,
+          lineworkDetected: false
+        };
       }
-      applyProjectSessionAction({ type: "rename-project", projectName: cleanedProjectNameFromFileName(file.name) });
-      setProjectCreatedAt(new Date().toISOString());
+      const completed = applyProjectSessionAction({ type: "complete-project-preparation", token });
+      if (completed.outcome.status !== "successful" || sourceSelectionGenerationRef.current !== generation) return;
+      setSourceCandidate(candidate);
+      setProjectNameDraft(candidate.projectName);
     } catch (err) {
-      setImage(null);
-      setError(err instanceof Error ? err.message : "Unable to read the selected image.");
+      const message = err instanceof Error ? err.message : "Unable to read the selected image.";
+      const failed = applyProjectSessionAction({ type: "fail-project-preparation", token, error: message });
+      if (failed.outcome.status !== "stale") setError(message);
+    } finally {
+      if (sourceSelectionGenerationRef.current === generation) setSourceReadPending(false);
     }
   }
 
@@ -787,29 +853,37 @@ function App() {
       analysis !== null ||
       manualStrokes.length > 0 ||
       projectPalette.length > 0 ||
-      sourceImageDataUrl !== null;
+      sourceImageDataUrl !== null ||
+      sourceCandidate !== null;
 
     if (hasCurrentWork && !window.confirm("Start a new project? This clears the current image, strokes, and paint palette on this device. Export the project JSON first if you want to keep it.")) {
+      applyProjectSessionAction({ type: "cancel-new-project" });
       return;
     }
 
+    const confirmed = applyProjectSessionAction({
+      type: "confirm-new-project",
+      project: {
+        projectName: "Cutout Project",
+        settings: defaultSettings,
+        sourceImage: null,
+        analysis: null
+      }
+    });
+    if (confirmed.outcome.status !== "successful") return;
     setAutosavePaused(true);
-    localStorage.removeItem(CUTOUT_AUTOSAVE_KEY);
+    sourceSelectionGenerationRef.current += 1;
+    setSourceCandidate(null);
+    setSourceReadPending(false);
     setImage(null);
     setSvgSourceInkDataUrl(null);
     setSvgImportedDetailDataUrl(null);
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(null);
-    hydrateProjectSession({
-      projectName: "Cutout Project",
-      settings: defaultSettings,
-      analysis: null
-    });
     setProjectCreatedAt(null);
     setProjectStatus("No saved project");
     applyTraceModeUiState("paint");
     setAdvancedOpen(false);
-    setAnalysis(null);
     setEditorOpen(false);
     setBrushSize("normal");
     setShowReference(false);
@@ -923,6 +997,7 @@ function App() {
     hydrateProjectSession({
       projectName: project.projectName,
       settings: project.settings,
+      sourceImage: project.sourceImage,
       analysis: project.analysis
     });
     setProjectCreatedAt(project.createdAt);
@@ -975,30 +1050,23 @@ function App() {
     }
     const next = { ...settings, [key]: value };
     setSettings(next);
-    setAnalysis(null);
   }
 
-  function applyProjectSessionAction(action: ProjectSessionAction) {
-    setProjectSessionState((current) => reduceProjectSessionTransition(current, action));
+  function applyProjectSessionAction(action: ProjectSessionAction<AppProjectSessionProject>) {
+    const transition = transitionProjectSession(projectSessionRef.current, action);
+    projectSessionRef.current = transition.session;
+    setProjectSessionState((current) => ({
+      session: transition.session,
+      pendingEffects: [...current.pendingEffects, ...transition.effects]
+    }));
+    return transition;
   }
 
   function hydrateProjectSession(project: typeof projectSession.project) {
-    setProjectSessionState((current) => reduceProjectSessionTransition(current, {
+    return applyProjectSessionAction({
       type: "hydrate-project",
       project
-    }));
-  }
-
-  function reduceProjectSessionTransition(
-    current: AppProjectSessionState,
-    action: ProjectSessionAction<typeof projectSession.project>
-  ): AppProjectSessionState {
-    const transition = transitionProjectSession(current.session, action);
-    if (transition.session === current.session && transition.effects.length === 0) return current;
-    return {
-      session: transition.session,
-      pendingEffects: [...current.pendingEffects, ...transition.effects]
-    };
+    });
   }
 
   function closeFileMenu() {
@@ -1049,7 +1117,6 @@ function App() {
     applyTraceModeUiState(mode);
     const next = traceModeSettings(mode, settings);
     setSettings(next);
-    setAnalysis(null);
   }
 
   async function applyDetailPreset(preset: DetailPreset) {
@@ -1058,51 +1125,13 @@ function App() {
       const shouldReplace = window.confirm("Change detail strength? This will replace your edited starter-line cleanup with a newly generated layer.");
       if (!shouldReplace) return;
     }
-    applyTraceModeUiState(next.templateStyle);
-    setSettings(next);
-    setProjectStatus(image ? "Unsaved changes" : "No saved project");
     if (!analysis || !image) {
-      setAnalysis(null);
+      applyTraceModeUiState(next.templateStyle);
+      setSettings(next);
+      setProjectStatus(sourceCandidate || image ? "Unsaved changes" : "No saved project");
       return;
     }
-
-    setBusy(true);
-    setError(null);
-    try {
-      const payload = new FormData();
-      payload.append("image", image);
-      payload.append("settings", JSON.stringify(next));
-      const response = await fetch("/api/analyze", { method: "POST", body: payload });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Unable to regenerate starter lines.");
-      const importedSvgDetail = svgSourceInkDataUrl
-        ? await svgInkForPreview({
-            sourceInkDataUrl: svgSourceInkDataUrl,
-            subjectBoundsPx: body.subjectBoundsPx,
-            previewWidthPx: body.previewWidthPx,
-            previewHeightPx: body.previewHeightPx,
-            outerLinePngDataUrl: body.outerLinePngDataUrl
-          })
-        : null;
-      setAnalysis((current) => current ? {
-        ...current,
-        previewPngDataUrl: body.previewPngDataUrl,
-        detailLinePngDataUrl: body.detailLinePngDataUrl,
-        traceQuality: body.traceQuality
-      } : body);
-      setEditedDetailDataUrl(importedSvgDetail);
-      setSvgImportedDetailDataUrl(importedSvgDetail);
-      setHistory([]);
-      setRedoHistory([]);
-      setEditableDetailLinesPresent(false);
-      viewportUserModifiedRef.current = false;
-      pendingContentFitRef.current = true;
-      resetCleanupChecks();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to regenerate starter lines.");
-    } finally {
-      setBusy(false);
-    }
+    await generateTemplate(undefined, next);
   }
 
   function switchToBlankTraceStudio() {
@@ -1263,8 +1292,6 @@ function App() {
 
   function setDetailExtractionMode(mode: DetailExtractionMode) {
     const next = { ...settings, detailExtractionMode: mode };
-    setSettings(next);
-    setProjectStatus("Unsaved changes");
     void generateTemplate(undefined, next);
   }
 
@@ -1857,7 +1884,7 @@ function App() {
             <section className="upload-step" aria-label="Upload step" ref={setupSectionRef}>
               <label className="upload-box">
                 <FileImage size={28} />
-                <span>{image ? image.name : "Choose a complete PNG, JPG, or SVG"}</span>
+                <span>{sourceCandidate?.file.name ?? image?.name ?? "Choose a complete PNG, JPG, or SVG"}</span>
                 <input
                   aria-label="Source image"
                   type="file"
@@ -1868,8 +1895,9 @@ function App() {
                   }}
                 />
               </label>
-              {svgLineworkDetected ? <p className="helper-note">SVG linework detected. Its authored dark ink will open as editable starter lines.</p> : null}
+              {(sourceCandidate?.lineworkDetected ?? svgLineworkDetected) ? <p className="helper-note">SVG linework detected. Its authored dark ink will open as editable starter lines.</p> : null}
               <p className="helper-note">Choose one complete character on a simple background.</p>
+              {error ? <div className="error-box">{error}</div> : null}
               <NumberField
                 label="Finished height"
                 suffix="in"
