@@ -100,7 +100,9 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
         if not analysis.outer_cut_path.strip():
             raise ValueError("A valid Cut Line is required before generating an AI proposal.")
         proposal = generate_linework_proposal(
-            image_bytes,
+            # Keep the provider request in the same cropped preview space as
+            # the protected Cut Line, editor, and proposal normalization.
+            analysis.paint_guide_png,
             analysis.outer_line_png,
             preview_size=(analysis.preview_width_px, analysis.preview_height_px),
             upload_confirmed=True,

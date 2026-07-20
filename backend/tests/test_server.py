@@ -105,14 +105,54 @@ class GenerateLineworkApiTest(unittest.TestCase):
         self.assertEqual(json.loads(body)["status"], "pending-review")
         generate.assert_called_once()
 
+    @patch("backend.cutout_studio.server.generate_linework_proposal")
+    def test_sends_the_cropped_analysis_preview_to_the_provider(self, generate) -> None:
+        source = Image.new("RGB", (240, 120), "white")
+        ImageDraw.Draw(source).ellipse((84, 24, 156, 96), fill="black")
+
+        def capture_provider_input(
+            provider_input: bytes,
+            protected_cutline: bytes,
+            *,
+            preview_size: tuple[int, int],
+            upload_confirmed: bool,
+            confirmed_estimate_usd: float,
+        ) -> LineworkProposal:
+            with Image.open(io.BytesIO(provider_input)) as image:
+                self.assertEqual(image.size, preview_size)
+                self.assertLess(image.width, source.width)
+            with Image.open(io.BytesIO(protected_cutline)) as image:
+                self.assertEqual(image.size, preview_size)
+            return LineworkProposal(
+                preview_png=_png_bytes(Image.new("RGB", preview_size, "white")),
+                detail_png=_png_bytes(Image.new("RGBA", preview_size, (0, 0, 0, 0))),
+                status="pending-review",
+                validation_issues=(),
+                ink_coverage=0.04,
+                suppressed_pixel_count=0,
+                preview_size=preview_size,
+                provider_output_size=(1024, 1536),
+            )
+
+        generate.side_effect = capture_provider_input
+        response, _body = self._post_linework(
+            {"uploadConfirmed": True, "estimatedCostUsd": 0.10},
+            image=source,
+        )
+
+        self.assertEqual(response.status, 200)
+        generate.assert_called_once()
+
     def _post_linework(
         self,
         confirmation: dict[str, object],
         *,
         detail_extraction_mode: str = "rendered",
+        image: Image.Image | None = None,
     ) -> tuple[http.client.HTTPResponse, bytes]:
-        image = Image.new("RGB", (64, 96), "white")
-        ImageDraw.Draw(image).ellipse((8, 8, 56, 88), fill="black")
+        if image is None:
+            image = Image.new("RGB", (64, 96), "white")
+            ImageDraw.Draw(image).ellipse((8, 8, 56, 88), fill="black")
         body, content_type = _multipart_body({
             "image": ("source.png", _png_bytes(image), "image/png"),
             "settings": json.dumps({"finishedHeightIn": 24, "detailExtractionMode": detail_extraction_mode}),

@@ -47,7 +47,7 @@ test("maker explicitly confirms one review-only AI proposal without changing acc
   });
 
   await proposalCard.getByRole("button", { name: "Simplify for wood template" }).click();
-  await expect(proposalCard).toContainText("Your source image will be uploaded to OpenAI");
+  await expect(proposalCard).toContainText("Your cropped source preview will be uploaded to OpenAI");
   await expect(proposalCard).toContainText("Exact estimated cost: $0.10");
   expect(requestCount).toBe(0);
 

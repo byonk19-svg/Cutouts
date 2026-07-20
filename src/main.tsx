@@ -3213,7 +3213,7 @@ function AiProposalCard({
         <>
           <div>
             <strong>Confirm one provider request</strong>
-            <p>Your source image will be uploaded to OpenAI under its normal retention terms. Exact estimated cost: ${AI_PROPOSAL_ESTIMATE_USD.toFixed(2)}. No automatic retry will be sent.</p>
+            <p>Your cropped source preview will be uploaded to OpenAI under its normal retention terms. Exact estimated cost: ${AI_PROPOSAL_ESTIMATE_USD.toFixed(2)}. No automatic retry will be sent.</p>
           </div>
           <div className="ai-proposal-actions">
             <button className="primary-action" onClick={onConfirm} disabled={!canConfirm}>Confirm upload and request one proposal</button>
