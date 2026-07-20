@@ -2112,6 +2112,8 @@ function App() {
                           review={aiProposalReview}
                           reviewView={aiProposalReviewView}
                           inputReadiness={inputReadiness}
+                          previewWidthPx={analysis.previewWidthPx}
+                          previewHeightPx={analysis.previewHeightPx}
                           originalPreviewPngDataUrl={analysis.paintGuidePngDataUrl}
                           outerLinePngDataUrl={analysis.outerLinePngDataUrl}
                           error={aiProposalError}
@@ -3157,6 +3159,8 @@ function AiProposalCard({
   review,
   reviewView,
   inputReadiness,
+  previewWidthPx,
+  previewHeightPx,
   originalPreviewPngDataUrl,
   outerLinePngDataUrl,
   error,
@@ -3176,6 +3180,8 @@ function AiProposalCard({
   review: AiProposalReview | null;
   reviewView: AiProposalReviewView;
   inputReadiness: ProjectSessionInputReadiness;
+  previewWidthPx: number;
+  previewHeightPx: number;
   originalPreviewPngDataUrl: string;
   outerLinePngDataUrl: string;
   error: string | null;
@@ -3248,7 +3254,11 @@ function AiProposalCard({
                   </button>
                 ))}
               </div>
-              <div className="ai-proposal-review-frame" aria-label={`${reviewView === "ai-lines-only" ? "AI lines only" : reviewView === "original-overlay" ? "Original Overlay" : "Print Preview"} review`}>
+              <div
+                className="ai-proposal-review-frame"
+                aria-label={`${reviewView === "ai-lines-only" ? "AI lines only" : reviewView === "original-overlay" ? "Original Overlay" : "Print Preview"} review`}
+                style={{ aspectRatio: `${previewWidthPx} / ${previewHeightPx}` }}
+              >
                 {reviewView === "original-overlay" ? <img src={originalPreviewPngDataUrl} alt="Original artwork" /> : null}
                 {reviewView === "print-preview" ? <img src={outerLinePngDataUrl} alt="Protected Cut Line" /> : null}
                 <img className={reviewView === "ai-lines-only" ? "" : "ai-proposal-review-overlay"} src={proposal.proposalDetailPngDataUrl} alt="AI linework proposal" />

@@ -13,6 +13,7 @@ from backend.cutout_studio.ai_linework import (
     LineworkGenerationError,
     generate_linework_proposal,
     normalize_generated_proposal,
+    wood_transfer_prompt,
 )
 
 
@@ -107,6 +108,13 @@ class NormalizeGeneratedProposalTest(unittest.TestCase):
 
 
 class GenerateLineworkProposalTest(unittest.TestCase):
+    def test_prompt_requires_the_complete_foreground_composition_and_major_props(self) -> None:
+        prompt = wood_transfer_prompt().lower()
+
+        self.assertIn("complete foreground composition", prompt)
+        self.assertIn("major foreground prop", prompt)
+        self.assertIn("do not omit", prompt)
+
     @patch("backend.cutout_studio.ai_linework.urlopen")
     def test_unconfirmed_request_is_rejected_before_provider_transport(self, mock_urlopen: MagicMock) -> None:
         with self.assertRaisesRegex(LineworkGenerationError, "(?i)confirm"):

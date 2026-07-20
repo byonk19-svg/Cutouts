@@ -63,9 +63,11 @@ class LineworkProposal:
 def wood_transfer_prompt() -> str:
     return (
         "Create one sparse black-and-white wood-transfer linework proposal from this exact image. "
-        "Preserve recognizable face, hair, clothing, limbs, hands, footwear, accessories, and major "
-        "paint boundaries. Use one clean line per intended interior feature. Remove shading, texture, "
-        "hatching, color, lettering, background decoration, and duplicate contours. Do not add or "
+        "Preserve the complete foreground composition, including recognizable face, hair, clothing, "
+        "limbs, hands, footwear, accessories, major foreground props, and major paint boundaries. "
+        "Use one clean line per intended interior feature. Do not omit a large foreground area or turn "
+        "a major foreground prop into isolated decorative marks. Remove shading, texture, hatching, "
+        "color, lettering, unrelated background decoration, and duplicate contours. Do not add or "
         "invent features. Do not draw an outside silhouette or any print, tiling, or calibration marks."
     )
 

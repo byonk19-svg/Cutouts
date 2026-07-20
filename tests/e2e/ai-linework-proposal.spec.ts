@@ -63,6 +63,9 @@ test("maker explicitly confirms one review-only AI proposal without changing acc
     "src",
     `data:image/png;base64,${normalizedDetail.toString("base64")}`
   );
+  await expect.poll(() => proposalCard.getByLabel("AI lines only review").evaluate(
+    (frame) => getComputedStyle(frame).aspectRatio
+  )).toBe("359 / 900");
   await expect(proposalCard.getByRole("button", { name: "AI lines only" })).toBeVisible();
   await expect(proposalCard.getByRole("button", { name: "Original Overlay" })).toBeVisible();
   await expect(proposalCard.getByRole("button", { name: "Print Preview" })).toBeVisible();
