@@ -71,11 +71,12 @@ proposal after a valid Cut Line exists.
 ### AI-Assisted Simplification
 
 An optional, maker-initiated cloud request for one Wood-Transfer Style interior
-Detail Line proposal. Before the request, Cutout Studio discloses that the
-Source Image will be uploaded under the provider's normal retention terms and
-requires confirmation of the exact estimated cost. It never runs for Ready
-Line Art, never retries automatically, and never owns the Cut Line or print
-geometry.
+Detail Line proposal. The maker may request it for a rendered source or for
+existing line art that is too detailed to transfer directly. Before the
+request, Cutout Studio discloses that the Source Image will be uploaded under
+the provider's normal retention terms and requires confirmation of the exact
+estimated cost. It never retries automatically, and never owns the Cut Line or
+print geometry.
 
 ### Wood-Transfer Style
 

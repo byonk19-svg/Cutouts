@@ -252,6 +252,7 @@ function App() {
     projectName,
     settings,
     analysis,
+    inputReadiness = "ready-line-art",
     editedDetailPngDataUrl: editedDetailDataUrl,
     manualStrokes,
     projectPalette,
@@ -2110,6 +2111,7 @@ function App() {
                           proposal={aiProposal}
                           review={aiProposalReview}
                           reviewView={aiProposalReviewView}
+                          inputReadiness={inputReadiness}
                           originalPreviewPngDataUrl={analysis.paintGuidePngDataUrl}
                           outerLinePngDataUrl={analysis.outerLinePngDataUrl}
                           error={aiProposalError}
@@ -3154,6 +3156,7 @@ function AiProposalCard({
   proposal,
   review,
   reviewView,
+  inputReadiness,
   originalPreviewPngDataUrl,
   outerLinePngDataUrl,
   error,
@@ -3172,6 +3175,7 @@ function AiProposalCard({
   proposal: ProjectSessionAiProposalResult | null;
   review: AiProposalReview | null;
   reviewView: AiProposalReviewView;
+  inputReadiness: ProjectSessionInputReadiness;
   originalPreviewPngDataUrl: string;
   outerLinePngDataUrl: string;
   error: string | null;
@@ -3191,10 +3195,12 @@ function AiProposalCard({
       {phase === "idle" ? (
         <>
           <div>
-            <strong>Needs Simplification</strong>
-            <p>Ask for one optional Wood-Transfer Style proposal. Your Cut Line, print geometry, and current Detail Lines stay unchanged.</p>
+            <strong>Simplify for wood template</strong>
+            <p>{inputReadiness === "ready-line-art"
+              ? "Existing ink was found. Ask for one optional Wood-Transfer Style proposal when the artwork is too detailed to transfer directly."
+              : "Ask for one optional Wood-Transfer Style proposal. Your Cut Line, print geometry, and current Detail Lines stay unchanged."}</p>
           </div>
-          <button className="tool-button" onClick={onBegin} disabled={!canBegin}><Sparkles size={16} /> Request AI proposal</button>
+          <button className="tool-button" onClick={onBegin} disabled={!canBegin}><Sparkles size={16} /> Simplify for wood template</button>
         </>
       ) : null}
       {phase === "confirming" ? (
@@ -3254,12 +3260,12 @@ function AiProposalCard({
                     <button className="tool-button" onClick={onReject} disabled={!canReject}>Reject proposal</button>
                   </>
                 ) : null}
-                {review.decision === "review-only" ? <button className="tool-button" onClick={onBegin} disabled={!canBegin}>Request another proposal</button> : null}
+                {review.decision === "review-only" ? <button className="tool-button" onClick={onBegin} disabled={!canBegin}>Simplify another version</button> : null}
               </div>
             </>
           ) : (
             <div className="ai-proposal-actions">
-              <button className="tool-button" onClick={onBegin} disabled={!canBegin}>Request another proposal</button>
+              <button className="tool-button" onClick={onBegin} disabled={!canBegin}>Simplify another version</button>
             </div>
           )}
         </>

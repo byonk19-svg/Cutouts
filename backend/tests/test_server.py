@@ -83,15 +83,27 @@ class GenerateLineworkApiTest(unittest.TestCase):
         self.assertTrue(payload["proposalDetailPngDataUrl"].startswith("data:image/png;base64,"))
 
     @patch("backend.cutout_studio.server.generate_linework_proposal")
-    def test_rejects_local_line_art_sources_at_the_api_seam(self, generate) -> None:
+    def test_accepts_local_line_art_sources_at_the_api_seam(self, generate) -> None:
+        preview = _png_bytes(Image.new("RGB", (64, 96), "white"))
+        detail = _png_bytes(Image.new("RGBA", (64, 96), (0, 0, 0, 0)))
+        generate.return_value = LineworkProposal(
+            preview_png=preview,
+            detail_png=detail,
+            status="pending-review",
+            validation_issues=(),
+            ink_coverage=0.04,
+            suppressed_pixel_count=0,
+            preview_size=(64, 96),
+            provider_output_size=(1024, 1536),
+        )
         response, body = self._post_linework(
             {"uploadConfirmed": True, "estimatedCostUsd": 0.10},
             detail_extraction_mode="lineArt",
         )
 
-        self.assertEqual(response.status, 400)
-        self.assertIn("needs simplification", json.loads(body)["error"].lower())
-        generate.assert_not_called()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(body)["status"], "pending-review")
+        generate.assert_called_once()
 
     def _post_linework(
         self,

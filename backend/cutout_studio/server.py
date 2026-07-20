@@ -99,8 +99,6 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
         analysis = analyze_template(image_bytes, settings)
         if not analysis.outer_cut_path.strip():
             raise ValueError("A valid Cut Line is required before generating an AI proposal.")
-        if analysis.trace_quality.get("detailExtractionModeUsed") != "rendered":
-            raise ValueError("AI proposals are available only for a Needs Simplification source.")
         proposal = generate_linework_proposal(
             image_bytes,
             analysis.outer_line_png,

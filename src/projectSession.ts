@@ -1327,13 +1327,6 @@ function hasValidCutLine(project: ProjectSessionProject) {
   return Boolean(project.analysis?.outerCutPath.trim());
 }
 
-function needsAiSimplification(project: ProjectSessionProject) {
-  const inputReadiness = project.inputReadiness;
-  if (inputReadiness === "needs-simplification") return true;
-  if (inputReadiness === "ready-line-art") return false;
-  return project.analysis?.traceQuality?.detailExtractionModeUsed === "rendered";
-}
-
 function deriveInputReadiness(analysis: CutoutProjectAnalysis): ProjectSessionInputReadiness {
   return analysis.traceQuality?.detailExtractionModeUsed === "rendered"
     ? "needs-simplification"
@@ -1341,8 +1334,7 @@ function deriveInputReadiness(analysis: CutoutProjectAnalysis): ProjectSessionIn
 }
 
 function canAiProposalRequestPrerequisites<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
-  return needsAiSimplification(session.project)
-    && session.project.sourceImage != null
+  return session.project.sourceImage != null
     && hasValidCutLine(session.project)
     && session.aiProposal.status !== "requesting";
 }

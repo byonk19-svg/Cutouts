@@ -14,16 +14,8 @@ test("maker explicitly confirms one review-only AI proposal without changing acc
   });
   await page.getByRole("button", { name: "Generate Template" }).click();
 
-  await expect(page.getByLabel("AI-assisted linework proposal")).toHaveCount(0);
-  const moreTools = page.getByLabel("More Tools");
-  await moreTools.locator("summary").click();
-  await Promise.all([
-    page.waitForResponse((response) => response.url().endsWith("/api/analyze") && response.request().method() === "POST"),
-    moreTools.getByLabel("Image type").getByRole("button", { name: "Rendered image" }).click()
-  ]);
-
   const proposalCard = page.getByLabel("AI-assisted linework proposal");
-  await expect(proposalCard).toContainText("Needs Simplification");
+  await expect(proposalCard).toContainText("Simplify for wood template");
   const detailCanvas = page.getByLabel("Editable interior detail lines");
   const acceptedDetailBefore = await detailCanvas.evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL());
 
@@ -54,7 +46,7 @@ test("maker explicitly confirms one review-only AI proposal without changing acc
     });
   });
 
-  await proposalCard.getByRole("button", { name: "Request AI proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Simplify for wood template" }).click();
   await expect(proposalCard).toContainText("Your source image will be uploaded to OpenAI");
   await expect(proposalCard).toContainText("Exact estimated cost: $0.10");
   expect(requestCount).toBe(0);
@@ -75,7 +67,7 @@ test("maker explicitly confirms one review-only AI proposal without changing acc
   await expect(proposalCard.getByRole("button", { name: "Original Overlay" })).toBeVisible();
   await expect(proposalCard.getByRole("button", { name: "Print Preview" })).toBeVisible();
   await expect(proposalCard.getByRole("button", { name: /Accept/i })).toHaveCount(0);
-  await expect(proposalCard.getByRole("button", { name: "Request another proposal" })).toBeVisible();
+  await expect(proposalCard.getByRole("button", { name: "Simplify another version" })).toBeVisible();
   await expect.poll(() => requestCount).toBe(1);
   await expect.poll(() => detailCanvas.evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL())).toBe(acceptedDetailBefore);
 });
@@ -122,7 +114,7 @@ test("maker reviews all views, explicitly accepts once, and undoes back to the p
   }));
 
   const proposalCard = page.getByLabel("AI-assisted linework proposal");
-  await proposalCard.getByRole("button", { name: "Request AI proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Simplify for wood template" }).click();
   await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
 
   await expect(proposalCard).toContainText("Ready for visual review");
@@ -202,14 +194,14 @@ test("rejecting and requesting a later proposal preserves accepted work", async 
   });
 
   const proposalCard = page.getByLabel("AI-assisted linework proposal");
-  await proposalCard.getByRole("button", { name: "Request AI proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Simplify for wood template" }).click();
   await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
   await expect(proposalCard).toContainText("Ready for visual review");
   await proposalCard.getByRole("button", { name: "Reject proposal" }).click();
   await expect(proposalCard).toContainText("Proposal rejected");
   await expect.poll(() => canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(acceptedDetailBefore);
 
-  await proposalCard.getByRole("button", { name: "Request another proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Simplify another version" }).click();
   await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
   await expect(proposalCard).toContainText("Ready for visual review");
   expect(requestCount).toBe(2);
@@ -238,7 +230,7 @@ test("request failure preserves accepted work and sends no automatic retry", asy
   });
 
   const proposalCard = page.getByLabel("AI-assisted linework proposal");
-  await proposalCard.getByRole("button", { name: "Request AI proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Simplify for wood template" }).click();
   await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
   await expect(proposalCard.getByRole("alert")).toContainText("Provider unavailable for this test.");
   await expect(proposalCard.getByRole("alert")).toContainText("No retry was sent");
@@ -288,7 +280,7 @@ test("an existing review milestone cannot bypass pending proposal gating", async
     } });
   });
   const proposalCard = page.getByLabel("AI-assisted linework proposal");
-  await proposalCard.getByRole("button", { name: "Request AI proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Simplify for wood template" }).click();
   await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
   await expect(proposalCard.getByRole("status")).toBeVisible();
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toBeDisabled();
@@ -336,7 +328,7 @@ test("a proposal response is ignored after the source project is replaced", asyn
     } });
   });
   let proposalCard = page.getByLabel("AI-assisted linework proposal");
-  await proposalCard.getByRole("button", { name: "Request AI proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Simplify for wood template" }).click();
   await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
   await expect(proposalCard.getByRole("status")).toBeVisible();
 
@@ -351,10 +343,10 @@ test("a proposal response is ignored after the source project is replaced", asyn
     moreTools.getByLabel("Image type").getByRole("button", { name: "Rendered image" }).click()
   ]);
   proposalCard = page.getByLabel("AI-assisted linework proposal");
-  await expect(proposalCard).toContainText("Needs Simplification");
+  await expect(proposalCard).toContainText("Simplify for wood template");
   releaseResponse?.();
   await page.waitForTimeout(500);
-  await expect(proposalCard).toContainText("Needs Simplification");
+  await expect(proposalCard).toContainText("Simplify for wood template");
   await expect(proposalCard).not.toContainText("Ready for visual review");
 });
 
@@ -389,7 +381,7 @@ test("a proposal response is ignored after accepted Detail Lines change while th
   });
 
   const proposalCard = page.getByLabel("AI-assisted linework proposal");
-  await proposalCard.getByRole("button", { name: "Request AI proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Simplify for wood template" }).click();
   await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
   await expect(proposalCard.getByRole("status")).toBeVisible();
 
@@ -398,11 +390,11 @@ test("a proposal response is ignored after accepted Detail Lines change while th
   await drawStroke(canvas, [[0.38, 0.38], [0.48, 0.42], [0.58, 0.38]]);
   await expect.poll(() => canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(acceptedBefore);
   const acceptedAfter = await canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
-  await expect(proposalCard).toContainText("Needs Simplification");
+  await expect(proposalCard).toContainText("Simplify for wood template");
 
   releaseResponse?.();
   await page.waitForTimeout(500);
-  await expect(proposalCard).toContainText("Needs Simplification");
+  await expect(proposalCard).toContainText("Simplify for wood template");
   await expect(proposalCard).not.toContainText("Ready for visual review");
   await expect.poll(() => canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(acceptedAfter);
 });
@@ -439,11 +431,11 @@ test("exports only accepted AI Detail Lines to SVG and PDF", async ({ page }) =>
   });
 
   const proposalCard = page.getByLabel("AI-assisted linework proposal");
-  await proposalCard.getByRole("button", { name: "Request AI proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Simplify for wood template" }).click();
   await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
   await expect(proposalCard).toContainText("Ready for visual review");
   await proposalCard.getByRole("button", { name: "Reject proposal" }).click();
-  await proposalCard.getByRole("button", { name: "Request another proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Simplify another version" }).click();
   await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
   await proposalCard.getByRole("button", { name: "AI Lines Only" }).click();
   await proposalCard.getByRole("button", { name: "Original Overlay" }).click();
