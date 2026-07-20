@@ -36,8 +36,8 @@ class NormalizeGeneratedProposalTest(unittest.TestCase):
     def test_alpha_composites_output_and_returns_preview_sized_transparent_black_detail(self) -> None:
         generated = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
         generated_draw = ImageDraw.Draw(generated)
-        generated_draw.line((100, 50, 100, 150), fill=(0, 0, 0, 255), width=6)
-        generated_draw.line((32, 50, 32, 150), fill=(0, 0, 0, 255), width=6)
+        generated_draw.line((100, 78, 100, 122), fill=(0, 0, 0, 255), width=6)
+        generated_draw.line((78, 110, 122, 110), fill=(0, 0, 0, 255), width=6)
 
         proposal = normalize_generated_proposal(
             png_bytes(generated),
@@ -90,6 +90,22 @@ class NormalizeGeneratedProposalTest(unittest.TestCase):
 
         self.assertEqual(proposal.status, "review-only")
         self.assertIn("misaligned", proposal.validation_issues)
+
+    def test_rejects_linework_that_covers_only_a_thin_slice_of_the_composition(self) -> None:
+        generated = Image.new("RGB", (200, 200), "white")
+        draw = ImageDraw.Draw(generated)
+        draw.line((60, 96, 140, 96), fill="black", width=3)
+        draw.line((60, 104, 140, 104), fill="black", width=3)
+
+        proposal = normalize_generated_proposal(
+            png_bytes(generated),
+            expected_generated_size=(200, 200),
+            preview_size=(200, 200),
+            protected_cutline_png=protected_cutline((200, 200)),
+        )
+
+        self.assertEqual(proposal.status, "review-only")
+        self.assertIn("incomplete-composition", proposal.validation_issues)
 
     def test_invalid_outputs_are_review_only(self) -> None:
         cases: list[tuple[str, bytes, tuple[int, int], bytes, str]] = []
@@ -149,6 +165,7 @@ class GenerateLineworkProposalTest(unittest.TestCase):
     def test_confirmed_request_posts_once_without_retry_and_normalizes_response(self, mock_urlopen: MagicMock) -> None:
         generated = Image.new("RGB", (1024, 1536), "white")
         ImageDraw.Draw(generated).line((512, 500, 512, 1000), fill="black", width=12)
+        ImageDraw.Draw(generated).line((300, 800, 700, 800), fill="black", width=12)
         response = MagicMock()
         response.read.return_value = json.dumps({
             "data": [{"b64_json": base64.b64encode(png_bytes(generated)).decode("ascii")}]

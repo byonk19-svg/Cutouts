@@ -24,6 +24,7 @@ SUPPRESSION_BAND_PX = 24
 MIN_INK_COVERAGE = 0.0005
 MAX_INK_COVERAGE = 0.22
 MAX_CUTLINE_CENTER_OFFSET_RATIO = 0.20
+MIN_COMPOSITION_SPAN_RATIO = 0.25
 
 ValidationIssue = Literal[
     "malformed",
@@ -34,6 +35,7 @@ ValidationIssue = Literal[
     "missing-cutline",
     "duplicate-contour",
     "misaligned",
+    "incomplete-composition",
 ]
 
 
@@ -163,6 +165,11 @@ def normalize_generated_proposal(
                 or abs(ink_center_y - cut_center_y) / max(1, cut_height) > MAX_CUTLINE_CENTER_OFFSET_RATIO
             ):
                 issues.append("misaligned")
+            if (
+                ink_width / max(1, cut_width) < MIN_COMPOSITION_SPAN_RATIO
+                or ink_height / max(1, cut_height) < MIN_COMPOSITION_SPAN_RATIO
+            ):
+                issues.append("incomplete-composition")
 
     coverage = float(np.count_nonzero(ink)) / float(ink.size)
     if coverage < MIN_INK_COVERAGE:
