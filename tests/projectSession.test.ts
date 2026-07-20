@@ -332,6 +332,9 @@ for (const finishedHeightIn of [Number.NaN, -1, 5, 97]) {
   const session = createProjectSession({ projectName: "Coraline", settings, analysis });
   const capabilities = projectSessionView(session).capabilities;
   assert(Object.isFrozen(capabilities), "Project Capabilities should be immutable at runtime");
+  assertEqual(capabilities.saveProject, false, "displayed save availability should reject a project without a Source Image");
+  const bypassedSave = transitionProjectSession(session, { type: "request-explicit-save" });
+  assertEqual(bypassedSave.outcome.status, "rejected", "save enforcement should share the displayed Project Session authority");
 }
 
 const lifecycleProject = {
@@ -345,6 +348,13 @@ const lifecycleProject = {
   workflowProgress: preservedProjectFields.workflowProgress,
   cleanupChecks: preservedProjectFields.cleanupChecks
 };
+
+{
+  const session = createProjectSession(lifecycleProject);
+  assertEqual(projectSessionView(session).capabilities.saveProject, true, "a complete project should expose save availability from Project Session");
+  const requested = transitionProjectSession(session, { type: "request-explicit-save" });
+  assertEqual(requested.outcome.status, "save-requested", "save enforcement should accept the same complete project");
+}
 
 function requestAiProposal(session: ReturnType<typeof createProjectSession>) {
   const confirming = transitionProjectSession(session, { type: "begin-ai-proposal-request" });
@@ -576,7 +586,13 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 }
 
 {
-  const session = createProjectSession(lifecycleProject);
+  const session = createProjectSession({
+    ...lifecycleProject,
+    traceMode: "paint" as const,
+    referenceOpacity: 61,
+    layerVisibility: preservedProjectFields.layerVisibility,
+    traceViewport: preservedProjectFields.traceViewport
+  });
   const requesting = requestAiProposal(session);
   const reviewOnly = transitionProjectSession(requesting.session, {
     type: "complete-ai-proposal-request",
@@ -667,7 +683,13 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 }
 
 {
-  const session = createProjectSession(lifecycleProject);
+  const session = createProjectSession({
+    ...lifecycleProject,
+    traceMode: "paint" as const,
+    referenceOpacity: 61,
+    layerVisibility: preservedProjectFields.layerVisibility,
+    traceViewport: preservedProjectFields.traceViewport
+  });
   const matching = transitionProjectSession(session, {
     type: "begin-project-paint-match",
     id: session.project.projectPalette[0].id
@@ -695,10 +717,11 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     mode: "replace-source",
     projectName: "New Character",
     sourceImage: { name: "new-character.png", type: "image/png", dataUrl: "data:image/png;base64,new-source" },
-    settings,
+    settings: { ...settings, templateStyle: "manual" },
     analysis: replacementAnalysis,
     initialDetailPngDataUrl: null,
-    initialProjectPalette: replacementPalette
+    initialProjectPalette: replacementPalette,
+    openEditorAfterCompletion: true
   });
 
   assertEqual(completed.outcome.status, "successful", "replacement should expose successful status");
@@ -723,6 +746,10 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     draw: false,
     export: false
   }, "replacement should reset source-dependent cleanup decisions");
+  assertEqual(completed.session.project.traceMode, "manual", "replacement should install Trace Mode in the same transition");
+  assertEqual(completed.session.project.referenceOpacity, 61, "replacement should preserve underlay opacity atomically");
+  assertEqual(completed.session.project.layerVisibility?.showReference, true, "replacement should derive editor visibility inside Project Session");
+  assertDeepEqual(completed.session.project.traceViewport, { zoom: 1, panX: 0, panY: 0 }, "replacement should reset the durable viewport atomically");
   assertEqual(projectSessionView(completed.session).aiProposal.status, "idle", "replacement should clear transient proposal state");
   assertEqual(projectSessionView(completed.session).paintMatch.status, "idle", "replacement should clear transient paint match state");
   assertEqual(completed.effects[0]?.type, "request-autosave", "replacement should request one Autosave");
@@ -733,6 +760,114 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   assertEqual(completed.session.project.projectPalette[0].label, installedLabel, "source completion should snapshot incoming palette entries");
   assertEqual(completed.session.project.projectPalette[0].matches[0].colorName, installedMatchName, "source completion should snapshot incoming paint matches");
   assertEqual(completed.session.revision, 1, "external mutation after source completion should not create an untracked Project Revision");
+}
+
+{
+  const session = createProjectSession({
+    ...lifecycleProject,
+    traceMode: "paint" as const
+  });
+  const changed = transitionProjectSession(session, {
+    type: "update-non-size-settings",
+    settings: { ...settings, templateStyle: "manual" }
+  });
+  assertEqual(changed.outcome.status, "applied", "changing trace settings should apply");
+  assertEqual(changed.session.project.traceMode, "manual", "Trace Mode should remain synchronized with template style in one transition");
+  assertEqual(changed.session.revision, session.revision + 1, "changing trace settings should advance one Project Revision");
+  assertEqual(changed.effects.length, 1, "changing trace settings should request one Autosave");
+}
+
+{
+  const session = createProjectSession({ ...lifecycleProject, ...preservedProjectFields });
+  const opacity = transitionProjectSession(session, { type: "set-reference-opacity", referenceOpacity: 67 });
+  assertEqual(opacity.session.project.referenceOpacity, 67, "underlay opacity should cross a named Project Session action");
+  const visibility = transitionProjectSession(opacity.session, {
+    type: "set-layer-visibility",
+    layer: "showSuggestions",
+    visible: true
+  });
+  assertEqual(visibility.session.project.layerVisibility?.showSuggestions, true, "layer visibility should cross a named Project Session action");
+  assertEqual(visibility.session.project.layerVisibility?.printPreview, false, "durable visibility should exclude transient Print Preview");
+  const viewport = transitionProjectSession(visibility.session, {
+    type: "set-trace-viewport",
+    traceViewport: { zoom: 2, panX: 5, panY: -4 }
+  });
+  assertDeepEqual(viewport.session.project.traceViewport, { zoom: 2, panX: 5, panY: -4 }, "viewport gestures should commit through a named Project Session action");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    traceMode: "paint" as const,
+    traceViewport: { zoom: 1.8, panX: 22, panY: -11 }
+  });
+  const invalidated = transitionProjectSession(reviewed, {
+    type: "invalidate-analysis-for-detail-settings",
+    detailCleanup: 55
+  });
+  assertEqual(invalidated.outcome.status, "applied", "interior-detail changes should invalidate generated analysis atomically");
+  assertEqual(invalidated.session.project.analysis, null, "interior-detail changes should clear stale analysis");
+  assertEqual(invalidated.session.project.editedDetailPngDataUrl, null, "interior-detail changes should clear stale accepted Detail Lines");
+  assertDeepEqual(invalidated.session.project.manualStrokes, [], "interior-detail changes should clear source-dependent Feature Lines");
+  assertEqual(invalidated.session.project.settings.detailCleanup, 55, "interior-detail changes should install the requested setting");
+  assertDeepEqual(invalidated.session.project.traceViewport, { zoom: 1, panX: 0, panY: 0 }, "interior-detail changes should reset the durable viewport");
+  assertDeepEqual(invalidated.session.project.projectPalette, reviewed.project.projectPalette, "analysis invalidation should preserve paint work");
+  assertDeepEqual(invalidated.session.project.workflowProgress, {
+    activeStep: "upload",
+    lineworkReviewed: false,
+    colorsOutcome: "incomplete"
+  }, "analysis invalidation should normalize Workflow Progress once");
+  assertEqual(invalidated.session.revision, reviewed.revision + 1, "analysis invalidation should create one Project Revision");
+  assertEqual(invalidated.effects.length, 0, "analysis invalidation should not Autosave a project while prepared analysis is absent");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    traceMode: "paint" as const,
+    layerVisibility: {
+      showReference: false,
+      showCutline: true,
+      showManualLines: false,
+      showSuggestions: true,
+      printPreview: false
+    }
+  });
+  const switched = transitionProjectSession(reviewed, {
+    type: "switch-to-blank-trace-studio"
+  });
+  assertEqual(switched.outcome.status, "applied", "switching to blank Trace Studio should apply once");
+  assertEqual(switched.session.project.traceMode, "manual", "blank Trace Studio should install manual Trace Mode");
+  assertEqual(switched.session.project.settings.templateStyle, "manual", "blank Trace Studio should install manual trace settings");
+  assertDeepEqual(switched.session.project.manualStrokes, [], "blank Trace Studio should clear Feature Lines atomically");
+  assertEqual(switched.session.project.editedDetailPngDataUrl, reviewed.project.editedDetailPngDataUrl, "blank Trace Studio should preserve accepted generated Detail Lines for later reuse");
+  assertDeepEqual(switched.session.project.layerVisibility, {
+    showReference: true,
+    showCutline: true,
+    showManualLines: true,
+    showSuggestions: false,
+    printPreview: false
+  }, "blank Trace Studio should install its saved workspace visibility atomically");
+  assertEqual(switched.session.revision, reviewed.revision + 1, "blank Trace Studio should create one Project Revision");
+  assertEqual(switched.effects.length, 1, "blank Trace Studio should request one Autosave");
+  assertEqual(switched.editorTransaction?.before.manualStrokes, reviewed.project.manualStrokes, "blank Trace Studio should expose the prior Feature Lines for one Undo entry");
+  assertDeepEqual(switched.editorTransaction?.after.manualStrokes, [], "blank Trace Studio should expose the cleared Feature Lines for one Undo entry");
+}
+
+{
+  const reviewed = createProjectSession({
+    ...lifecycleProject,
+    traceMode: "paint" as const,
+    manualStrokes: [],
+    workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
+  });
+  const switched = transitionProjectSession(reviewed, { type: "switch-to-blank-trace-studio" });
+  assertDeepEqual(switched.session.project.workflowProgress, {
+    activeStep: "clean",
+    lineworkReviewed: false,
+    colorsOutcome: "incomplete"
+  }, "entering blank Trace Studio should revoke stale review even when there were no Feature Lines to clear");
+  assertEqual(switched.editorTransaction, undefined, "mode-only blank Trace Studio should not invent an artifact Undo entry");
 }
 
 {
@@ -747,6 +882,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     settings: { ...settings, detailCleanup: 72 },
     analysis: regeneratedAnalysis,
     initialDetailPngDataUrl: "data:image/png;base64,regenerated-imported-detail",
+    openEditorAfterCompletion: false,
     initialProjectPalette: [
       projectPaintColor({
         id: "detected-2-facc15",
@@ -783,7 +919,8 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     settings,
     analysis: { ...analysis, previewPngDataUrl: "data:image/png;base64,older" },
     initialDetailPngDataUrl: null,
-    initialProjectPalette: []
+    initialProjectPalette: [],
+    openEditorAfterCompletion: false
   });
   assertEqual(stale.outcome.status, "stale", "an older out-of-order result should be rejected as stale");
   assertEqual(stale.session.project, second.session.project, "an older out-of-order result should not overwrite the project");
@@ -799,7 +936,8 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     settings,
     analysis: { ...analysis, previewPngDataUrl: "data:image/png;base64,newer" },
     initialDetailPngDataUrl: null,
-    initialProjectPalette: []
+    initialProjectPalette: [],
+    openEditorAfterCompletion: false
   });
   assertEqual(current.outcome.status, "successful", "the newest controlled response should apply");
   assertEqual(current.session.project.sourceImage.name, "newer.png", "the newest Source Image should win");
@@ -818,7 +956,8 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     settings,
     analysis: { ...analysis, previewPngDataUrl: "data:image/png;base64,late" },
     initialDetailPngDataUrl: null,
-    initialProjectPalette: []
+    initialProjectPalette: [],
+    openEditorAfterCompletion: false
   });
   assertEqual(stale.outcome.status, "stale", "the existing preparation token should still reject results from an older Project Revision");
   assertEqual(stale.session.project.settings.threshold, 61, "a stale preparation result should preserve the newer settings revision");
@@ -936,9 +1075,11 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   });
   const paintSelections = reviewed.project.projectPalette;
   const mutated = transitionProjectSession(reviewed, {
-    type: "commit-accepted-linework",
-    editedDetailPngDataUrl: "data:image/png;base64,changed-detail",
-    manualStrokes: [{ id: "mouth", points: [{ x: 30, y: 40 }] }]
+    type: "commit-editor-transaction",
+    outcome: {
+      editedDetailPngDataUrl: "data:image/png;base64,changed-detail",
+      manualStrokes: [{ id: "mouth", points: [{ x: 30, y: 40 }] }]
+    }
   });
 
   assertEqual(mutated.outcome.status, "applied", "accepted-linework mutation should apply");
@@ -1017,9 +1158,11 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
   });
   const unchanged = transitionProjectSession(empty, {
-    type: "commit-accepted-linework",
-    editedDetailPngDataUrl: null,
-    manualStrokes: []
+    type: "commit-editor-transaction",
+    outcome: {
+      editedDetailPngDataUrl: null,
+      manualStrokes: []
+    }
   });
   assertEqual(unchanged.outcome.status, "unchanged", "a semantically identical empty linework write should not revoke milestones");
   assertEqual(unchanged.session, empty, "an identical linework write should preserve revision and progress");
@@ -1399,14 +1542,6 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     ...lifecycleProject,
     workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
   });
-  const hydrateRejected = transitionProjectSession(reviewed, {
-    type: "hydrate-project",
-    project: duplicatePaletteProject
-  });
-  assertEqual(hydrateRejected.outcome.status, "rejected", "hydrating duplicate palette IDs should be rejected");
-  assertEqual(hydrateRejected.outcome.error.code, "invalid-project-file", "duplicate palette IDs should report invalid project data");
-  assertEqual(hydrateRejected.session, reviewed, "rejected hydration should preserve the current session");
-
   const restorePreparing = transitionProjectSession(reviewed, { type: "begin-project-preparation", operation: "restore-project" });
   if (restorePreparing.outcome.status !== "preparing") throw new Error("expected restore token");
   const restoreRejected = transitionProjectSession(restorePreparing.session, {
@@ -1417,6 +1552,34 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   });
   assertEqual(restoreRejected.outcome.status, "failed", "restoring duplicate palette IDs should fail safely");
   assertEqual(restoreRejected.session.project, reviewed.project, "failed restore should preserve the current active project");
+
+  const invalidSizePreparing = transitionProjectSession(reviewed, { type: "begin-project-preparation", operation: "restore-project" });
+  if (invalidSizePreparing.outcome.status !== "preparing") throw new Error("expected invalid-size restore token");
+  const invalidSizeRejected = transitionProjectSession(invalidSizePreparing.session, {
+    type: "complete-project-restore",
+    token: invalidSizePreparing.outcome.token,
+    project: {
+      ...lifecycleProject,
+      settings: { ...settings, finishedHeightIn: 5 }
+    },
+    requestAutosave: true
+  });
+  assertEqual(invalidSizeRejected.outcome.status, "failed", "restoring an out-of-range Finished Size should fail inside Project Session");
+  assertEqual(invalidSizeRejected.session.project, reviewed.project, "invalid-size restore should preserve the current active project");
+
+  const mismatchPreparing = transitionProjectSession(reviewed, { type: "begin-project-preparation", operation: "restore-project" });
+  if (mismatchPreparing.outcome.status !== "preparing") throw new Error("expected mismatched-analysis restore token");
+  const mismatchRejected = transitionProjectSession(mismatchPreparing.session, {
+    type: "complete-project-restore",
+    token: mismatchPreparing.outcome.token,
+    project: {
+      ...lifecycleProject,
+      settings: { ...settings, finishedHeightIn: 48 }
+    },
+    requestAutosave: true
+  });
+  assertEqual(mismatchRejected.outcome.status, "failed", "restoring analysis for a different Finished Size should fail inside Project Session");
+  assertEqual(mismatchRejected.session.project, reviewed.project, "mismatched-analysis restore should preserve the current active project");
 }
 
 {

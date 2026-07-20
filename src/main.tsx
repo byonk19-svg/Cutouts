@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode, type SetStateAction } from "react";
+import { StrictMode, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ChevronLeft, ChevronRight, Copy, Download, Eraser, Eye, FileImage, FileText, FolderOpen, Hand, ListChecks, MousePointerClick, Pencil, Redo2, RefreshCw, RotateCcw, Save, SlidersHorizontal, Sparkles, SwatchBook, Trash2, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import {
@@ -186,7 +186,7 @@ function cutoutProjectFromPersistenceSnapshot(
     settings: project.settings,
     traceMode: project.traceMode,
     analysis: project.analysis,
-    editedDetailPngDataUrl: project.traceMode === "manual" ? null : project.editedDetailPngDataUrl,
+    editedDetailPngDataUrl: project.editedDetailPngDataUrl,
     manualStrokes: project.manualStrokes,
     projectPalette: project.projectPalette,
     paintGuideEdits: paintGuideEditsFromProjectPalette(project.projectPalette),
@@ -269,64 +269,28 @@ function App() {
   const aiProposalError = aiProposalState.status === "failed" ? aiProposalState.error : null;
   const workflowProgress = projectCapabilities.guidedWorkflow.progress;
   const [projectNameDraft, setProjectNameDraft] = useState(projectName);
-  const setSettings = (action: SetStateAction<Settings>) => {
-    const currentSettings = projectSessionRef.current.project.settings;
-    applyProjectSessionAction({
-      type: "update-non-size-settings",
-      settings: resolveStateAction(action, currentSettings)
-    });
-  };
-  const setAnalysis = (action: SetStateAction<Analysis | null>) => {
-    const currentAnalysis = projectSessionRef.current.project.analysis;
-    applyProjectSessionAction({
-      type: "replace-analysis",
-      analysis: resolveStateAction(action, currentAnalysis)
-    });
-  };
-  const setEditedDetailDataUrl = (action: SetStateAction<string | null>) => {
-    const current = projectSessionRef.current.project.editedDetailPngDataUrl;
-    applyProjectSessionAction({
-      type: "commit-accepted-linework",
-      editedDetailPngDataUrl: resolveStateAction(action, current),
-      manualStrokes: projectSessionRef.current.project.manualStrokes
-    });
-  };
-  const setManualStrokes = (action: SetStateAction<TraceStroke[]>) => {
-    const current = projectSessionRef.current.project.manualStrokes;
-    applyProjectSessionAction({
-      type: "commit-accepted-linework",
-      editedDetailPngDataUrl: projectSessionRef.current.project.editedDetailPngDataUrl,
-      manualStrokes: resolveStateAction(action, current)
-    });
-  };
-  const updateWorkspacePreferences = (
-    preferences: Partial<Pick<AppProjectSessionProject, "traceMode" | "referenceOpacity" | "layerVisibility" | "traceViewport">>
-  ) => applyProjectSessionAction({ type: "update-workspace-preferences", preferences });
-  const setTraceMode = (action: SetStateAction<TraceMode>) => {
-    const current = projectSessionRef.current.project.traceMode;
-    updateWorkspacePreferences({ traceMode: resolveStateAction(action, current) });
-  };
-  const setReferenceOpacity = (action: SetStateAction<number>) => {
-    const current = projectSessionRef.current.project.referenceOpacity;
-    updateWorkspacePreferences({ referenceOpacity: resolveStateAction(action, current) });
-  };
-  const setLayerVisibility = (
+  const updateProjectSettings = (nextSettings: Settings) => applyProjectSessionAction({
+    type: "update-non-size-settings",
+    settings: nextSettings
+  });
+  const updateReferenceOpacity = (referenceOpacity: number) => applyProjectSessionAction({
+    type: "set-reference-opacity",
+    referenceOpacity
+  });
+  const updateLayerVisibility = (
     key: "showReference" | "showCutline" | "showManualLines" | "showSuggestions",
-    action: SetStateAction<boolean>
+    value: boolean
   ) => {
-    const current = projectSessionRef.current.project.layerVisibility;
-    updateWorkspacePreferences({
-      layerVisibility: { ...current, [key]: resolveStateAction(action, current[key]), printPreview: false }
-    });
+    applyProjectSessionAction({ type: "set-layer-visibility", layer: key, visible: value });
   };
-  const setShowReference = (action: SetStateAction<boolean>) => setLayerVisibility("showReference", action);
-  const setShowCutline = (action: SetStateAction<boolean>) => setLayerVisibility("showCutline", action);
-  const setShowManualLines = (action: SetStateAction<boolean>) => setLayerVisibility("showManualLines", action);
-  const setShowSuggestions = (action: SetStateAction<boolean>) => setLayerVisibility("showSuggestions", action);
-  const setTraceViewport = (action: SetStateAction<TraceViewport>) => {
-    const current = projectSessionRef.current.project.traceViewport;
-    updateWorkspacePreferences({ traceViewport: resolveStateAction(action, current) });
-  };
+  const setShowReference = (value: boolean) => updateLayerVisibility("showReference", value);
+  const setShowCutline = (value: boolean) => updateLayerVisibility("showCutline", value);
+  const setShowManualLines = (value: boolean) => updateLayerVisibility("showManualLines", value);
+  const setShowSuggestions = (value: boolean) => updateLayerVisibility("showSuggestions", value);
+  const updateTraceViewport = (traceViewport: TraceViewport) => applyProjectSessionAction({
+    type: "set-trace-viewport",
+    traceViewport
+  });
   const [sourceCandidate, setSourceCandidate] = useState<PreparedSourceCandidate | null>(null);
   const [sourceReadPending, setSourceReadPending] = useState(false);
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>("No saved project");
@@ -411,9 +375,9 @@ function App() {
 
   const selectedImage = sourceCandidate?.file ?? image;
   const canAnalyze = selectedImage !== null && !busy && !sourceReadPending && projectCapabilities.analyzeSource;
-  const canExport = image !== null && analysis !== null && !busy && projectCapabilities.exportProject;
-  const canSaveProject = image !== null && sourceImageDataUrl !== null && analysis !== null && !busy;
-  const canExportSvg = analysis !== null && analysis.outerCutPath.trim().length > 0 && !busy && projectCapabilities.exportProject;
+  const canExport = image !== null && !busy && projectCapabilities.exportProject;
+  const canSaveProject = !busy && projectCapabilities.saveProject;
+  const canExportSvg = !busy && projectCapabilities.exportProject;
   const selectedDetailPreset = detailPresetFromTraceMode(traceMode);
   const traceStudioOpen = traceMode === "manual";
   const selectedStroke = selectedStrokeId ? manualStrokes.find((stroke) => stroke.id === selectedStrokeId) ?? null : null;
@@ -458,23 +422,20 @@ function App() {
 
   useEffect(() => {
     if (analysis) return;
-    resetEditorState();
+    resetEditorPresentation();
   }, [analysis]);
 
   useEffect(() => {
     if (editorTool !== "remove") clearRemovalPreview();
   }, [editorTool]);
 
-  function resetEditorState() {
+  function resetEditorPresentation() {
     clearRemovalPreview();
     setDetailLineHistory(createEditorTransactionHistory());
-    setEditedDetailDataUrl(null);
-    setManualStrokes([]);
     setFeatureLineHistory(createEditorTransactionHistory());
     setSelectedStrokeId(null);
     setDimUnselectedStrokes(false);
     setSelectionFeedback("");
-    setTraceViewport(DEFAULT_TRACE_VIEWPORT);
     setCutlineBounds(null);
     setCutlineBoundsResolved(false);
     setDetailLineBounds(null);
@@ -612,15 +573,6 @@ function App() {
     }
   }, [manualStrokes, selectedStrokeId]);
 
-  useEffect(() => {
-    if (printPreview) {
-      setShowReference(false);
-      setShowSuggestions(false);
-      setShowCutline(true);
-      setShowManualLines(true);
-    }
-  }, [printPreview]);
-
   async function generateTemplate(preset?: DetailPreset, settingsOverride?: Settings) {
     const candidate = sourceCandidate;
     const targetImage = candidate?.file ?? image;
@@ -675,6 +627,7 @@ function App() {
         inputReadiness: inputReadinessForAnalysis(body, targetSvgSourceInk !== null),
         initialDetailPngDataUrl: importedSvgDetail,
         initialProjectPalette,
+        openEditorAfterCompletion: openEditor,
         ...(candidate ? { createdAt: new Date().toISOString() } : {})
       });
       if (completed.outcome.status === "stale") return;
@@ -683,9 +636,9 @@ function App() {
       }
 
       resetAiProposalPresentation();
-      resetEditorState();
+      resetEditorPresentation();
       setColorDetailsOpen(false);
-      applyTraceModeUiState(nextSettings.templateStyle);
+      applyTraceModePresentation(nextSettings.templateStyle);
       if (candidate) {
         setImage(candidate.file);
         setSourceImageDataUrl(candidate.dataUrl);
@@ -693,15 +646,9 @@ function App() {
         setSvgLineworkDetected(candidate.lineworkDetected);
         setSourceCandidate((current) => current?.generation === candidate.generation ? null : current);
       }
-      setEditedDetailDataUrl(importedSvgDetail);
       setSvgImportedDetailDataUrl(importedSvgDetail);
-      if (preservedManualStrokes.length > 0) setManualStrokes(preservedManualStrokes);
       setSelectedPaintColorIds([]);
       setEditorOpen(openEditor || preservedManualStrokes.length > 0);
-      setShowReference(openEditor);
-      setShowSuggestions(false);
-      setShowCutline(true);
-      setShowManualLines(true);
       setEditorTool(defaultEditorToolForTraceMode(nextSettings.templateStyle));
       pendingContentFitRef.current = openEditor || preservedManualStrokes.length > 0;
       setProjectStatus("Unsaved changes");
@@ -958,20 +905,15 @@ function App() {
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(null);
     setProjectStatus("No saved project");
-    applyTraceModeUiState("paint");
+    applyTraceModePresentation("paint");
     setAdvancedOpen(false);
     setEditorOpen(false);
     setBrushSize("normal");
-    setShowReference(false);
-    setReferenceOpacity(35);
-    setShowCutline(true);
-    setShowManualLines(true);
-    setShowSuggestions(false);
     setSelectedPaintColorIds([]);
     setPaintReviewFilter("all");
     setColorDetailsOpen(false);
     setShoppingListStatus("");
-    resetEditorState();
+    resetEditorPresentation();
     setError(null);
     strokeIdRef.current = 0;
   }
@@ -1068,7 +1010,7 @@ function App() {
       return;
     }
     const next = { ...settings, [key]: value };
-    setSettings(next);
+    updateProjectSettings(next);
   }
 
   function applyProjectSessionAction(action: ProjectSessionAction<AppProjectSessionProject>) {
@@ -1110,8 +1052,8 @@ function App() {
 
   function resetTracingSettings() {
     const nextMode = traceMode === "manual" ? "manual" : "paint";
-    setSettings((current) => ({
-      ...traceModeSettings(nextMode, current),
+    updateProjectSettings({
+      ...traceModeSettings(nextMode, settings),
       threshold: defaultSettings.threshold,
       smoothing: defaultSettings.smoothing,
       speckArea: defaultSettings.speckArea,
@@ -1119,16 +1061,16 @@ function App() {
       detailLines: nextMode === "manual" ? false : defaultSettings.detailLines,
       detailCleanup: nextMode === "manual" ? 100 : defaultSettings.detailCleanup,
       templateStyle: nextMode
-    }));
-    applyTraceModeUiState(nextMode);
+    });
+    applyTraceModePresentation(nextMode);
     setAdvancedOpen(false);
     setProjectStatus(image ? "Unsaved changes" : "No saved project");
   }
 
   function applyTraceMode(mode: TraceMode) {
-    applyTraceModeUiState(mode);
+    applyTraceModePresentation(mode);
     const next = traceModeSettings(mode, settings);
-    setSettings(next);
+    updateProjectSettings(next);
   }
 
   async function applyDetailPreset(preset: DetailPreset) {
@@ -1138,8 +1080,8 @@ function App() {
       if (!shouldReplace) return;
     }
     if (!analysis || !image) {
-      applyTraceModeUiState(next.templateStyle);
-      setSettings(next);
+      applyTraceModePresentation(next.templateStyle);
+      updateProjectSettings(next);
       setProjectStatus(sourceCandidate || image ? "Unsaved changes" : "No saved project");
       return;
     }
@@ -1147,27 +1089,32 @@ function App() {
   }
 
   function switchToBlankTraceStudio() {
-    applyTraceModeUiState("manual");
-    setSettings((current) => traceModeSettings("manual", current));
-    commitFeatureLineTransaction(manualStrokes, []);
+    applyTraceModePresentation("manual");
+    const switched = applyProjectSessionAction({
+      type: "switch-to-blank-trace-studio"
+    });
+    const featureTransaction = switched.editorTransaction;
+    if (featureTransaction) {
+      setFeatureLineHistory((current) => recordEditorTransaction(current, {
+        before: featureTransaction.before.manualStrokes as TraceStroke[],
+        after: featureTransaction.after.manualStrokes as TraceStroke[]
+      }));
+    }
     setSelectedStrokeId(null);
     setSelectionFeedback("Switched to blank Trace Studio");
     setEditorOpen(true);
-    setShowReference(true);
-    setShowSuggestions(false);
-    setShowCutline(true);
-    setShowManualLines(true);
     setPrintPreview(false);
     pendingContentFitRef.current = true;
   }
 
   function updateInteriorDetail(value: number) {
-    setSettings((current) => ({ ...current, detailCleanup: value, detailLines: true, templateStyle: traceMode }));
-    setAnalysis(null);
+    applyProjectSessionAction({
+      type: "invalidate-analysis-for-detail-settings",
+      detailCleanup: value
+    });
   }
 
-  function applyTraceModeUiState(mode: TraceMode) {
-    setTraceMode(mode);
+  function applyTraceModePresentation(mode: TraceMode) {
     setAutoStarterOpen(mode !== "manual");
     setEditorTool(defaultEditorToolForTraceMode(mode));
   }
@@ -1541,7 +1488,10 @@ function App() {
       const current = { x: event.clientX, y: event.clientY };
       viewportUserModifiedRef.current = true;
       pendingContentFitRef.current = false;
-      setTraceViewport((viewport) => panViewport(viewport, { x: current.x - previous.x, y: current.y - previous.y }));
+      updateTraceViewport(panViewport(projectSessionRef.current.project.traceViewport, {
+        x: current.x - previous.x,
+        y: current.y - previous.y
+      }));
       panStartRef.current = current;
       return;
     }
@@ -1857,14 +1807,14 @@ function App() {
     const viewportSize = viewport
       ? { width: viewport.clientWidth, height: viewport.clientHeight }
       : { width: 1, height: 1 };
-    setTraceViewport((current) => zoomViewport(current, nextZoom, focus, viewportSize));
+    updateTraceViewport(zoomViewport(projectSessionRef.current.project.traceViewport, nextZoom, focus, viewportSize));
   }
 
   function resetZoom() {
     viewportUserModifiedRef.current = false;
     pendingContentFitRef.current = false;
     if (!fitTraceViewportToContent()) {
-      setTraceViewport(DEFAULT_TRACE_VIEWPORT);
+      updateTraceViewport(DEFAULT_TRACE_VIEWPORT);
     }
   }
 
@@ -1873,14 +1823,14 @@ function App() {
     pendingContentFitRef.current = false;
     const viewport = editorViewportRef.current;
     if (!viewport || !analysis) {
-      setTraceViewport({ zoom: 1, panX: 0, panY: 0 });
+      updateTraceViewport({ zoom: 1, panX: 0, panY: 0 });
       return;
     }
     const fitted = fittedTraceSize(
       { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
       { width: viewport.clientWidth, height: viewport.clientHeight }
     );
-    setTraceViewport(centerBoundsInViewport(
+    updateTraceViewport(centerBoundsInViewport(
       traceContentBounds(),
       { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
       { width: viewport.clientWidth, height: viewport.clientHeight },
@@ -1891,7 +1841,7 @@ function App() {
   function fitTraceViewportToContent() {
     const viewport = editorViewportRef.current;
     if (!viewport || !analysis) return false;
-    setTraceViewport(fitBoundsToViewport(
+    updateTraceViewport(fitBoundsToViewport(
       traceContentBounds(),
       { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
       { width: viewport.clientWidth, height: viewport.clientHeight },
@@ -2064,10 +2014,10 @@ function App() {
             <input
               type="checkbox"
               checked={settings.includeInstructionCoverPage}
-              onChange={() => setSettings((current) => ({
-                ...current,
-                includeInstructionCoverPage: !current.includeInstructionCoverPage
-              }))}
+              onChange={() => updateProjectSettings({
+                ...settings,
+                includeInstructionCoverPage: !settings.includeInstructionCoverPage
+              })}
             />
             Include instruction cover page
           </label>
@@ -2145,7 +2095,7 @@ function App() {
                         onRemove={() => setEditorTool("remove")}
                         onAdd={selectAddMissingLine}
                         onUndo={undoDetailEdit}
-                        onToggleOriginal={() => setShowReference((shown) => !shown)}
+                        onToggleOriginal={() => setShowReference(!showReference)}
                         onFit={resetZoom}
                         onAccept={acceptCleanLines}
                       />
@@ -2347,7 +2297,7 @@ function App() {
                   </div>
                   <div className="layer-controls" aria-label="Trace Studio layer visibility">
                     <label>
-                      <input type="checkbox" checked={showReference} onChange={() => setShowReference((shown) => !shown)} />
+                      <input type="checkbox" checked={showReference} onChange={() => setShowReference(!showReference)} />
                       Show original
                     </label>
                     {showReference ? (
@@ -2358,21 +2308,21 @@ function App() {
                           min={0}
                           max={100}
                           value={referenceOpacity}
-                          onChange={(event) => setReferenceOpacity(Number(event.target.value))}
+                          onChange={(event) => updateReferenceOpacity(Number(event.target.value))}
                         />
                       </label>
                     ) : null}
                     <label>
-                      <input type="checkbox" checked={showCutline} onChange={() => setShowCutline((shown) => !shown)} />
+                      <input type="checkbox" checked={showCutline} onChange={() => setShowCutline(!showCutline)} />
                       Cutline
                     </label>
                     <label>
-                      <input type="checkbox" checked={showManualLines} onChange={() => setShowManualLines((shown) => !shown)} />
+                      <input type="checkbox" checked={showManualLines} onChange={() => setShowManualLines(!showManualLines)} />
                       {traceStudioOpen ? "Manual lines" : "Editable starter lines"}
                     </label>
                     {traceStudioOpen ? (
                       <label>
-                        <input type="checkbox" checked={showSuggestions} onChange={() => setShowSuggestions((shown) => !shown)} />
+                        <input type="checkbox" checked={showSuggestions} onChange={() => setShowSuggestions(!showSuggestions)} />
                         Starter lines
                       </label>
                     ) : null}
@@ -2663,7 +2613,7 @@ function App() {
                 <details className="edit-color-details" aria-label="Edit Color Details" open={colorDetailsOpen} onToggle={(event) => setColorDetailsOpen(event.currentTarget.open)}>
                   <summary>Edit Color Details</summary>
                 <div className="paint-guide-disclosure-content">
-                  <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => setSettings((current) => ({ ...current, paletteSize: value }))} />
+                  <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => updateProjectSettings({ ...settings, paletteSize: value })} />
                   <dl className="summary-grid">
                     <div>
                       <dt>Finished size</dt>
@@ -3025,7 +2975,7 @@ function App() {
               canExportPdf={canExport}
               canExportSvg={canExportSvg}
               onNavigate={navigateToWorkflowStep}
-              onToggleCover={() => setSettings((current) => ({ ...current, includeInstructionCoverPage: !current.includeInstructionCoverPage }))}
+              onToggleCover={() => updateProjectSettings({ ...settings, includeInstructionCoverPage: !settings.includeInstructionCoverPage })}
               onToggleColorGuide={() => setExportColorGuide(!settings.includePaintGuidePage)}
               onDownloadPdf={() => void exportPdf()}
               onDownloadSvg={exportSvgLinework}
@@ -3614,12 +3564,6 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(reader.error ?? new Error("Unable to read file."));
     reader.readAsDataURL(file);
   });
-}
-
-function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
-  return typeof action === "function"
-    ? (action as (value: T) => T)(current)
-    : action;
 }
 
 async function fileFromDataUrl(dataUrl: string, name: string, type: string) {

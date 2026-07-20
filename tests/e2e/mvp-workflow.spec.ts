@@ -140,6 +140,25 @@ test("project persistence keeps one coherent revision and recovers from a visibl
 
   await page.reload();
   await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
+
+  const acceptedDetail = "data:image/png;base64,accepted-detail-preserved-for-reuse";
+  const manualProjectWithAcceptedDetail = {
+    ...downloadedProject,
+    traceMode: "manual",
+    settings: { ...downloadedProject.settings, templateStyle: "manual" },
+    editedDetailPngDataUrl: acceptedDetail
+  };
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "manual-with-accepted-detail.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(manualProjectWithAcceptedDetail))
+  });
+  await fileMenu.getByText("File", { exact: true }).click();
+  const manualDownloadPromise = page.waitForEvent("download");
+  await fileMenu.getByRole("button", { name: "Save Project" }).click();
+  const manualRoundTrip = JSON.parse(await readDownloadText(await manualDownloadPromise));
+  expect(manualRoundTrip.traceMode).toBe("manual");
+  expect(manualRoundTrip.editedDetailPngDataUrl).toBe(acceptedDetail);
 });
 
 test("Editor Transactions keep Undo and Redo artifact-only while preserving paint work", async ({ page }) => {

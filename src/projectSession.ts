@@ -34,11 +34,20 @@ import {
   type WorkflowStep,
   type WorkflowStepItem
 } from "./guidedWorkflow.ts";
-import type { Settings } from "./traceWorkflow.ts";
+import { DEFAULT_TRACE_VIEWPORT, type TraceViewport } from "./traceViewport.ts";
+import { traceModeSettings, type Settings, type TraceMode } from "./traceWorkflow.ts";
 
 const AI_PROPOSAL_ESTIMATE_USD = 0.10;
 
 export type ProjectSessionInputReadiness = "needs-simplification" | "ready-line-art";
+
+export type ProjectSessionLayerVisibility = {
+  showReference: boolean;
+  showCutline: boolean;
+  showManualLines: boolean;
+  showSuggestions: boolean;
+  printPreview: boolean;
+};
 
 export type ProjectSessionProject = {
   projectName: string;
@@ -51,10 +60,10 @@ export type ProjectSessionProject = {
   projectPalette?: readonly ProjectPaintColor[];
   workflowProgress?: WorkflowProgress;
   createdAt?: string | null;
-  traceMode?: unknown;
+  traceMode?: TraceMode;
   referenceOpacity?: number;
-  layerVisibility?: unknown;
-  traceViewport?: unknown;
+  layerVisibility?: ProjectSessionLayerVisibility;
+  traceViewport?: TraceViewport;
   cleanupChecks?: {
     cutline: boolean;
     remove: boolean;
@@ -181,6 +190,7 @@ export type ProjectCapabilities = {
   readonly analyzeSource: boolean;
   readonly regenerateAnalysis: boolean;
   readonly startNewProject: boolean;
+  readonly saveProject: boolean;
   readonly exportProject: boolean;
   readonly aiProposal: AiProposalCapabilities;
   readonly paint: PaintCapabilities;
@@ -190,9 +200,9 @@ export type ProjectCapabilities = {
 export type ProjectSessionAction<TProject extends ProjectSessionProject = ProjectSessionProject> =
   | { type: "rename-project"; projectName: string }
   | { type: "change-finished-size"; finishedHeightIn: number }
-  | { type: "hydrate-project"; project: TProject }
   | { type: "update-non-size-settings"; settings: Settings }
-  | { type: "replace-analysis"; analysis: CutoutProjectAnalysis | null; inputReadiness?: ProjectSessionInputReadiness }
+  | { type: "invalidate-analysis-for-detail-settings"; detailCleanup: number }
+  | { type: "switch-to-blank-trace-studio" }
   | { type: "begin-ai-proposal-request" }
   | { type: "cancel-ai-proposal-request" }
   | { type: "confirm-ai-proposal-request"; estimatedCostUsd: number; uploadConfirmed: boolean }
@@ -218,18 +228,15 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
   | { type: "complete-project-paint-match"; token: ProjectSessionPaintMatchToken; matches: readonly CraftPaintMatch[] }
   | { type: "fail-project-paint-match"; token: ProjectSessionPaintMatchToken; error: string }
   | {
-      type: "commit-accepted-linework";
-      editedDetailPngDataUrl: string | null;
-      manualStrokes: readonly unknown[];
-    }
-  | {
       type: "commit-editor-transaction";
       outcome: {
         editedDetailPngDataUrl: string | null;
         manualStrokes: readonly unknown[];
       };
     }
-  | { type: "update-workspace-preferences"; preferences: Partial<Pick<ProjectSessionProject, "traceMode" | "referenceOpacity" | "layerVisibility" | "traceViewport">> }
+  | { type: "set-reference-opacity"; referenceOpacity: number }
+  | { type: "set-layer-visibility"; layer: Exclude<keyof ProjectSessionLayerVisibility, "printPreview">; visible: boolean }
+  | { type: "set-trace-viewport"; traceViewport: TraceViewport }
   | { type: "set-color-guide-included"; included: boolean }
   | { type: "request-export" }
   | { type: "request-explicit-save" }
@@ -249,6 +256,7 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
       analysis: CutoutProjectAnalysis;
       initialDetailPngDataUrl: string | null;
       initialProjectPalette: readonly ProjectPaintColor[];
+      openEditorAfterCompletion: boolean;
       createdAt?: string;
     }
   | { type: "complete-project-restore"; token: ProjectPreparationToken; project: TProject; requestAutosave: boolean }
@@ -704,8 +712,51 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     });
     return applyPaintPaletteTransition(session, nextPalette);
   }
-  if (action.type === "commit-accepted-linework" || action.type === "commit-editor-transaction") {
-    const outcome = action.type === "commit-editor-transaction" ? action.outcome : action;
+  if (action.type === "invalidate-analysis-for-detail-settings") {
+    const traceMode = session.project.traceMode ?? session.project.settings.templateStyle;
+    return applyProjectTransition(session, {
+      ...session.project,
+      settings: nonSizeSettings(session.project.settings, {
+        ...session.project.settings,
+        detailCleanup: action.detailCleanup,
+        detailLines: true,
+        templateStyle: traceMode
+      }),
+      traceMode,
+      traceViewport: DEFAULT_TRACE_VIEWPORT,
+      analysis: null,
+      inputReadiness: undefined,
+      editedDetailPngDataUrl: null,
+      manualStrokes: []
+    } as TProject, { proposalChange: "invalidate" });
+  }
+  if (action.type === "switch-to-blank-trace-studio") {
+    const before = editableArtifact(session.project);
+    const after = {
+      editedDetailPngDataUrl: session.project.editedDetailPngDataUrl ?? null,
+      manualStrokes: []
+    } satisfies ProjectSessionEditableArtifact;
+    const featureLinesChanged = !sameReadonlyArray(before.manualStrokes, after.manualStrokes);
+    const lineworkChanged = session.project.traceMode !== "manual" || featureLinesChanged;
+    return applyProjectTransition(session, {
+      ...session.project,
+      settings: nonSizeSettings(session.project.settings, traceModeSettings("manual", session.project.settings)),
+      traceMode: "manual",
+      layerVisibility: traceStudioLayerVisibility(),
+      manualStrokes: after.manualStrokes,
+      ...(lineworkChanged
+        ? {
+            workflowProgress: invalidateLineworkReview(normalizedWorkflowProgress(session.project)),
+            cleanupChecks: emptyCleanupChecks()
+          }
+        : {})
+    } as TProject, {
+      proposalChange: lineworkChanged ? "invalidate" : "preserve",
+      ...(featureLinesChanged ? { editorTransaction: { before, after } } : {})
+    });
+  }
+  if (action.type === "commit-editor-transaction") {
+    const outcome = action.outcome;
     if (
       session.project.editedDetailPngDataUrl === outcome.editedDetailPngDataUrl
       && sameReadonlyArray(session.project.manualStrokes, outcome.manualStrokes)
@@ -718,12 +769,27 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       cleanupChecks: emptyCleanupChecks()
     } as TProject, { proposalChange: "invalidate" });
   }
-  if (action.type === "update-workspace-preferences") {
-    const project = { ...session.project, ...action.preferences } as TProject;
-    if (Object.entries(action.preferences).every(([key, value]) => session.project[key as keyof TProject] === value)) {
-      return unchangedTransition(session);
-    }
-    return applyProjectTransition(session, project);
+  if (action.type === "set-reference-opacity") {
+    if (session.project.referenceOpacity === action.referenceOpacity) return unchangedTransition(session);
+    return applyProjectTransition(session, {
+      ...session.project,
+      referenceOpacity: action.referenceOpacity
+    } as TProject);
+  }
+  if (action.type === "set-layer-visibility") {
+    const current = session.project.layerVisibility ?? defaultLayerVisibility(false);
+    if (current[action.layer] === action.visible && current.printPreview === false) return unchangedTransition(session);
+    return applyProjectTransition(session, {
+      ...session.project,
+      layerVisibility: { ...current, [action.layer]: action.visible, printPreview: false }
+    } as TProject);
+  }
+  if (action.type === "set-trace-viewport") {
+    if (session.project.traceViewport === action.traceViewport) return unchangedTransition(session);
+    return applyProjectTransition(session, {
+      ...session.project,
+      traceViewport: action.traceViewport
+    } as TProject);
   }
   if (action.type === "set-color-guide-included") {
     if (isWorkflowBlockedByAiProposal(session)) {
@@ -787,16 +853,16 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     if (!isCurrentPreparation(session, action.token) || action.token.operation !== "restore-project") {
       return staleTransition(session, action.token);
     }
-    const paletteValidation = validateStableProjectPaletteIds(action.project.projectPalette);
-    if (!paletteValidation.ok) {
+    const restoreValidation = validateRestoredProject(action.project);
+    if (!restoreValidation.ok) {
       const nextSession = {
         ...session,
-        operation: { status: "failed", operation: "restore-project", error: paletteValidation.message } as const
+        operation: { status: "failed", operation: "restore-project", error: restoreValidation.message } as const
       };
       return {
         session: nextSession,
         capabilities: projectCapabilities(nextSession),
-        outcome: { status: "failed", error: paletteValidation.message },
+        outcome: { status: "failed", error: restoreValidation.message },
         effects: []
       };
     }
@@ -869,6 +935,9 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       editedDetailPngDataUrl: action.initialDetailPngDataUrl,
       manualStrokes: action.mode === "replace-source" ? [] : session.project.manualStrokes,
       projectPalette: snapshotProjectPalette(action.initialProjectPalette),
+      traceMode: action.settings.templateStyle,
+      layerVisibility: defaultLayerVisibility(action.openEditorAfterCompletion),
+      traceViewport: DEFAULT_TRACE_VIEWPORT,
       workflowProgress: { activeStep: "clean", lineworkReviewed: false, colorsOutcome: "incomplete" },
       cleanupChecks: { cutline: false, remove: false, draw: false, export: false }
     } as TProject;
@@ -929,25 +998,6 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
   if (action.type === "change-finished-size" && !isValidFinishedHeight(action.finishedHeightIn)) {
     return rejectedTransition(session, "invalid-finished-size", "Finished Size must be between 6 and 96 inches.");
   }
-  if (action.type === "hydrate-project" && action.project.projectName.trim().length === 0) {
-    return rejectedTransition(session, "invalid-project-name", "Project name cannot be blank.");
-  }
-  if (action.type === "hydrate-project" && !isValidFinishedHeight(action.project.settings.finishedHeightIn)) {
-    return rejectedTransition(session, "invalid-finished-size", "Finished Size must be between 6 and 96 inches.");
-  }
-  if (action.type === "hydrate-project") {
-    const paletteValidation = validateStableProjectPaletteIds(action.project.projectPalette);
-    if (!paletteValidation.ok) {
-      return rejectedTransition(session, "invalid-project-file", paletteValidation.message);
-    }
-  }
-  if (
-    action.type === "replace-analysis" &&
-    action.analysis !== null &&
-    action.analysis.finishedHeightIn !== session.project.settings.finishedHeightIn
-  ) {
-    return rejectedTransition(session, "analysis-size-mismatch", "Analysis does not match the current Finished Size.");
-  }
   const normalizedProjectName = action.type === "rename-project" ? action.projectName.trim() : null;
   if (action.type === "rename-project" && normalizedProjectName === session.project.projectName) {
     return unchangedTransition(session);
@@ -955,13 +1005,6 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
   if (action.type === "change-finished-size" && action.finishedHeightIn === session.project.settings.finishedHeightIn) {
     return unchangedTransition(session);
   }
-  if (action.type === "hydrate-project" && action.project === session.project) {
-    return unchangedTransition(session);
-  }
-  if (action.type === "replace-analysis" && action.analysis === session.project.analysis) {
-    return unchangedTransition(session);
-  }
-
   const project = action.type === "rename-project"
     ? { ...session.project, projectName: normalizedProjectName as string } as TProject
     : action.type === "change-finished-size"
@@ -975,32 +1018,13 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
           ? resizeAnalysisForFinishedHeight(session.project.analysis, action.finishedHeightIn)
           : null
         } as TProject
-      : action.type === "hydrate-project"
-        ? normalizeProjectWorkflow(action.project)
-        : action.type === "update-non-size-settings"
-          ? {
-              ...session.project,
-              settings: {
-                ...action.settings,
-                finishedHeightIn: session.project.settings.finishedHeightIn,
-                includePaintGuidePage: session.project.settings.includePaintGuidePage
-              }
-            } as TProject
-          : {
-              ...session.project,
-              analysis: action.analysis,
-              inputReadiness: action.analysis === null
-                ? undefined
-                : action.inputReadiness ?? deriveInputReadiness(action.analysis)
-            } as TProject;
+      : {
+          ...session.project,
+          settings: nonSizeSettings(session.project.settings, action.settings),
+          traceMode: action.settings.templateStyle
+        } as TProject;
   return applyProjectTransition(session, project, {
-    proposalChange: (
-      action.type === "change-finished-size"
-      || action.type === "hydrate-project"
-      || action.type === "replace-analysis"
-    )
-      ? "invalidate"
-      : "preserve"
+    proposalChange: action.type === "change-finished-size" ? "invalidate" : "preserve"
   });
 }
 
@@ -1202,6 +1226,7 @@ function projectCapabilities<TProject extends ProjectSessionProject>(
     analyzeSource: !preparing,
     regenerateAnalysis: !preparing && session.project.analysis !== null && session.project.sourceImage != null,
     startNewProject: true,
+    saveProject: isPersistableProject(session.project),
     exportProject: canExportProject(session),
     aiProposal: Object.freeze({
       canBeginRequest: canBeginAiProposalRequest(session),
@@ -1503,6 +1528,39 @@ function autosaveEffect<TProject extends ProjectSessionProject>(
   session: ProjectSession<TProject>
 ): ProjectSessionEffect<TProject> {
   return { type: "request-autosave", revision: session.revision, project: session.project };
+}
+
+function nonSizeSettings(current: Settings, next: Settings): Settings {
+  return {
+    ...next,
+    finishedHeightIn: current.finishedHeightIn,
+    includePaintGuidePage: current.includePaintGuidePage
+  };
+}
+
+function defaultLayerVisibility(showReference: boolean): ProjectSessionLayerVisibility {
+  return {
+    showReference,
+    showCutline: true,
+    showManualLines: true,
+    showSuggestions: false,
+    printPreview: false
+  };
+}
+
+function traceStudioLayerVisibility(): ProjectSessionLayerVisibility {
+  return defaultLayerVisibility(true);
+}
+
+function validateRestoredProject(project: ProjectSessionProject): { ok: true } | { ok: false; message: string } {
+  if (project.projectName.trim().length === 0) return { ok: false, message: "Project name cannot be blank." };
+  if (!isValidFinishedHeight(project.settings.finishedHeightIn)) {
+    return { ok: false, message: "Finished Size must be between 6 and 96 inches." };
+  }
+  if (project.analysis && project.analysis.finishedHeightIn !== project.settings.finishedHeightIn) {
+    return { ok: false, message: "Analysis does not match the restored Finished Size." };
+  }
+  return validateStableProjectPaletteIds(project.projectPalette);
 }
 
 function isValidFinishedHeight(value: number) {
