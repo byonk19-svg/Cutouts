@@ -75,6 +75,22 @@ class NormalizeGeneratedProposalTest(unittest.TestCase):
         self.assertEqual(detail.getpixel((42, 50))[3], 255)
         self.assertGreater(proposal.suppressed_pixel_count, 0)
 
+    def test_rejects_linework_materially_displaced_from_the_protected_cutline(self) -> None:
+        generated = Image.new("RGB", (200, 200), "white")
+        draw = ImageDraw.Draw(generated)
+        draw.line((138, 85, 162, 115), fill="black", width=3)
+        draw.line((138, 115, 162, 85), fill="black", width=3)
+
+        proposal = normalize_generated_proposal(
+            png_bytes(generated),
+            expected_generated_size=(200, 200),
+            preview_size=(200, 200),
+            protected_cutline_png=protected_cutline((200, 200)),
+        )
+
+        self.assertEqual(proposal.status, "review-only")
+        self.assertIn("misaligned", proposal.validation_issues)
+
     def test_invalid_outputs_are_review_only(self) -> None:
         cases: list[tuple[str, bytes, tuple[int, int], bytes, str]] = []
         cases.append(("malformed", b"not-an-image", (100, 100), protected_cutline(), "malformed"))
@@ -114,6 +130,7 @@ class GenerateLineworkProposalTest(unittest.TestCase):
         self.assertIn("complete foreground composition", prompt)
         self.assertIn("major foreground prop", prompt)
         self.assertIn("do not omit", prompt)
+        self.assertIn("same positions and scale", prompt)
 
     @patch("backend.cutout_studio.ai_linework.urlopen")
     def test_unconfirmed_request_is_rejected_before_provider_transport(self, mock_urlopen: MagicMock) -> None:
