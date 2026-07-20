@@ -98,7 +98,7 @@ const analysis = {
     settings,
     traceMode: "manual",
     analysis,
-    editedDetailPngDataUrl: null,
+    editedDetailPngDataUrl: "data:image/png;base64,accepted-detail-preserved-for-reuse",
     manualStrokes: strokes,
     paintGuideEdits: [
       { hex: "#f1ce2d", label: "Coat", note: "main raincoat body", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" },
@@ -135,7 +135,7 @@ const analysis = {
   assertEqual(project.paintGuideEdits.length, 3, "project serialization should include paint guide edits");
   assertEqual(project.analysis.outerLinePngDataUrl, analysis.outerLinePngDataUrl, "project should keep the cutline image");
   assertEqual(project.analysis.detailLinePngDataUrl, analysis.detailLinePngDataUrl, "project should keep the suggestion layer image");
-  assertEqual(project.editedDetailPngDataUrl, null, "manual projects should not store an edited raster detail layer");
+  assertEqual(project.editedDetailPngDataUrl, "data:image/png;base64,accepted-detail-preserved-for-reuse", "manual projects should preserve accepted Detail Lines for later reuse");
 
   project.projectName = "Coraline yard cutout";
   project.settings.finishedHeightIn = 48;
@@ -155,6 +155,7 @@ const analysis = {
   assertEqual(restored.manualStrokes[0].points[0].x, 10, "round trip should preserve stroke x coordinate");
   assertEqual(restored.manualStrokes[0].points[1].y, 20, "round trip should preserve stroke y coordinate");
   assertEqual(restored.manualStrokes[1].width, 20, "round trip should preserve stroke width");
+  assertEqual(restored.editedDetailPngDataUrl, "data:image/png;base64,accepted-detail-preserved-for-reuse", "manual project round trip should preserve accepted Detail Lines");
   assertEqual(restored.paintGuideEdits[0].label, "Coat", "round trip should preserve paint labels");
   assertEqual(restored.projectPalette[1].label, "Hair", "round trip should preserve project palette labels");
   assertEqual(restored.projectPalette[1].locked, true, "round trip should preserve seeded manual palette locks");
@@ -382,6 +383,91 @@ const analysis = {
     failed = true;
   }
   assert(failed, "import should reject unknown project schema versions");
+}
+
+{
+  const duplicatePaletteProject = JSON.parse(serializeCutoutProject(createCutoutProjectSnapshot({
+    projectName: "Duplicate ids",
+    createdAt: "2026-07-07T10:00:00.000Z",
+    updatedAt: "2026-07-07T10:00:00.000Z",
+    sourceImage: { name: "source.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,source" },
+    settings,
+    traceMode: "manual",
+    analysis,
+    manualStrokes: [],
+    referenceOpacity: 35,
+    layerVisibility: {
+      showReference: false,
+      showCutline: true,
+      showManualLines: true,
+      showSuggestions: false,
+      printPreview: false
+    },
+    traceViewport: DEFAULT_TRACE_VIEWPORT
+  })));
+  duplicatePaletteProject.projectPalette = [
+    { ...duplicatePaletteProject.projectPalette[0], id: "shared-id" },
+    {
+      ...duplicatePaletteProject.projectPalette[0],
+      id: "shared-id",
+      hex: "#0c143a",
+      label: "Hair",
+      selectedMatchId: null,
+      manualOverride: "",
+      source: "manual"
+    }
+  ];
+
+  let duplicateRestoreRejected = false;
+  try {
+    restoreCutoutProject(duplicatePaletteProject);
+  } catch {
+    duplicateRestoreRejected = true;
+  }
+  assert(duplicateRestoreRejected, "restore should reject duplicate palette IDs");
+}
+
+{
+  let blankIdRejected = false;
+  try {
+    createCutoutProjectSnapshot({
+      projectName: "Blank ids",
+      createdAt: "2026-07-07T10:00:00.000Z",
+      updatedAt: "2026-07-07T10:00:00.000Z",
+      sourceImage: { name: "source.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,source" },
+      settings,
+      traceMode: "manual",
+      analysis,
+      manualStrokes: [],
+      projectPalette: [
+        {
+          id: "   ",
+          hex: "#f1ce2d",
+          label: "Coat",
+          note: "",
+          included: true,
+          selectedMatchId: null,
+          manualOverride: "",
+          coverage: 0.22,
+          matches: [],
+          locked: false,
+          source: "detected"
+        }
+      ],
+      referenceOpacity: 35,
+      layerVisibility: {
+        showReference: false,
+        showCutline: true,
+        showManualLines: true,
+        showSuggestions: false,
+        printPreview: false
+      },
+      traceViewport: DEFAULT_TRACE_VIEWPORT
+    });
+  } catch {
+    blankIdRejected = true;
+  }
+  assert(blankIdRejected, "snapshot creation should reject blank palette IDs");
 }
 
 {

@@ -272,6 +272,11 @@ test("an existing review milestone cannot bypass pending proposal gating", async
   const height = Number(await canvas.getAttribute("height"));
   let releaseResponse: (() => void) | undefined;
   const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+  let exportRequestCount = 0;
+  await page.route("**/api/export", (route) => {
+    exportRequestCount += 1;
+    return route.abort();
+  });
   await page.route("**/api/generate-linework", async (route) => {
     await responseGate;
     await route.fulfill({ json: {
@@ -288,10 +293,16 @@ test("an existing review milestone cannot bypass pending proposal gating", async
   await expect(proposalCard.getByRole("status")).toBeVisible();
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toBeDisabled();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toBeDisabled();
+  await forceGuidedWorkflowClick(guidedWorkflow.getByRole("button", { name: /Export/ }));
+  await expect(page.getByLabel("Export workspace")).toHaveCount(0);
+  expect(exportRequestCount).toBe(0);
   releaseResponse?.();
   await expect(proposalCard).toContainText("Ready for visual review");
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toBeDisabled();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toBeDisabled();
+  await forceGuidedWorkflowClick(guidedWorkflow.getByRole("button", { name: /Export/ }));
+  await expect(page.getByLabel("Export workspace")).toHaveCount(0);
+  expect(exportRequestCount).toBe(0);
   await proposalCard.getByRole("button", { name: "Reject proposal" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toBeEnabled();
 });
@@ -345,6 +356,55 @@ test("a proposal response is ignored after the source project is replaced", asyn
   await page.waitForTimeout(500);
   await expect(proposalCard).toContainText("Needs Simplification");
   await expect(proposalCard).not.toContainText("Ready for visual review");
+});
+
+test("a proposal response is ignored after accepted Detail Lines change while the request is in flight", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  const source = readFileSync("backend/tests/fixtures/coraline/coraline-best-clean-outline.png");
+  const normalizedDetail = readFileSync("backend/tests/fixtures/coraline/coraline-detail-layer.png");
+  await page.getByLabel("Source image").setInputFiles({ name: "edited-during-request.png", mimeType: "image/png", buffer: source });
+  await page.getByRole("button", { name: "Generate Template" }).click();
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith("/api/analyze") && response.request().method() === "POST"),
+    moreTools.getByLabel("Image type").getByRole("button", { name: "Rendered image" }).click()
+  ]);
+
+  const canvas = page.getByLabel("Editable interior detail lines");
+  const width = Number(await canvas.getAttribute("width"));
+  const height = Number(await canvas.getAttribute("height"));
+  let releaseResponse: (() => void) | undefined;
+  const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+  await page.route("**/api/generate-linework", async (route) => {
+    await responseGate;
+    await route.fulfill({ json: {
+      status: "pending-review", validationIssues: [], canReplaceAcceptedDetail: false,
+      proposalPreviewPngDataUrl: `data:image/png;base64,${source.toString("base64")}`,
+      proposalDetailPngDataUrl: `data:image/png;base64,${normalizedDetail.toString("base64")}`,
+      inkCoverage: 0.04, suppressedPixelCount: 21, previewWidthPx: width, previewHeightPx: height,
+      model: "gpt-image-1.5", provider: "openai", estimatedCostUsd: 0.1
+    } });
+  });
+
+  const proposalCard = page.getByLabel("AI-assisted linework proposal");
+  await proposalCard.getByRole("button", { name: "Request AI proposal" }).click();
+  await proposalCard.getByRole("button", { name: "Confirm upload and request one proposal" }).click();
+  await expect(proposalCard.getByRole("status")).toBeVisible();
+
+  const acceptedBefore = await canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Add Missing Line" }).click();
+  await drawStroke(canvas, [[0.38, 0.38], [0.48, 0.42], [0.58, 0.38]]);
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(acceptedBefore);
+  const acceptedAfter = await canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await expect(proposalCard).toContainText("Needs Simplification");
+
+  releaseResponse?.();
+  await page.waitForTimeout(500);
+  await expect(proposalCard).toContainText("Needs Simplification");
+  await expect(proposalCard).not.toContainText("Ready for visual review");
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(acceptedAfter);
 });
 
 test("exports only accepted AI Detail Lines to SVG and PDF", async ({ page }) => {
@@ -418,4 +478,36 @@ test("exports only accepted AI Detail Lines to SVG and PDF", async ({ page }) =>
 async function savedProject(page: import("@playwright/test").Page) {
   await expect.poll(() => page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"))).not.toBeNull();
   return page.evaluate(() => JSON.parse(localStorage.getItem("cutout-studio:auto-save:v1") ?? "{}"));
+}
+
+async function drawStroke(
+  canvas: import("@playwright/test").Locator,
+  points: Array<[number, number]>
+) {
+  const [first, ...rest] = points;
+  await canvas.hover({ position: await canvasLocalPoint(canvas, first[0], first[1]) });
+  await canvas.page().mouse.down();
+  for (const [x, y] of rest) {
+    await canvas.hover({ position: await canvasLocalPoint(canvas, x, y) });
+  }
+  await canvas.page().mouse.up();
+}
+
+async function canvasLocalPoint(
+  canvas: import("@playwright/test").Locator,
+  xFraction: number,
+  yFraction: number
+) {
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("Detail Line canvas was not visible.");
+  return { x: box.width * xFraction, y: box.height * yFraction };
+}
+
+async function forceGuidedWorkflowClick(button: import("@playwright/test").Locator) {
+  await button.evaluate((element) => {
+    const wasDisabled = element.hasAttribute("disabled");
+    element.removeAttribute("disabled");
+    (element as HTMLButtonElement).click();
+    if (wasDisabled) element.setAttribute("disabled", "");
+  });
 }

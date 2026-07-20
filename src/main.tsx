@@ -6,38 +6,46 @@ import {
   cleanedProjectNameFromFileName,
   createCutoutProjectSnapshot,
   projectFileName,
-  resizeAnalysisForFinishedHeight,
   restoreCutoutProject,
   serializeCutoutProject,
   type CutoutProject,
   type CutoutProjectAnalysis
 } from "./cutoutProject";
+import {
+  createProjectSessionPersistenceCoordinator,
+  createProjectSession,
+  projectSessionView,
+  transitionProjectSession,
+  validateCraftPaintMatches,
+  type ProjectSession,
+  type ProjectSessionAction,
+  type ProjectSessionAiProposalResult,
+  type ProjectSessionAiProposalState,
+  type ProjectSessionEffect,
+  type ProjectSessionInputReadiness,
+  type ProjectPersistenceSnapshot,
+  type ProjectSessionSourceImage
+} from "./projectSession.ts";
 import { previewDetailSegment, previewFirstDetailSegment, removeDetailSegmentPreview, type DetailSegmentPreview } from "./detailEditor";
 import {
-  acceptAiProposalReview,
-  applyAcceptedAiProposal,
-  beginAiProposalReview,
-  canAcceptAiProposal,
-  rejectAiProposalReview,
-  reviewAiProposalView,
-  type AiProposalReview,
-  type AiProposalReviewView
-} from "./aiLineworkReview";
+  createEditorTransactionHistory,
+  recordEditorTransaction,
+  redoEditorTransaction,
+  undoEditorTransaction,
+  type EditorTransactionHistory
+} from "./editorTransactions.ts";
+import { type AiProposalReview, type AiProposalReviewView } from "./aiLineworkReview";
 import {
-  addProjectPaintColor,
   filterPaintGuideEntries,
   groupShoppingListItems,
   isValidHexColor,
   matchConfidenceLabel,
   matchDisplayName,
-  mergeProjectPaintColors,
   paintGuideEditsFromProjectPalette,
   paintGuideEntriesForProjectPalette,
   paintSanityWarnings,
-  removeProjectPaintColor,
   seedProjectPaletteFromDetected,
   shoppingListText,
-  updateProjectPaintColor,
   type PaintGuideEntry,
   type PaintReviewFilter,
   type ProjectPaintColor
@@ -66,12 +74,6 @@ import { buildTraceQualityReview } from "./traceQuality";
 import { isSvgFile, prepareSvgFastPathUpload, svgInkForPreview } from "./svgFastPath";
 import {
   DEFAULT_WORKFLOW_PROGRESS,
-  completeColorReview,
-  completeLineworkReview,
-  invalidateLineworkReview,
-  navigateWorkflow,
-  resetWorkflowForSource,
-  workflowStepItems,
   type WorkflowProgress,
   type WorkflowStep,
   type WorkflowStepItem
@@ -111,23 +113,37 @@ type EditorTool = "erase" | "draw" | "smoothDraw" | "remove" | "select" | "pan";
 type BrushSize = "thin" | "normal" | "bold";
 type CleanupStep = "cutline" | "remove" | "draw" | "export";
 type Analysis = CutoutProjectAnalysis;
-type PaintGuidePatch = Partial<Omit<ProjectPaintColor, "id" | "source">>;
-type AiProposalPhase = "idle" | "confirming" | "requesting" | "ready" | "failed";
-const AI_PROPOSAL_ESTIMATE_USD = 0.10;
-type AiProposalResponse = {
-  status: "pending-review" | "review-only";
-  validationIssues: string[];
-  canReplaceAcceptedDetail: false;
-  proposalPreviewPngDataUrl: string;
-  proposalDetailPngDataUrl: string;
-  inkCoverage: number;
-  suppressedPixelCount: number;
-  previewWidthPx: number;
-  previewHeightPx: number;
-  model: string;
-  provider: string;
-  estimatedCostUsd: number;
+type AppProjectSessionProject = {
+  projectName: string;
+  settings: Settings;
+  sourceImage: ProjectSessionSourceImage | null;
+  analysis: Analysis | null;
+  inputReadiness?: ProjectSessionInputReadiness;
+  editedDetailPngDataUrl: string | null;
+  manualStrokes: TraceStroke[];
+  projectPalette: ProjectPaintColor[];
+  workflowProgress: WorkflowProgress;
+  cleanupChecks: Record<CleanupStep, boolean>;
+  createdAt: string | null;
+  traceMode: TraceMode;
+  referenceOpacity: number;
+  layerVisibility: CutoutProject["layerVisibility"];
+  traceViewport: TraceViewport;
 };
+type AppProjectSessionState = {
+  session: ProjectSession<AppProjectSessionProject>;
+  pendingEffects: readonly ProjectSessionEffect<AppProjectSessionProject>[];
+};
+type PaintGuidePatch = Partial<Omit<ProjectPaintColor, "id" | "source">>;
+type PreparedSourceCandidate = {
+  generation: number;
+  projectName: string;
+  file: File;
+  dataUrl: string;
+  sourceInkDataUrl: string | null;
+  lineworkDetected: boolean;
+};
+const AI_PROPOSAL_ESTIMATE_USD = 0.10;
 type ProjectStatus = "No saved project" | "Unsaved changes" | "Auto-saved" | "Saved" | "Restored auto-save" | "Project opened" | "Project export failed" | "Project import failed" | "Auto-save failed";
 type StrokeDragState = {
   mode: "move" | "point";
@@ -135,6 +151,7 @@ type StrokeDragState = {
   pointIndex?: number;
   startPoint: TracePoint;
   originalStrokes: TraceStroke[];
+  previewStrokes?: TraceStroke[];
   moved: boolean;
 };
 
@@ -153,29 +170,137 @@ const defaultSettings: Settings = {
   includePaintGuidePage: true
 };
 
+function cutoutProjectFromPersistenceSnapshot(
+  snapshot: ProjectPersistenceSnapshot<AppProjectSessionProject>
+): CutoutProject {
+  const project = snapshot.project;
+  if (!project.sourceImage || !project.analysis) {
+    throw new Error("The project is not ready to save.");
+  }
+  const now = new Date().toISOString();
+  return createCutoutProjectSnapshot({
+    projectName: project.projectName,
+    createdAt: project.createdAt ?? now,
+    updatedAt: now,
+    sourceImage: project.sourceImage,
+    settings: project.settings,
+    traceMode: project.traceMode,
+    analysis: project.analysis,
+    editedDetailPngDataUrl: project.editedDetailPngDataUrl,
+    manualStrokes: project.manualStrokes,
+    projectPalette: project.projectPalette,
+    paintGuideEdits: paintGuideEditsFromProjectPalette(project.projectPalette),
+    referenceOpacity: project.referenceOpacity,
+    layerVisibility: { ...project.layerVisibility, printPreview: false },
+    traceViewport: project.traceViewport,
+    cleanupChecks: project.cleanupChecks,
+    workflowProgress: project.workflowProgress
+  });
+}
+
+function appProjectFromCutoutProject(project: CutoutProject): AppProjectSessionProject {
+  return {
+    projectName: project.projectName,
+    settings: project.settings,
+    sourceImage: project.sourceImage,
+    analysis: project.analysis,
+    inputReadiness: inputReadinessForAnalysis(project.analysis, false),
+    editedDetailPngDataUrl: project.editedDetailPngDataUrl,
+    manualStrokes: project.manualStrokes,
+    projectPalette: project.projectPalette,
+    workflowProgress: project.workflowProgress,
+    cleanupChecks: project.cleanupChecks,
+    createdAt: project.createdAt,
+    traceMode: project.traceMode,
+    referenceOpacity: project.referenceOpacity,
+    layerVisibility: { ...project.layerVisibility, printPreview: false },
+    traceViewport: project.traceViewport
+  };
+}
+
 function App() {
   const [image, setImage] = useState<File | null>(null);
   const [sourceImageDataUrl, setSourceImageDataUrl] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState("Cutout Project");
-  const [projectCreatedAt, setProjectCreatedAt] = useState<string | null>(null);
+  const [projectSessionState, setProjectSessionState] = useState<AppProjectSessionState>(() => ({
+    session: createProjectSession({
+      projectName: "Cutout Project",
+      settings: defaultSettings,
+      sourceImage: null,
+      analysis: null,
+      editedDetailPngDataUrl: null,
+      manualStrokes: [],
+      projectPalette: [],
+      workflowProgress: DEFAULT_WORKFLOW_PROGRESS,
+      cleanupChecks: { cutline: false, remove: false, draw: false, export: false },
+      createdAt: null,
+      traceMode: "paint",
+      referenceOpacity: 35,
+      layerVisibility: {
+        showReference: false,
+        showCutline: true,
+        showManualLines: true,
+        showSuggestions: false,
+        printPreview: false
+      },
+      traceViewport: DEFAULT_TRACE_VIEWPORT
+    }),
+    pendingEffects: []
+  }));
+  const projectSessionRef = useRef(projectSessionState.session);
+  const projectSession = projectSessionState.session;
+  const {
+    projectName,
+    settings,
+    analysis,
+    editedDetailPngDataUrl: editedDetailDataUrl,
+    manualStrokes,
+    projectPalette,
+    cleanupChecks,
+    traceMode,
+    referenceOpacity,
+    layerVisibility: { showReference, showCutline, showManualLines, showSuggestions },
+    traceViewport
+  } = projectSession.project;
+  const sessionView = projectSessionView(projectSession);
+  const projectCapabilities = sessionView.capabilities;
+  const aiProposalState = sessionView.aiProposal;
+  const aiProposal = aiProposalState.status === "ready" ? aiProposalState.proposal : null;
+  const aiProposalReview = aiProposalState.status === "ready" ? aiProposalState.review : null;
+  const aiProposalError = aiProposalState.status === "failed" ? aiProposalState.error : null;
+  const workflowProgress = projectCapabilities.guidedWorkflow.progress;
+  const [projectNameDraft, setProjectNameDraft] = useState(projectName);
+  const updateProjectSettings = (nextSettings: Settings) => applyProjectSessionAction({
+    type: "update-non-size-settings",
+    settings: nextSettings
+  });
+  const updateReferenceOpacity = (referenceOpacity: number) => applyProjectSessionAction({
+    type: "set-reference-opacity",
+    referenceOpacity
+  });
+  const updateLayerVisibility = (
+    key: "showReference" | "showCutline" | "showManualLines" | "showSuggestions",
+    value: boolean
+  ) => {
+    applyProjectSessionAction({ type: "set-layer-visibility", layer: key, visible: value });
+  };
+  const setShowReference = (value: boolean) => updateLayerVisibility("showReference", value);
+  const setShowCutline = (value: boolean) => updateLayerVisibility("showCutline", value);
+  const setShowManualLines = (value: boolean) => updateLayerVisibility("showManualLines", value);
+  const setShowSuggestions = (value: boolean) => updateLayerVisibility("showSuggestions", value);
+  const updateTraceViewport = (traceViewport: TraceViewport) => applyProjectSessionAction({
+    type: "set-trace-viewport",
+    traceViewport
+  });
+  const [sourceCandidate, setSourceCandidate] = useState<PreparedSourceCandidate | null>(null);
+  const [sourceReadPending, setSourceReadPending] = useState(false);
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>("No saved project");
-  const [autosavePaused, setAutosavePaused] = useState(false);
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
-  const [traceMode, setTraceMode] = useState<TraceMode>("paint");
   const [autoStarterOpen, setAutoStarterOpen] = useState(true);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTool, setEditorTool] = useState<EditorTool>("remove");
   const [brushSize, setBrushSize] = useState<BrushSize>("normal");
-  const [showReference, setShowReference] = useState(false);
-  const [referenceOpacity, setReferenceOpacity] = useState(35);
-  const [showCutline, setShowCutline] = useState(true);
-  const [showManualLines, setShowManualLines] = useState(true);
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [printPreview, setPrintPreview] = useState(false);
   const [editableDetailLinesPresent, setEditableDetailLinesPresent] = useState(false);
-  const [traceViewport, setTraceViewport] = useState<TraceViewport>(DEFAULT_TRACE_VIEWPORT);
   const [cutlineBounds, setCutlineBounds] = useState<TraceBounds | null>(null);
   const [cutlineBoundsResolved, setCutlineBoundsResolved] = useState(false);
   const [detailLineBounds, setDetailLineBounds] = useState<TraceBounds | null>(null);
@@ -183,34 +308,23 @@ function App() {
   const [selectedStrokeId, setSelectedStrokeId] = useState<string | null>(null);
   const [dimUnselectedStrokes, setDimUnselectedStrokes] = useState(false);
   const [selectionFeedback, setSelectionFeedback] = useState("");
-  const [cleanupChecks, setCleanupChecks] = useState<Record<CleanupStep, boolean>>({
-    cutline: false,
-    remove: false,
-    draw: false,
-    export: false
-  });
-  const [workflowProgress, setWorkflowProgress] = useState<WorkflowProgress>(DEFAULT_WORKFLOW_PROGRESS);
-  const [manualStrokes, setManualStrokes] = useState<TraceStroke[]>([]);
-  const [projectPalette, setProjectPalette] = useState<ProjectPaintColor[]>([]);
   const [newPaintHex, setNewPaintHex] = useState("#f1c7a5");
   const [newPaintLabel, setNewPaintLabel] = useState("Skin tone");
+  const [paintHexDrafts, setPaintHexDrafts] = useState<Record<string, string>>({});
   const [selectedPaintColorIds, setSelectedPaintColorIds] = useState<string[]>([]);
   const [paintReviewFilter, setPaintReviewFilter] = useState<PaintReviewFilter>("all");
   const [colorDetailsOpen, setColorDetailsOpen] = useState(false);
   const [shoppingListStatus, setShoppingListStatus] = useState("");
-  const [manualHistory, setManualHistory] = useState<TraceStroke[][]>([]);
-  const [manualRedoHistory, setManualRedoHistory] = useState<TraceStroke[][]>([]);
-  const [history, setHistory] = useState<string[]>([]);
-  const [redoHistory, setRedoHistory] = useState<string[]>([]);
-  const [editedDetailDataUrl, setEditedDetailDataUrl] = useState<string | null>(null);
+  const [featureLineHistory, setFeatureLineHistory] = useState<EditorTransactionHistory<TraceStroke[]>>(
+    createEditorTransactionHistory
+  );
+  const [detailLineHistory, setDetailLineHistory] = useState<EditorTransactionHistory<string>>(
+    createEditorTransactionHistory
+  );
   const [svgSourceInkDataUrl, setSvgSourceInkDataUrl] = useState<string | null>(null);
   const [svgImportedDetailDataUrl, setSvgImportedDetailDataUrl] = useState<string | null>(null);
   const [svgLineworkDetected, setSvgLineworkDetected] = useState(false);
-  const [aiProposalPhase, setAiProposalPhase] = useState<AiProposalPhase>("idle");
-  const [aiProposal, setAiProposal] = useState<AiProposalResponse | null>(null);
-  const [aiProposalReview, setAiProposalReview] = useState<AiProposalReview | null>(null);
   const [aiProposalReviewView, setAiProposalReviewView] = useState<AiProposalReviewView>("ai-lines-only");
-  const [aiProposalError, setAiProposalError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -229,32 +343,48 @@ function App() {
   const lastPointRef = useRef<TracePoint | null>(null);
   const smoothAnchorRef = useRef<TracePoint | null>(null);
   const draftStrokeRef = useRef<TraceStroke | null>(null);
+  const rasterTransactionBeforeRef = useRef<string | null>(null);
   const strokeDragRef = useRef<StrokeDragState | null>(null);
   const strokeIdRef = useRef(0);
   const pendingContentFitRef = useRef(false);
   const viewportUserModifiedRef = useRef(false);
-  const aiProposalRequestStartedRef = useRef(false);
-  const aiProposalRequestGenerationRef = useRef(0);
+  const sourceSelectionGenerationRef = useRef(0);
   const traceContentBoundsRef = useRef<TraceBounds | null>(null);
-  const reviewedLineworkRef = useRef<{
-    manualStrokes: TraceStroke[];
-    editedDetailDataUrl: string | null;
-    traceMode: TraceMode;
-  } | null>(null);
   const removalPreviewRef = useRef<DetailSegmentPreview | null>(null);
   const [removalPreviewCount, setRemovalPreviewCount] = useState(0);
+  const persistenceCoordinatorRef = useRef<ReturnType<typeof createProjectSessionPersistenceCoordinator<AppProjectSessionProject>> | null>(null);
+  if (persistenceCoordinatorRef.current === null) {
+    persistenceCoordinatorRef.current = createProjectSessionPersistenceCoordinator<AppProjectSessionProject>({
+      debounceMs: 450,
+      schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      cancel: (handle) => window.clearTimeout(handle as number),
+      serialize: (snapshot) => serializeCutoutProject(cutoutProjectFromPersistenceSnapshot(snapshot)),
+      writeAutosave: (serialized) => localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serialized),
+      downloadProject: (serialized, snapshot) => {
+        const blob = new Blob([serialized], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = projectFileName(snapshot.project.projectName);
+        link.click();
+        URL.revokeObjectURL(url);
+      },
+      clearAutosave: () => localStorage.removeItem(CUTOUT_AUTOSAVE_KEY)
+    });
+  }
 
-  const canAnalyze = image !== null && !busy;
-  const canExport = image !== null && analysis !== null && !busy;
-  const canSaveProject = image !== null && sourceImageDataUrl !== null && analysis !== null && !busy;
-  const canExportSvg = analysis !== null && analysis.outerCutPath.trim().length > 0 && !busy;
+  const selectedImage = sourceCandidate?.file ?? image;
+  const canAnalyze = selectedImage !== null && !busy && !sourceReadPending && projectCapabilities.analyzeSource;
+  const canExport = image !== null && !busy && projectCapabilities.exportProject;
+  const canSaveProject = !busy && projectCapabilities.saveProject;
+  const canExportSvg = !busy && projectCapabilities.exportProject;
   const selectedDetailPreset = detailPresetFromTraceMode(traceMode);
   const traceStudioOpen = traceMode === "manual";
   const selectedStroke = selectedStrokeId ? manualStrokes.find((stroke) => stroke.id === selectedStrokeId) ?? null : null;
   const selectedStrokeSummary = selectedTraceStrokeSummary(manualStrokes, selectedStrokeId);
-  const undoDisabled = traceStudioOpen ? manualHistory.length === 0 : history.length === 0;
-  const redoDisabled = traceStudioOpen ? manualRedoHistory.length === 0 : redoHistory.length === 0;
-  const primaryTraceActionLabel = traceActionLabel({ image, analysis, busy, traceMode });
+  const undoDisabled = traceStudioOpen ? featureLineHistory.undo.length === 0 : detailLineHistory.undo.length === 0;
+  const redoDisabled = traceStudioOpen ? featureLineHistory.redo.length === 0 : detailLineHistory.redo.length === 0;
+  const primaryTraceActionLabel = traceActionLabel({ image: selectedImage, analysis, busy, traceMode });
   const paintGuideEntries = paintGuideEntriesForProjectPalette(projectPalette);
   const paintWarnings = paintSanityWarnings(paintGuideEntries);
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
@@ -271,21 +401,12 @@ function App() {
       printPreview
     })
     : null;
-  const aiProposalBlocksAdvancement = aiProposalPhase === "requesting" || aiProposalReview?.decision === "pending";
-  const guidedWorkflowSteps = workflowStepItems(workflowProgress, { hasAnalysis: analysis !== null }).map((item) => (
-    aiProposalBlocksAdvancement && (item.step === "colors" || item.step === "export")
-      ? { ...item, status: "locked" as const, clickable: false }
-      : item
-  ));
+  const guidedWorkflowSteps = projectCapabilities.guidedWorkflow.steps;
   const uploadStepActive = workflowProgress.activeStep === "upload";
   const cleanStepActive = workflowProgress.activeStep === "clean";
   const colorsStepActive = workflowProgress.activeStep === "colors";
   const exportStepActive = workflowProgress.activeStep === "export";
-  const needsAiSimplification = Boolean(
-    analysis?.outerCutPath.trim()
-    && analysis.traceQuality?.detailExtractionModeUsed === "rendered"
-    && !svgLineworkDetected
-  );
+  const showAiProposal = aiProposalState.status !== "idle" || projectCapabilities.aiProposal.canBeginRequest;
   const duplicatePaintSuggestion = groupDuplicatePaintPurchases(paintGuideEntries).find((group) => group.swatchNumbers.length > 1);
 
   useEffect(() => {
@@ -301,46 +422,20 @@ function App() {
 
   useEffect(() => {
     if (analysis) return;
-    resetEditorState();
+    resetEditorPresentation();
   }, [analysis]);
 
   useEffect(() => {
     if (editorTool !== "remove") clearRemovalPreview();
   }, [editorTool]);
 
-  useEffect(() => {
-    if (!workflowProgress.lineworkReviewed) {
-      reviewedLineworkRef.current = null;
-      return;
-    }
-    const reviewed = reviewedLineworkRef.current;
-    if (!reviewed) {
-      reviewedLineworkRef.current = { manualStrokes, editedDetailDataUrl, traceMode };
-      return;
-    }
-    if (
-      reviewed.manualStrokes === manualStrokes
-      && reviewed.editedDetailDataUrl === editedDetailDataUrl
-      && reviewed.traceMode === traceMode
-    ) return;
-
-    reviewedLineworkRef.current = null;
-    setWorkflowProgress((current) => invalidateLineworkReview(current));
-    setCleanupChecks({ cutline: false, remove: false, draw: false, export: false });
-  }, [editedDetailDataUrl, manualStrokes, traceMode, workflowProgress.lineworkReviewed]);
-
-  function resetEditorState() {
+  function resetEditorPresentation() {
     clearRemovalPreview();
-    setHistory([]);
-    setRedoHistory([]);
-    setEditedDetailDataUrl(null);
-    setManualStrokes([]);
-    setManualHistory([]);
-    setManualRedoHistory([]);
+    setDetailLineHistory(createEditorTransactionHistory());
+    setFeatureLineHistory(createEditorTransactionHistory());
     setSelectedStrokeId(null);
     setDimUnselectedStrokes(false);
     setSelectionFeedback("");
-    setTraceViewport(DEFAULT_TRACE_VIEWPORT);
     setCutlineBounds(null);
     setCutlineBoundsResolved(false);
     setDetailLineBounds(null);
@@ -348,68 +443,70 @@ function App() {
     viewportUserModifiedRef.current = false;
     setPrintPreview(false);
     setEditableDetailLinesPresent(false);
-    resetAiProposalState();
+    resetAiProposalPresentation();
   }
 
-  function resetAiProposalState() {
-    aiProposalRequestGenerationRef.current += 1;
-    aiProposalRequestStartedRef.current = false;
-    setAiProposalPhase("idle");
-    setAiProposal(null);
-    setAiProposalReview(null);
+  function resetAiProposalPresentation() {
     setAiProposalReviewView("ai-lines-only");
-    setAiProposalError(null);
   }
 
   useEffect(() => {
     try {
       const rawProject = localStorage.getItem(CUTOUT_AUTOSAVE_KEY);
       if (!rawProject) return;
-      void applyProject(restoreCutoutProject(rawProject), "Restored auto-save").catch(() => {
-        setProjectStatus("Project import failed");
-      });
+      void restoreProjectFromText(rawProject, "Restored auto-save", false);
     } catch {
       setProjectStatus("Project import failed");
     }
   }, []);
 
   useEffect(() => {
-    if (autosavePaused) return;
-    const snapshot = buildProjectSnapshot();
-    if (!snapshot) return;
-    setProjectStatus("Unsaved changes");
-    const timeoutId = window.setTimeout(() => {
-      try {
-        localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serializeCutoutProject(snapshot));
-        setProjectStatus("Auto-saved");
-      } catch {
-        setProjectStatus("Auto-save failed");
-      }
-    }, 450);
+    setProjectNameDraft(projectName);
+  }, [projectName]);
 
-    return () => window.clearTimeout(timeoutId);
-  }, [
-    image,
-    sourceImageDataUrl,
-    projectName,
-    projectCreatedAt,
-    settings,
-    traceMode,
-    analysis,
-    manualStrokes,
-    projectPalette,
-    referenceOpacity,
-    showReference,
-    showCutline,
-    showManualLines,
-    showSuggestions,
-    printPreview,
-    editedDetailDataUrl,
-    traceViewport,
-    cleanupChecks,
-    workflowProgress,
-    autosavePaused
-  ]);
+  useEffect(() => {
+    setPaintHexDrafts((current) => {
+      const next: Record<string, string> = {};
+      let changed = false;
+      for (const entry of projectPalette) {
+        const draft = current[entry.id];
+        if (draft === undefined) continue;
+        if (normalizePaintHexDraft(draft) === entry.hex) {
+          changed = true;
+          continue;
+        }
+        next[entry.id] = draft;
+      }
+      if (!changed && Object.keys(next).length === Object.keys(current).length) return current;
+      return next;
+    });
+  }, [projectPalette]);
+
+  useEffect(() => {
+    const pendingEffects = projectSessionState.pendingEffects;
+    if (pendingEffects.length === 0) return;
+    const coordinator = persistenceCoordinatorRef.current;
+    if (!coordinator) return;
+    for (const effect of pendingEffects) {
+      if (effect.type === "request-autosave") setProjectStatus("Unsaved changes");
+      void coordinator.execute(effect, (resultAction) => {
+        const transition = applyProjectSessionAction(resultAction);
+        if (transition.outcome.status === "stale") return;
+        if (resultAction.type === "persistence-succeeded") {
+          setProjectStatus(resultAction.mode === "autosave" ? "Auto-saved" : "Saved");
+        } else {
+          setProjectStatus(resultAction.mode === "autosave" ? "Auto-save failed" : "Project export failed");
+        }
+      });
+    }
+    setProjectSessionState((current) => current.pendingEffects === pendingEffects
+      ? { ...current, pendingEffects: [] }
+      : current);
+  }, [projectSessionState.pendingEffects]);
+
+  useEffect(() => {
+    return () => persistenceCoordinatorRef.current?.dispose();
+  }, []);
 
   useEffect(() => {
     if (!analysis || !editorOpen) return;
@@ -476,138 +573,166 @@ function App() {
     }
   }, [manualStrokes, selectedStrokeId]);
 
-  useEffect(() => {
-    if (printPreview) {
-      setShowReference(false);
-      setShowSuggestions(false);
-      setShowCutline(true);
-      setShowManualLines(true);
-    }
-  }, [printPreview]);
-
   async function generateTemplate(preset?: DetailPreset, settingsOverride?: Settings) {
-    if (!image) return;
+    const candidate = sourceCandidate;
+    const targetImage = candidate?.file ?? image;
+    if (!targetImage) return;
+    const targetSvgSourceInk = candidate ? candidate.sourceInkDataUrl : svgSourceInkDataUrl;
+    const mode = candidate ? "replace-source" as const : "regenerate-analysis" as const;
     const nextSettings = settingsOverride ?? (preset ? detailPresetSettings(preset, settings) : settings);
-    if (preset) {
-      setSettings(nextSettings);
-      applyTraceModeUiState(nextSettings.templateStyle);
-    }
-    const preservedManualStrokes = traceStudioOpen ? manualStrokes : [];
-    if (analysis && preservedManualStrokes.length > 0) {
+    const preservedManualStrokes = mode === "regenerate-analysis" && traceStudioOpen ? manualStrokes : [];
+    if (mode === "regenerate-analysis" && analysis && preservedManualStrokes.length > 0) {
       const shouldRegenerate = window.confirm("Regenerate the cutline? This may replace the cutline and starter lines. Your manual Trace Studio lines will be kept unless you reset details.");
       if (!shouldRegenerate) return;
     }
-    resetAiProposalState();
+    const preparing = applyProjectSessionAction({ type: "begin-project-preparation", operation: mode });
+    if (preparing.outcome.status !== "preparing") return;
+    const token = preparing.outcome.token;
     setBusy(true);
     setError(null);
     try {
       const payload = new FormData();
-      payload.append("image", image);
+      payload.append("image", targetImage);
       payload.append("settings", JSON.stringify(nextSettings));
       const response = await fetch("/api/analyze", { method: "POST", body: payload });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to analyze image.");
       const openEditor = opensEditorWithReference(nextSettings.templateStyle);
-      const importedSvgDetail = svgSourceInkDataUrl
+      const importedSvgDetail = targetSvgSourceInk
         ? await svgInkForPreview({
-            sourceInkDataUrl: svgSourceInkDataUrl,
+            sourceInkDataUrl: targetSvgSourceInk,
             subjectBoundsPx: body.subjectBoundsPx,
             previewWidthPx: body.previewWidthPx,
             previewHeightPx: body.previewHeightPx,
             outerLinePngDataUrl: body.outerLinePngDataUrl
           })
         : null;
-      resetEditorState();
+      const initialProjectPalette = seedProjectPaletteFromDetected(body.palette, []);
+      const completed = applyProjectSessionAction({
+        type: "complete-source-analysis",
+        token,
+        mode,
+        ...(candidate
+          ? {
+              projectName: projectNameDraft.trim() || candidate.projectName,
+              sourceImage: {
+                name: candidate.file.name,
+                type: candidate.file.type || "application/octet-stream",
+                dataUrl: candidate.dataUrl
+              }
+            }
+          : {}),
+        settings: nextSettings,
+        analysis: body,
+        inputReadiness: inputReadinessForAnalysis(body, targetSvgSourceInk !== null),
+        initialDetailPngDataUrl: importedSvgDetail,
+        initialProjectPalette,
+        openEditorAfterCompletion: openEditor,
+        ...(candidate ? { createdAt: new Date().toISOString() } : {})
+      });
+      if (completed.outcome.status === "stale") return;
+      if (completed.outcome.status !== "successful") {
+        throw new Error(completed.outcome.status === "failed" ? completed.outcome.error : "Unable to apply prepared analysis.");
+      }
+
+      resetAiProposalPresentation();
+      resetEditorPresentation();
       setColorDetailsOpen(false);
-      setAnalysis(body);
-      setEditedDetailDataUrl(importedSvgDetail);
+      applyTraceModePresentation(nextSettings.templateStyle);
+      if (candidate) {
+        setImage(candidate.file);
+        setSourceImageDataUrl(candidate.dataUrl);
+        setSvgSourceInkDataUrl(candidate.sourceInkDataUrl);
+        setSvgLineworkDetected(candidate.lineworkDetected);
+        setSourceCandidate((current) => current?.generation === candidate.generation ? null : current);
+      }
       setSvgImportedDetailDataUrl(importedSvgDetail);
-      setWorkflowProgress({ activeStep: "clean", lineworkReviewed: false, colorsOutcome: "incomplete" });
-      if (preservedManualStrokes.length > 0) setManualStrokes(preservedManualStrokes);
-      setProjectPalette(seedProjectPaletteFromDetected(body.palette, []));
       setSelectedPaintColorIds([]);
       setEditorOpen(openEditor || preservedManualStrokes.length > 0);
-      setShowReference(openEditor);
-      setShowSuggestions(false);
-      setShowCutline(true);
-      setShowManualLines(true);
       setEditorTool(defaultEditorToolForTraceMode(nextSettings.templateStyle));
       pendingContentFitRef.current = openEditor || preservedManualStrokes.length > 0;
-      resetCleanupChecks();
+      setProjectStatus("Unsaved changes");
     } catch (err) {
-      setAnalysis(null);
-      setError(err instanceof Error ? err.message : "Unable to analyze image.");
+      const message = err instanceof Error ? err.message : "Unable to analyze image.";
+      const failed = applyProjectSessionAction({ type: "fail-project-preparation", token, error: message });
+      if (failed.outcome.status !== "stale") setError(message);
     } finally {
       setBusy(false);
     }
   }
 
   async function requestAiLineworkProposal() {
-    if (!image || !analysis || aiProposalPhase !== "confirming" || aiProposalRequestStartedRef.current) return;
-    const requestGeneration = aiProposalRequestGenerationRef.current;
-    aiProposalRequestStartedRef.current = true;
-    setAiProposalPhase("requesting");
-    setAiProposalError(null);
+    if (!image || !analysis) return;
+    const requesting = applyProjectSessionAction({
+      type: "confirm-ai-proposal-request",
+      estimatedCostUsd: AI_PROPOSAL_ESTIMATE_USD,
+      uploadConfirmed: true
+    });
+    if (requesting.outcome.status !== "requesting") return;
+    const token = requesting.outcome.token;
+    const requestImage = image;
+    const requestSettings = settings;
+    const requestAnalysis = analysis;
     try {
       const payload = new FormData();
-      payload.append("image", image);
-      payload.append("settings", JSON.stringify(settings));
+      payload.append("image", requestImage);
+      payload.append("settings", JSON.stringify(requestSettings));
       payload.append("confirmation", JSON.stringify({ uploadConfirmed: true, estimatedCostUsd: AI_PROPOSAL_ESTIMATE_USD }));
       const response = await fetch("/api/generate-linework", { method: "POST", body: payload });
       const body: unknown = await response.json();
-      if (requestGeneration !== aiProposalRequestGenerationRef.current) return;
       if (!response.ok) {
         const message = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
           ? body.error
           : "Unable to generate the AI proposal.";
         throw new Error(message);
       }
-      const proposal = parseAiProposalResponse(body, analysis);
-      setAiProposal(proposal);
-      setAiProposalReview(beginAiProposalReview(proposal.status));
-      setAiProposalReviewView("ai-lines-only");
-      setAiProposalPhase("ready");
+      const proposal = parseAiProposalResponse(body, requestAnalysis);
+      const completed = applyProjectSessionAction({ type: "complete-ai-proposal-request", token, proposal });
+      if (completed.outcome.status === "successful") resetAiProposalPresentation();
     } catch (err) {
-      if (requestGeneration !== aiProposalRequestGenerationRef.current) return;
-      setAiProposalError(err instanceof Error ? err.message : "Unable to generate the AI proposal.");
-      setAiProposalPhase("failed");
+      applyProjectSessionAction({
+        type: "fail-ai-proposal-request",
+        token,
+        error: err instanceof Error ? err.message : "Unable to generate the AI proposal."
+      });
     }
   }
 
   function beginAiLineworkRequest() {
-    resetAiProposalState();
-    setAiProposalPhase("confirming");
+    const transition = applyProjectSessionAction({ type: "begin-ai-proposal-request" });
+    if (transition.outcome.status === "applied") resetAiProposalPresentation();
+  }
+
+  function cancelAiLineworkRequest() {
+    applyProjectSessionAction({ type: "cancel-ai-proposal-request" });
   }
 
   function selectAiProposalReviewView(view: AiProposalReviewView) {
-    setAiProposalReviewView(view);
-    setAiProposalReview((review) => review ? reviewAiProposalView(review, view) : review);
+    const transition = applyProjectSessionAction({ type: "review-ai-proposal-view", view });
+    if (transition.outcome.status === "applied" || transition.outcome.status === "unchanged") {
+      setAiProposalReviewView(view);
+    }
   }
 
   function acceptAiLineworkProposal() {
-    if (!aiProposal || !aiProposalReview || !canAcceptAiProposal(aiProposalReview)) return;
-    const currentDetail = currentDetailDataUrl();
-    if (!currentDetail) return;
-    const acceptedReview = acceptAiProposalReview(aiProposalReview);
-    const applied = applyAcceptedAiProposal({
-      currentDetailDataUrl: currentDetail,
-      proposalDetailDataUrl: aiProposal.proposalDetailPngDataUrl,
-      history
-    });
-    setHistory(applied.history);
-    setRedoHistory([]);
-    setEditedDetailDataUrl(applied.acceptedDetailDataUrl);
-    loadDetailCanvas(applied.acceptedDetailDataUrl);
-    setAiProposalReview(acceptedReview);
+    const accepted = applyProjectSessionAction({ type: "accept-ai-proposal" });
+    const transaction = accepted.editorTransaction;
+    const before = transaction?.before.editedDetailPngDataUrl;
+    const after = transaction?.after.editedDetailPngDataUrl;
+    if (accepted.outcome.status !== "applied" || !before || !after) return;
+    setDetailLineHistory((current) => recordEditorTransaction(current, { before, after }));
+    loadDetailCanvas(after);
     setProjectStatus("Unsaved changes");
   }
 
   function rejectAiLineworkProposal() {
-    setAiProposalReview((review) => review ? rejectAiProposalReview(review) : review);
+    applyProjectSessionAction({ type: "reject-ai-proposal" });
   }
 
   async function exportPdf() {
-    if (!image) return;
+    if (!canExport || !image) return;
+    const authorized = applyProjectSessionAction({ type: "request-export" });
+    if (authorized.outcome.status !== "applied") return;
     if (traceStudioOpen && manualStrokes.length === 0) {
       const shouldContinue = window.confirm("No manual detail lines have been drawn yet. Export an outside-cutline-only packet?");
       if (!shouldContinue) return;
@@ -652,7 +777,9 @@ function App() {
   }
 
   function exportSvgLinework() {
-    if (!analysis) return;
+    if (!canExportSvg || !analysis) return;
+    const authorized = applyProjectSessionAction({ type: "request-export" });
+    if (authorized.outcome.status !== "applied") return;
     if (!analysis.outerCutPath.trim()) {
       setError("Regenerate the cutline before exporting SVG linework.");
       return;
@@ -681,43 +808,51 @@ function App() {
   }
 
   async function handleImageUpload(file: File | null) {
-    resetAiProposalState();
-    setColorDetailsOpen(false);
-    setImage(null);
-    setAnalysis(null);
-    setError(null);
-    setSourceImageDataUrl(null);
-    setProjectPalette([]);
-    setSelectedPaintColorIds([]);
-    setPaintReviewFilter("all");
-    setShoppingListStatus("");
-    setProjectCreatedAt(null);
-    setWorkflowProgress((current) => resetWorkflowForSource(current));
-    setProjectStatus(file ? "Unsaved changes" : "No saved project");
-    setSvgSourceInkDataUrl(null);
-    setSvgImportedDetailDataUrl(null);
-    setSvgLineworkDetected(false);
+    const generation = sourceSelectionGenerationRef.current + 1;
+    sourceSelectionGenerationRef.current = generation;
     if (!file) {
-      setImage(null);
+      setSourceCandidate(null);
+      setSourceReadPending(false);
       return;
     }
 
+    const preparing = applyProjectSessionAction({ type: "begin-project-preparation", operation: "replace-source" });
+    if (preparing.outcome.status !== "preparing") return;
+    const token = preparing.outcome.token;
+    setSourceReadPending(true);
+    setError(null);
     try {
+      let candidate: PreparedSourceCandidate;
       if (isSvgFile(file)) {
         const prepared = await prepareSvgFastPathUpload(file);
-        setImage(prepared.sourceFile);
-        setSourceImageDataUrl(prepared.sourceDataUrl);
-        setSvgSourceInkDataUrl(prepared.sourceInkDataUrl);
-        setSvgLineworkDetected(prepared.sourceInkDataUrl !== null);
+        candidate = {
+          generation,
+          projectName: cleanedProjectNameFromFileName(file.name),
+          file: prepared.sourceFile,
+          dataUrl: prepared.sourceDataUrl,
+          sourceInkDataUrl: prepared.sourceInkDataUrl,
+          lineworkDetected: prepared.sourceInkDataUrl !== null
+        };
       } else {
-        setImage(file);
-        setSourceImageDataUrl(await readFileAsDataUrl(file));
+        candidate = {
+          generation,
+          projectName: cleanedProjectNameFromFileName(file.name),
+          file,
+          dataUrl: await readFileAsDataUrl(file),
+          sourceInkDataUrl: null,
+          lineworkDetected: false
+        };
       }
-      setProjectName(cleanedProjectNameFromFileName(file.name));
-      setProjectCreatedAt(new Date().toISOString());
+      const completed = applyProjectSessionAction({ type: "complete-project-preparation", token });
+      if (completed.outcome.status !== "successful" || sourceSelectionGenerationRef.current !== generation) return;
+      setSourceCandidate(candidate);
+      setProjectNameDraft(candidate.projectName);
     } catch (err) {
-      setImage(null);
-      setError(err instanceof Error ? err.message : "Unable to read the selected image.");
+      const message = err instanceof Error ? err.message : "Unable to read the selected image.";
+      const failed = applyProjectSessionAction({ type: "fail-project-preparation", token, error: message });
+      if (failed.outcome.status !== "stale") setError(message);
+    } finally {
+      if (sourceSelectionGenerationRef.current === generation) setSourceReadPending(false);
     }
   }
 
@@ -727,51 +862,65 @@ function App() {
       analysis !== null ||
       manualStrokes.length > 0 ||
       projectPalette.length > 0 ||
-      sourceImageDataUrl !== null;
+      sourceImageDataUrl !== null ||
+      sourceCandidate !== null;
 
     if (hasCurrentWork && !window.confirm("Start a new project? This clears the current image, strokes, and paint palette on this device. Export the project JSON first if you want to keep it.")) {
+      applyProjectSessionAction({ type: "cancel-new-project" });
       return;
     }
 
-    setAutosavePaused(true);
-    localStorage.removeItem(CUTOUT_AUTOSAVE_KEY);
+    const confirmed = applyProjectSessionAction({
+      type: "confirm-new-project",
+      project: {
+        projectName: "Cutout Project",
+        settings: defaultSettings,
+        sourceImage: null,
+        analysis: null,
+        editedDetailPngDataUrl: null,
+        manualStrokes: [],
+        projectPalette: [],
+        workflowProgress: DEFAULT_WORKFLOW_PROGRESS,
+        cleanupChecks: { cutline: false, remove: false, draw: false, export: false },
+        createdAt: null,
+        traceMode: "paint",
+        referenceOpacity: 35,
+        layerVisibility: {
+          showReference: false,
+          showCutline: true,
+          showManualLines: true,
+          showSuggestions: false,
+          printPreview: false
+        },
+        traceViewport: DEFAULT_TRACE_VIEWPORT
+      }
+    });
+    if (confirmed.outcome.status !== "successful") return;
+    sourceSelectionGenerationRef.current += 1;
+    setSourceCandidate(null);
+    setSourceReadPending(false);
     setImage(null);
     setSvgSourceInkDataUrl(null);
     setSvgImportedDetailDataUrl(null);
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(null);
-    setProjectName("Cutout Project");
-    setProjectCreatedAt(null);
     setProjectStatus("No saved project");
-    setSettings(defaultSettings);
-    applyTraceModeUiState("paint");
+    applyTraceModePresentation("paint");
     setAdvancedOpen(false);
-    setAnalysis(null);
     setEditorOpen(false);
     setBrushSize("normal");
-    setShowReference(false);
-    setReferenceOpacity(35);
-    setShowCutline(true);
-    setShowManualLines(true);
-    setShowSuggestions(false);
-    setProjectPalette([]);
     setSelectedPaintColorIds([]);
     setPaintReviewFilter("all");
     setColorDetailsOpen(false);
     setShoppingListStatus("");
-    resetCleanupChecks();
-    setWorkflowProgress(DEFAULT_WORKFLOW_PROGRESS);
-    resetEditorState();
+    resetEditorPresentation();
     setError(null);
     strokeIdRef.current = 0;
-    window.setTimeout(() => setAutosavePaused(false), 100);
   }
 
   function navigateToWorkflowStep(step: WorkflowStep) {
-    if (aiProposalBlocksAdvancement && (step === "colors" || step === "export")) return;
-    const next = navigateWorkflow(workflowProgress, step, { hasAnalysis: analysis !== null });
-    if (next.activeStep !== step) return;
-    setWorkflowProgress(next);
+    const transition = applyProjectSessionAction({ type: "navigate-workflow", target: step });
+    if (transition.outcome.status === "rejected" || transition.session.project.workflowProgress.activeStep !== step) return;
     const targetElement = step === "upload"
       ? setupSectionRef.current
       : step === "clean"
@@ -783,133 +932,95 @@ function App() {
     targetElement?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function buildProjectSnapshot() {
-    if (!image || !sourceImageDataUrl || !analysis) return null;
-    const now = new Date().toISOString();
-    return createCutoutProjectSnapshot({
-      projectName,
-      createdAt: projectCreatedAt ?? now,
-      updatedAt: now,
-      sourceImage: {
-        name: image.name,
-        type: image.type || "application/octet-stream",
-        dataUrl: sourceImageDataUrl
-      },
-      settings,
-      traceMode,
-      analysis,
-      editedDetailPngDataUrl: traceStudioOpen ? null : editedDetailDataUrl,
-      manualStrokes,
-      projectPalette,
-      paintGuideEdits: paintGuideEditsFromProjectPalette(projectPalette),
-      referenceOpacity,
-      layerVisibility: {
-        showReference,
-        showCutline,
-        showManualLines,
-        showSuggestions,
-        printPreview
-      },
-      traceViewport,
-      cleanupChecks,
-      workflowProgress
-    });
-  }
-
-  function downloadProjectFile(status: ProjectStatus) {
-    const project = buildProjectSnapshot();
-    if (!project) return;
-    try {
-      const blob = new Blob([serializeCutoutProject(project)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = projectFileName(project.projectName);
-      link.click();
-      URL.revokeObjectURL(url);
-      localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serializeCutoutProject(project));
-      setProjectStatus(status);
-    } catch {
-      setProjectStatus("Project export failed");
-    }
+  function downloadProjectFile() {
+    if (!canSaveProject) return;
+    applyProjectSessionAction({ type: "request-explicit-save" });
   }
 
   async function openProjectFile(file: File | null) {
     if (!file) return;
+    await restoreProject(() => file.text(), "Project opened", true);
+  }
+
+  async function restoreProjectFromText(text: string, status: ProjectStatus, requestAutosave: boolean) {
+    await restoreProject(() => Promise.resolve(text), status, requestAutosave);
+  }
+
+  async function restoreProject(
+    readProject: () => Promise<string>,
+    status: ProjectStatus,
+    requestAutosave: boolean
+  ) {
+    const preparing = applyProjectSessionAction({ type: "begin-project-preparation", operation: "restore-project" });
+    if (preparing.outcome.status !== "preparing") return;
+    const token = preparing.outcome.token;
     try {
-      const text = await file.text();
-      const project = restoreCutoutProject(text);
-      await applyProject(project, "Project opened");
-      localStorage.setItem(CUTOUT_AUTOSAVE_KEY, serializeCutoutProject(project));
-    } catch {
+      const project = restoreCutoutProject(await readProject());
+      const restoredFile = await fileFromDataUrl(project.sourceImage.dataUrl, project.sourceImage.name, project.sourceImage.type);
+      const completed = applyProjectSessionAction({
+        type: "complete-project-restore",
+        token,
+        project: appProjectFromCutoutProject(project),
+        requestAutosave
+      });
+      if (completed.outcome.status !== "successful") return;
+      installRestoredProjectRuntime(project, restoredFile, status);
+    } catch (restoreError) {
+      const message = restoreError instanceof Error ? restoreError.message : "Unable to open that project file.";
+      const failed = applyProjectSessionAction({ type: "fail-project-preparation", token, error: message });
+      if (failed.outcome.status === "stale") return;
       setProjectStatus("Project import failed");
       setError("Unable to open that project file.");
     }
   }
 
-  async function applyProject(project: CutoutProject, status: ProjectStatus) {
-    resetAiProposalState();
-    const restoredFile = await fileFromDataUrl(project.sourceImage.dataUrl, project.sourceImage.name, project.sourceImage.type);
-    setAutosavePaused(true);
+  function installRestoredProjectRuntime(project: CutoutProject, restoredFile: File, status: ProjectStatus) {
+    resetAiProposalPresentation();
     setColorDetailsOpen(false);
     setImage(restoredFile);
     setSvgSourceInkDataUrl(null);
     setSvgImportedDetailDataUrl(project.editedDetailPngDataUrl);
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(project.sourceImage.dataUrl);
-    setProjectName(project.projectName);
-    setProjectCreatedAt(project.createdAt);
-    setSettings(project.settings);
-    applyTraceModeUiState(project.traceMode);
-    setManualStrokes(project.manualStrokes);
-    setProjectPalette(project.projectPalette);
+    setAutoStarterOpen(project.traceMode !== "manual");
+    setEditorTool(defaultEditorToolForTraceMode(project.traceMode));
     setSelectedPaintColorIds([]);
     setPaintReviewFilter("all");
     setShoppingListStatus("");
-    setAnalysis(project.analysis);
     setEditorOpen(opensEditorWithReference(project.traceMode) || project.manualStrokes.length > 0);
-    setShowReference(project.layerVisibility.showReference);
-    setReferenceOpacity(project.referenceOpacity);
-    setShowCutline(project.layerVisibility.showCutline);
-    setShowManualLines(project.layerVisibility.showManualLines);
-    setShowSuggestions(project.layerVisibility.showSuggestions);
     setPrintPreview(false);
-    setTraceViewport(project.traceViewport);
     pendingContentFitRef.current = isDefaultTraceViewport(project.traceViewport);
     viewportUserModifiedRef.current = !isDefaultTraceViewport(project.traceViewport);
     setSelectedStrokeId(null);
     setDimUnselectedStrokes(false);
     setSelectionFeedback("");
-    reviewedLineworkRef.current = project.workflowProgress.lineworkReviewed
-      ? {
-          manualStrokes: project.manualStrokes,
-          editedDetailDataUrl: project.editedDetailPngDataUrl,
-          traceMode: project.traceMode
-        }
-      : null;
-    setCleanupChecks(project.cleanupChecks);
-    setWorkflowProgress(project.workflowProgress);
-    setManualHistory([]);
-    setManualRedoHistory([]);
-    setHistory([]);
-    setRedoHistory([]);
-    setEditedDetailDataUrl(project.editedDetailPngDataUrl);
+    setFeatureLineHistory(createEditorTransactionHistory());
+    setDetailLineHistory(createEditorTransactionHistory());
     setError(null);
     setProjectStatus(status);
     strokeIdRef.current = highestStrokeNumber(project.manualStrokes);
-    window.setTimeout(() => setAutosavePaused(false), 100);
   }
 
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
-    const next = { ...settings, [key]: value };
-    setSettings(next);
     if (key === "finishedHeightIn") {
-      setAnalysis((current) => current
-        ? resizeAnalysisForFinishedHeight(current, value as Settings["finishedHeightIn"])
-        : current);
+      applyProjectSessionAction({
+        type: "change-finished-size",
+        finishedHeightIn: value as Settings["finishedHeightIn"]
+      });
       return;
     }
-    setAnalysis(null);
+    const next = { ...settings, [key]: value };
+    updateProjectSettings(next);
+  }
+
+  function applyProjectSessionAction(action: ProjectSessionAction<AppProjectSessionProject>) {
+    const transition = transitionProjectSession(projectSessionRef.current, action);
+    projectSessionRef.current = transition.session;
+    setProjectSessionState((current) => ({
+      session: transition.session,
+      pendingEffects: [...current.pendingEffects, ...transition.effects]
+    }));
+    return transition;
   }
 
   function closeFileMenu() {
@@ -922,27 +1033,27 @@ function App() {
   }
 
   function acceptCleanLines() {
-    if (!analysis?.outerCutPath.trim()) {
-      setError("A valid cut line is required before continuing to Colors.");
-      return;
-    }
-    setCleanupChecks((current) => ({ ...current, cutline: true, remove: true, draw: true }));
-    setWorkflowProgress((current) => completeLineworkReview(current));
+    const transition = applyProjectSessionAction({ type: "complete-linework-review" });
+    if (transition.outcome.status === "rejected") setError(transition.outcome.error.message);
+    else setError(null);
   }
 
   function finishColorReview(outcome: "reviewed" | "skipped") {
-    setSettings((current) => ({ ...current, includePaintGuidePage: outcome === "reviewed" }));
-    setWorkflowProgress((current) => completeColorReview(current, outcome));
+    const transition = applyProjectSessionAction({ type: "complete-color-review", outcome });
+    if (transition.outcome.status === "rejected") setError(transition.outcome.error.message);
+    else setError(null);
   }
 
   function setExportColorGuide(included: boolean) {
-    setSettings((current) => ({ ...current, includePaintGuidePage: included }));
+    const transition = applyProjectSessionAction({ type: "set-color-guide-included", included });
+    if (transition.outcome.status === "rejected") setError(transition.outcome.error.message);
+    else setError(null);
   }
 
   function resetTracingSettings() {
     const nextMode = traceMode === "manual" ? "manual" : "paint";
-    setSettings((current) => ({
-      ...traceModeSettings(nextMode, current),
+    updateProjectSettings({
+      ...traceModeSettings(nextMode, settings),
       threshold: defaultSettings.threshold,
       smoothing: defaultSettings.smoothing,
       speckArea: defaultSettings.speckArea,
@@ -950,108 +1061,113 @@ function App() {
       detailLines: nextMode === "manual" ? false : defaultSettings.detailLines,
       detailCleanup: nextMode === "manual" ? 100 : defaultSettings.detailCleanup,
       templateStyle: nextMode
-    }));
-    applyTraceModeUiState(nextMode);
+    });
+    applyTraceModePresentation(nextMode);
     setAdvancedOpen(false);
     setProjectStatus(image ? "Unsaved changes" : "No saved project");
   }
 
   function applyTraceMode(mode: TraceMode) {
-    applyTraceModeUiState(mode);
+    applyTraceModePresentation(mode);
     const next = traceModeSettings(mode, settings);
-    setSettings(next);
-    setAnalysis(null);
+    updateProjectSettings(next);
   }
 
   async function applyDetailPreset(preset: DetailPreset) {
     const next = detailPresetSettings(preset, settings);
-    if (analysis && (editedDetailDataUrl !== null || history.length > 0)) {
+    if (analysis && (editedDetailDataUrl !== null || detailLineHistory.undo.length > 0)) {
       const shouldReplace = window.confirm("Change detail strength? This will replace your edited starter-line cleanup with a newly generated layer.");
       if (!shouldReplace) return;
     }
-    applyTraceModeUiState(next.templateStyle);
-    setSettings(next);
-    setProjectStatus(image ? "Unsaved changes" : "No saved project");
     if (!analysis || !image) {
-      setAnalysis(null);
+      applyTraceModePresentation(next.templateStyle);
+      updateProjectSettings(next);
+      setProjectStatus(sourceCandidate || image ? "Unsaved changes" : "No saved project");
       return;
     }
-
-    setBusy(true);
-    setError(null);
-    try {
-      const payload = new FormData();
-      payload.append("image", image);
-      payload.append("settings", JSON.stringify(next));
-      const response = await fetch("/api/analyze", { method: "POST", body: payload });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Unable to regenerate starter lines.");
-      const importedSvgDetail = svgSourceInkDataUrl
-        ? await svgInkForPreview({
-            sourceInkDataUrl: svgSourceInkDataUrl,
-            subjectBoundsPx: body.subjectBoundsPx,
-            previewWidthPx: body.previewWidthPx,
-            previewHeightPx: body.previewHeightPx,
-            outerLinePngDataUrl: body.outerLinePngDataUrl
-          })
-        : null;
-      setAnalysis((current) => current ? {
-        ...current,
-        previewPngDataUrl: body.previewPngDataUrl,
-        detailLinePngDataUrl: body.detailLinePngDataUrl,
-        traceQuality: body.traceQuality
-      } : body);
-      setEditedDetailDataUrl(importedSvgDetail);
-      setSvgImportedDetailDataUrl(importedSvgDetail);
-      setHistory([]);
-      setRedoHistory([]);
-      setEditableDetailLinesPresent(false);
-      viewportUserModifiedRef.current = false;
-      pendingContentFitRef.current = true;
-      resetCleanupChecks();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to regenerate starter lines.");
-    } finally {
-      setBusy(false);
-    }
+    await generateTemplate(undefined, next);
   }
 
   function switchToBlankTraceStudio() {
-    applyTraceModeUiState("manual");
-    setSettings((current) => traceModeSettings("manual", current));
-    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-    setManualRedoHistory([]);
-    setManualStrokes([]);
+    applyTraceModePresentation("manual");
+    const switched = applyProjectSessionAction({
+      type: "switch-to-blank-trace-studio"
+    });
+    const featureTransaction = switched.editorTransaction;
+    if (featureTransaction) {
+      setFeatureLineHistory((current) => recordEditorTransaction(current, {
+        before: featureTransaction.before.manualStrokes as TraceStroke[],
+        after: featureTransaction.after.manualStrokes as TraceStroke[]
+      }));
+    }
     setSelectedStrokeId(null);
     setSelectionFeedback("Switched to blank Trace Studio");
     setEditorOpen(true);
-    setShowReference(true);
-    setShowSuggestions(false);
-    setShowCutline(true);
-    setShowManualLines(true);
     setPrintPreview(false);
     pendingContentFitRef.current = true;
   }
 
   function updateInteriorDetail(value: number) {
-    setSettings((current) => ({ ...current, detailCleanup: value, detailLines: true, templateStyle: traceMode }));
-    setAnalysis(null);
+    applyProjectSessionAction({
+      type: "invalidate-analysis-for-detail-settings",
+      detailCleanup: value
+    });
   }
 
-  function applyTraceModeUiState(mode: TraceMode) {
-    setTraceMode(mode);
+  function applyTraceModePresentation(mode: TraceMode) {
     setAutoStarterOpen(mode !== "manual");
     setEditorTool(defaultEditorToolForTraceMode(mode));
   }
 
   function updatePaintGuideEntry(id: string, patch: Partial<Omit<ProjectPaintColor, "id" | "source">>) {
     const current = projectPalette.find((entry) => entry.id === id);
-    if (!current) return;
-    setProjectPalette((palette) => updateProjectPaintColor(palette, id, patch));
+    if (!current) return null;
+    const transition = applyProjectSessionAction({
+      type: "update-project-paint-color",
+      id,
+      patch
+    });
     setShoppingListStatus("");
-    if (typeof patch.hex === "string" && isValidHexColor(patch.hex)) {
-      void refreshPaintMatchesForColor(id, patch.hex);
+    return transition;
+  }
+
+  function setPaintHexDraft(id: string, value: string) {
+    setPaintHexDrafts((current) => current[id] === value ? current : { ...current, [id]: value });
+    setShoppingListStatus("");
+  }
+
+  function clearPaintHexDraft(id: string) {
+    setPaintHexDrafts((current) => {
+      if (!(id in current)) return current;
+      const { [id]: _removed, ...rest } = current;
+      return rest;
+    });
+  }
+
+  async function commitPaintHexDraft(id: string, draftValue: string) {
+    const current = projectSessionRef.current.project.projectPalette?.find((entry) => entry.id === id);
+    if (!current) {
+      clearPaintHexDraft(id);
+      return;
     }
+    const normalizedHex = normalizePaintHexDraft(draftValue);
+    if (!isValidSessionPaintHex(draftValue)) {
+      clearPaintHexDraft(id);
+      setShoppingListStatus("Enter a valid 3- or 6-digit hex color.");
+      return;
+    }
+    if (normalizedHex === current.hex) {
+      clearPaintHexDraft(id);
+      return;
+    }
+    const transition = updatePaintGuideEntry(id, { hex: normalizedHex });
+    if (transition?.outcome.status === "applied" || transition?.outcome.status === "unchanged") {
+      clearPaintHexDraft(id);
+      await refreshPaintMatchesForColor(id);
+      return;
+    }
+    clearPaintHexDraft(id);
+    setShoppingListStatus("Enter a valid 3- or 6-digit hex color.");
   }
 
   async function addManualPaintColor() {
@@ -1059,24 +1175,32 @@ function App() {
       setShoppingListStatus("Enter a valid hex color");
       return;
     }
-    const matches = await fetchPaintMatches(newPaintHex);
-    setProjectPalette((palette) => addProjectPaintColor(palette, {
+    const added = applyProjectSessionAction({
+      type: "add-project-paint-color",
       hex: newPaintHex,
-      label: newPaintLabel,
-      matches
-    }));
+      label: newPaintLabel
+    });
+    if (added.outcome.status !== "applied") return;
+    const createdPaintColorId = added.outcome.createdPaintColorId;
+    if (!createdPaintColorId) {
+      setShoppingListStatus("Unable to add color");
+      return;
+    }
     setNewPaintLabel("");
-    setShoppingListStatus("Color added");
+    await refreshPaintMatchesForColor(createdPaintColorId, {
+      successStatus: "Color added",
+      failureStatus: "Color added. Unable to refresh paint matches. Existing choices were kept."
+    });
   }
 
   function removePaintColor(id: string) {
-    setProjectPalette((palette) => removeProjectPaintColor(palette, id));
+    applyProjectSessionAction({ type: "remove-project-paint-color", id });
     setSelectedPaintColorIds((ids) => ids.filter((item) => item !== id));
     setShoppingListStatus("");
   }
 
   function mergeSelectedPaintColors() {
-    setProjectPalette((palette) => mergeProjectPaintColors(palette, selectedPaintColorIds));
+    applyProjectSessionAction({ type: "merge-project-paint-colors", ids: selectedPaintColorIds });
     setSelectedPaintColorIds([]);
     setShoppingListStatus("Colors merged");
   }
@@ -1085,14 +1209,13 @@ function App() {
     const ids = paintGuideEntries
       .filter((entry) => swatchNumbers.includes(entry.index))
       .map((entry) => entry.id);
-    setProjectPalette((palette) => mergeProjectPaintColors(palette, ids));
+    applyProjectSessionAction({ type: "merge-project-paint-colors", ids });
     setSelectedPaintColorIds([]);
     setShoppingListStatus("Colors merged");
   }
 
   function resetProjectPaletteFromDetected() {
-    if (!analysis) return;
-    setProjectPalette(seedProjectPaletteFromDetected(analysis.palette, []));
+    applyProjectSessionAction({ type: "reset-project-palette-from-analysis" });
     setSelectedPaintColorIds([]);
     setShoppingListStatus("Palette reset to detected colors");
   }
@@ -1101,21 +1224,57 @@ function App() {
     setSelectedPaintColorIds((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
   }
 
-  async function refreshPaintMatchesForColor(id: string, hex: string) {
-    const matches = await fetchPaintMatches(hex);
-    setProjectPalette((palette) => updateProjectPaintColor(palette, id, { matches }));
+  async function refreshPaintMatchesForColor(
+    id: string,
+    options?: {
+      successStatus?: string;
+      failureStatus?: string;
+    }
+  ) {
+    const request = applyProjectSessionAction({ type: "begin-project-paint-match", id });
+    if (request.outcome.status !== "requesting-paint-match") return;
+    try {
+      const matches = await requestPaintMatches(request.outcome.token.expectedHex);
+      const completed = applyProjectSessionAction({
+        type: "complete-project-paint-match",
+        token: request.outcome.token,
+        matches
+      });
+      if (completed.outcome.status === "stale") return;
+      if (completed.outcome.status === "applied" || completed.outcome.status === "successful") {
+        if (typeof options?.successStatus === "string") setShoppingListStatus(options.successStatus);
+      }
+    } catch {
+      const failed = applyProjectSessionAction({
+        type: "fail-project-paint-match",
+        token: request.outcome.token,
+        error: "Unable to refresh paint matches."
+      });
+      if (failed.outcome.status === "stale") return;
+      setShoppingListStatus(options?.failureStatus ?? "Unable to refresh paint matches. Existing choices were kept.");
+    }
   }
 
-  async function fetchPaintMatches(hex: string) {
-    if (!isValidHexColor(hex)) return [];
+  async function requestPaintMatches(hex: string) {
+    if (!isValidHexColor(hex)) throw new Error("Invalid hex color");
     const response = await fetch("/api/match-color", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hex })
     });
-    if (!response.ok) return [];
-    const body = await response.json();
-    return Array.isArray(body.matches) ? body.matches : [];
+    if (!response.ok) throw new Error("Unable to refresh paint matches.");
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new Error("Unable to refresh paint matches.");
+    }
+    if (!body || typeof body !== "object") {
+      throw new Error("Unable to refresh paint matches.");
+    }
+    const validated = validateCraftPaintMatches((body as { matches?: unknown }).matches);
+    if (!validated.ok) throw new Error(validated.message);
+    return validated.matches;
   }
 
   async function copyPaintShoppingList() {
@@ -1165,83 +1324,81 @@ function App() {
     return canvas.toDataURL("image/png");
   }
 
-  function saveHistorySnapshot() {
-    const current = currentDetailDataUrl();
-    if (!current) return;
-    setHistory((items) => [...items.slice(-19), current]);
-    setRedoHistory([]);
+  function applyEditorTransactionArtifacts(
+    editedDetailPngDataUrl: string | null,
+    nextManualStrokes: TraceStroke[]
+  ) {
+    return applyProjectSessionAction({
+      type: "commit-editor-transaction",
+      outcome: { editedDetailPngDataUrl, manualStrokes: nextManualStrokes }
+    });
+  }
+
+  function commitDetailLineTransaction(before: string, after: string) {
+    if (before === after) return false;
+    setDetailLineHistory((current) => recordEditorTransaction(current, { before, after }));
+    applyEditorTransactionArtifacts(after, projectSessionRef.current.project.manualStrokes);
+    return true;
+  }
+
+  function commitFeatureLineTransaction(before: TraceStroke[], after: TraceStroke[]) {
+    if (before.length === after.length && before.every((stroke, index) => stroke === after[index])) return false;
+    setFeatureLineHistory((current) => recordEditorTransaction(current, { before, after }));
+    applyEditorTransactionArtifacts(projectSessionRef.current.project.editedDetailPngDataUrl, after);
+    return true;
   }
 
   function setDetailExtractionMode(mode: DetailExtractionMode) {
     const next = { ...settings, detailExtractionMode: mode };
-    setSettings(next);
-    setProjectStatus("Unsaved changes");
     void generateTemplate(undefined, next);
   }
 
   function undoDetailEdit() {
     if (traceStudioOpen) {
-      const previous = manualHistory[manualHistory.length - 1];
-      if (!previous) return;
-      setManualHistory((items) => items.slice(0, -1));
-      setManualRedoHistory((items) => [...items.slice(-19), manualStrokes]);
-      setManualStrokes(previous);
+      const replay = undoEditorTransaction(featureLineHistory);
+      if (!replay.changed) return;
+      setFeatureLineHistory(replay.history);
+      applyEditorTransactionArtifacts(editedDetailDataUrl, replay.artifact);
       setSelectedStrokeId(null);
       setSelectionFeedback("Undid stroke edit");
       return;
     }
-    const current = currentDetailDataUrl();
-    const previous = history[history.length - 1];
-    if (!previous) return;
-    setHistory((items) => items.slice(0, -1));
-    if (current) setRedoHistory((items) => [...items.slice(-19), current]);
-    setEditedDetailDataUrl(previous);
-    loadDetailCanvas(previous);
+    const replay = undoEditorTransaction(detailLineHistory);
+    if (!replay.changed) return;
+    setDetailLineHistory(replay.history);
+    applyEditorTransactionArtifacts(replay.artifact, manualStrokes);
+    loadDetailCanvas(replay.artifact);
   }
 
   function redoDetailEdit() {
     if (traceStudioOpen) {
-      const next = manualRedoHistory[manualRedoHistory.length - 1];
-      if (!next) return;
-      setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-      setManualRedoHistory((items) => items.slice(0, -1));
-      setManualStrokes(next);
+      const replay = redoEditorTransaction(featureLineHistory);
+      if (!replay.changed) return;
+      setFeatureLineHistory(replay.history);
+      applyEditorTransactionArtifacts(editedDetailDataUrl, replay.artifact);
       setSelectedStrokeId(null);
       setSelectionFeedback("Redid stroke edit");
       return;
     }
-    const current = currentDetailDataUrl();
-    const next = redoHistory[redoHistory.length - 1];
-    if (!next) return;
-    if (current) setHistory((items) => [...items.slice(-19), current]);
-    setRedoHistory((items) => items.slice(0, -1));
-    setEditedDetailDataUrl(next);
-    loadDetailCanvas(next);
+    const replay = redoEditorTransaction(detailLineHistory);
+    if (!replay.changed) return;
+    setDetailLineHistory(replay.history);
+    applyEditorTransactionArtifacts(replay.artifact, manualStrokes);
+    loadDetailCanvas(replay.artifact);
   }
 
   function resetDetailLayer() {
     if (!analysis) return;
     if (traceStudioOpen) {
-      setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-      setManualRedoHistory([]);
-      setManualStrokes([]);
+      if (!commitFeatureLineTransaction(manualStrokes, [])) return;
       setSelectedStrokeId(null);
       setSelectionFeedback("Cleared manual strokes");
       return;
     }
-    saveHistorySnapshot();
+    const before = currentDetailDataUrl();
     const restoredDetail = svgImportedDetailDataUrl ?? analysis.detailLinePngDataUrl;
-    setEditedDetailDataUrl(restoredDetail);
+    if (before) commitDetailLineTransaction(before, restoredDetail);
     loadDetailCanvas(restoredDetail);
-  }
-
-  function resetCleanupChecks() {
-    setCleanupChecks({
-      cutline: false,
-      remove: false,
-      draw: false,
-      export: false
-    });
   }
 
   function beginStroke(event: PointerEvent<HTMLCanvasElement>) {
@@ -1301,7 +1458,7 @@ function App() {
       return;
     }
     safelySetPointerCapture(event.currentTarget, event.pointerId);
-    saveHistorySnapshot();
+    rasterTransactionBeforeRef.current = currentDetailDataUrl();
     drawingRef.current = true;
     lastPointRef.current = point;
     smoothAnchorRef.current = point;
@@ -1320,8 +1477,8 @@ function App() {
         ? moveTraceStroke(drag.originalStrokes, drag.strokeId, { x: point.x - drag.startPoint.x, y: point.y - drag.startPoint.y })
         : updateTraceStrokePoint(drag.originalStrokes, drag.strokeId, drag.pointIndex ?? -1, point);
       if (result.changed) {
-        strokeDragRef.current = { ...drag, moved: true };
-        setManualStrokes(result.strokes);
+        strokeDragRef.current = { ...drag, moved: true, previewStrokes: result.strokes };
+        renderManualTraceLayer(result.strokes);
       }
       return;
     }
@@ -1331,7 +1488,10 @@ function App() {
       const current = { x: event.clientX, y: event.clientY };
       viewportUserModifiedRef.current = true;
       pendingContentFitRef.current = false;
-      setTraceViewport((viewport) => panViewport(viewport, { x: current.x - previous.x, y: current.y - previous.y }));
+      updateTraceViewport(panViewport(projectSessionRef.current.project.traceViewport, {
+        x: current.x - previous.x,
+        y: current.y - previous.y
+      }));
       panStartRef.current = current;
       return;
     }
@@ -1365,9 +1525,8 @@ function App() {
       const drag = strokeDragRef.current;
       if (drag) {
         safelyReleasePointerCapture(event.currentTarget, event.pointerId);
-        if (drag.moved) {
-          setManualHistory((items) => [...items.slice(-19), drag.originalStrokes]);
-          setManualRedoHistory([]);
+        if (drag.moved && drag.previewStrokes) {
+          commitFeatureLineTransaction(drag.originalStrokes, drag.previewStrokes);
           setSelectionFeedback(drag.mode === "point" ? "Edited point" : "Moved stroke");
         }
         strokeDragRef.current = null;
@@ -1383,9 +1542,7 @@ function App() {
         safelyReleasePointerCapture(event.currentTarget, event.pointerId);
         const draft = draftStrokeRef.current;
         if (draft && draft.points.length > 0) {
-          setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-          setManualRedoHistory([]);
-          setManualStrokes((items) => [...items, draft]);
+          commitFeatureLineTransaction(manualStrokes, [...manualStrokes, draft]);
           setSelectedStrokeId(draft.id);
           setSelectionFeedback("Created stroke");
         }
@@ -1401,7 +1558,9 @@ function App() {
         drawStrokeSegment(smoothAnchorRef.current, lastPointRef.current);
       }
       safelyReleasePointerCapture(event.currentTarget, event.pointerId);
-      setEditedDetailDataUrl(event.currentTarget.toDataURL("image/png"));
+      const after = event.currentTarget.toDataURL("image/png");
+      const before = rasterTransactionBeforeRef.current;
+      if (before) commitDetailLineTransaction(before, after);
       const bounds = canvasContentBounds(event.currentTarget);
       setEditableDetailLinesPresent(bounds !== null);
       setDetailLineBounds(bounds);
@@ -1409,6 +1568,7 @@ function App() {
     drawingRef.current = false;
     lastPointRef.current = null;
     smoothAnchorRef.current = null;
+    rasterTransactionBeforeRef.current = null;
   }
 
   function canvasPoint(event: PointerEvent<HTMLCanvasElement>): TracePoint {
@@ -1483,9 +1643,9 @@ function App() {
     }
     const result = removeDetailSegmentPreview(imageData.data, canvas.width, preview);
     if (!result.changed) return;
-    saveHistorySnapshot();
+    const before = canvas.toDataURL("image/png");
     context.putImageData(imageData, 0, 0);
-    setEditedDetailDataUrl(canvas.toDataURL("image/png"));
+    commitDetailLineTransaction(before, canvas.toDataURL("image/png"));
     const bounds = canvasContentBounds(canvas);
     setEditableDetailLinesPresent(bounds !== null);
     setDetailLineBounds(bounds);
@@ -1543,9 +1703,9 @@ function App() {
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
     const result = removeDetailSegmentPreview(imageData.data, canvas.width, preview);
     if (!result.changed) return;
-    saveHistorySnapshot();
+    const before = canvas.toDataURL("image/png");
     context.putImageData(imageData, 0, 0);
-    setEditedDetailDataUrl(canvas.toDataURL("image/png"));
+    commitDetailLineTransaction(before, canvas.toDataURL("image/png"));
     const bounds = canvasContentBounds(canvas);
     setEditableDetailLinesPresent(bounds !== null);
     setDetailLineBounds(bounds);
@@ -1575,9 +1735,7 @@ function App() {
   function removeManualStrokeAt(point: TracePoint) {
     const result = eraseTraceStrokes(manualStrokes, point, brushPixels(brushSize));
     if (!result.changed) return;
-    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-    setManualRedoHistory([]);
-    setManualStrokes(result.strokes);
+    commitFeatureLineTransaction(manualStrokes, result.strokes);
     setSelectedStrokeId(null);
     setSelectionFeedback(result.removedStrokeIds.length === 1 ? "Deleted stroke" : `Deleted ${result.removedStrokeIds.length} strokes`);
   }
@@ -1589,9 +1747,7 @@ function App() {
 
   function commitManualStrokeEdit(result: StrokeEditResult, nextSelectedStrokeId = selectedStrokeId) {
     if (!result.changed) return;
-    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-    setManualRedoHistory([]);
-    setManualStrokes(result.strokes);
+    commitFeatureLineTransaction(manualStrokes, result.strokes);
     setSelectedStrokeId(result.selectedStrokeId ?? nextSelectedStrokeId ?? null);
   }
 
@@ -1599,9 +1755,7 @@ function App() {
     if (!selectedStrokeId) return;
     const result = deleteTraceStroke(manualStrokes, selectedStrokeId);
     if (!result.changed) return;
-    setManualHistory((items) => [...items.slice(-19), manualStrokes]);
-    setManualRedoHistory([]);
-    setManualStrokes(result.strokes);
+    commitFeatureLineTransaction(manualStrokes, result.strokes);
     setSelectedStrokeId(null);
     setSelectionFeedback("Deleted stroke");
   }
@@ -1653,14 +1807,14 @@ function App() {
     const viewportSize = viewport
       ? { width: viewport.clientWidth, height: viewport.clientHeight }
       : { width: 1, height: 1 };
-    setTraceViewport((current) => zoomViewport(current, nextZoom, focus, viewportSize));
+    updateTraceViewport(zoomViewport(projectSessionRef.current.project.traceViewport, nextZoom, focus, viewportSize));
   }
 
   function resetZoom() {
     viewportUserModifiedRef.current = false;
     pendingContentFitRef.current = false;
     if (!fitTraceViewportToContent()) {
-      setTraceViewport(DEFAULT_TRACE_VIEWPORT);
+      updateTraceViewport(DEFAULT_TRACE_VIEWPORT);
     }
   }
 
@@ -1669,14 +1823,14 @@ function App() {
     pendingContentFitRef.current = false;
     const viewport = editorViewportRef.current;
     if (!viewport || !analysis) {
-      setTraceViewport({ zoom: 1, panX: 0, panY: 0 });
+      updateTraceViewport({ zoom: 1, panX: 0, panY: 0 });
       return;
     }
     const fitted = fittedTraceSize(
       { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
       { width: viewport.clientWidth, height: viewport.clientHeight }
     );
-    setTraceViewport(centerBoundsInViewport(
+    updateTraceViewport(centerBoundsInViewport(
       traceContentBounds(),
       { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
       { width: viewport.clientWidth, height: viewport.clientHeight },
@@ -1687,7 +1841,7 @@ function App() {
   function fitTraceViewportToContent() {
     const viewport = editorViewportRef.current;
     if (!viewport || !analysis) return false;
-    setTraceViewport(fitBoundsToViewport(
+    updateTraceViewport(fitBoundsToViewport(
       traceContentBounds(),
       { width: analysis.previewWidthPx, height: analysis.previewHeightPx },
       { width: viewport.clientWidth, height: viewport.clientHeight },
@@ -1738,7 +1892,7 @@ function App() {
               </button>
               <button type="button" onClick={() => {
                 closeFileMenu();
-                downloadProjectFile("Saved");
+                downloadProjectFile();
               }} disabled={!canSaveProject}>
                 <Save size={15} />
                 Save Project
@@ -1768,7 +1922,7 @@ function App() {
             <section className="upload-step" aria-label="Upload step" ref={setupSectionRef}>
               <label className="upload-box">
                 <FileImage size={28} />
-                <span>{image ? image.name : "Choose a complete PNG, JPG, or SVG"}</span>
+                <span>{sourceCandidate?.file.name ?? image?.name ?? "Choose a complete PNG, JPG, or SVG"}</span>
                 <input
                   aria-label="Source image"
                   type="file"
@@ -1779,8 +1933,9 @@ function App() {
                   }}
                 />
               </label>
-              {svgLineworkDetected ? <p className="helper-note">SVG linework detected. Its authored dark ink will open as editable starter lines.</p> : null}
+              {(sourceCandidate?.lineworkDetected ?? svgLineworkDetected) ? <p className="helper-note">SVG linework detected. Its authored dark ink will open as editable starter lines.</p> : null}
               <p className="helper-note">Choose one complete character on a simple background.</p>
+              {error ? <div className="error-box">{error}</div> : null}
               <NumberField
                 label="Finished height"
                 suffix="in"
@@ -1795,9 +1950,13 @@ function App() {
                 <input
                   aria-label="Project name (optional)"
                   type="text"
-                  value={projectName}
-                  onChange={(event) => setProjectName(event.target.value)}
-                  onBlur={() => setProjectName((name) => name.trim() || "Cutout Project")}
+                  value={projectNameDraft}
+                  onChange={(event) => setProjectNameDraft(event.target.value)}
+                  onBlur={() => {
+                    const normalizedName = projectNameDraft.trim() || "Cutout Project";
+                    setProjectNameDraft(normalizedName);
+                    applyProjectSessionAction({ type: "rename-project", projectName: normalizedName });
+                  }}
                 />
               </label>
               <button className="primary-action upload-primary-action" onClick={() => void generateTemplate("balanced")} disabled={!canAnalyze}>
@@ -1855,10 +2014,10 @@ function App() {
             <input
               type="checkbox"
               checked={settings.includeInstructionCoverPage}
-              onChange={() => setSettings((current) => ({
-                ...current,
-                includeInstructionCoverPage: !current.includeInstructionCoverPage
-              }))}
+              onChange={() => updateProjectSettings({
+                ...settings,
+                includeInstructionCoverPage: !settings.includeInstructionCoverPage
+              })}
             />
             Include instruction cover page
           </label>
@@ -1931,15 +2090,12 @@ function App() {
                         brushSize={brushSize}
                         undoDisabled={undoDisabled}
                         showReference={showReference}
-                        cutlineValid={Boolean(analysis.outerCutPath.trim())}
-                        acceptDisabled={
-                          aiProposalBlocksAdvancement
-                        }
+                        canAccept={projectCapabilities.guidedWorkflow.canCompleteLineworkReview}
                         removalPreviewCount={removalPreviewCount}
                         onRemove={() => setEditorTool("remove")}
                         onAdd={selectAddMissingLine}
                         onUndo={undoDetailEdit}
-                        onToggleOriginal={() => setShowReference((shown) => !shown)}
+                        onToggleOriginal={() => setShowReference(!showReference)}
                         onFit={resetZoom}
                         onAccept={acceptCleanLines}
                       />
@@ -1948,17 +2104,21 @@ function App() {
                         reviewed={workflowProgress.lineworkReviewed}
                         review={traceQualityReview}
                       />
-                      {needsAiSimplification ? (
+                      {showAiProposal ? (
                         <AiProposalCard
-                          phase={aiProposalPhase}
+                          phase={aiProposalState.status}
                           proposal={aiProposal}
                           review={aiProposalReview}
                           reviewView={aiProposalReviewView}
                           originalPreviewPngDataUrl={analysis.paintGuidePngDataUrl}
                           outerLinePngDataUrl={analysis.outerLinePngDataUrl}
                           error={aiProposalError}
+                          canBegin={projectCapabilities.aiProposal.canBeginRequest}
+                          canConfirm={projectCapabilities.aiProposal.canConfirmRequest}
+                          canAccept={projectCapabilities.aiProposal.canAccept}
+                          canReject={projectCapabilities.aiProposal.canReject}
                           onBegin={beginAiLineworkRequest}
-                          onCancel={() => setAiProposalPhase("idle")}
+                          onCancel={cancelAiLineworkRequest}
                           onConfirm={() => void requestAiLineworkProposal()}
                           onReviewView={selectAiProposalReviewView}
                           onAccept={acceptAiLineworkProposal}
@@ -2137,7 +2297,7 @@ function App() {
                   </div>
                   <div className="layer-controls" aria-label="Trace Studio layer visibility">
                     <label>
-                      <input type="checkbox" checked={showReference} onChange={() => setShowReference((shown) => !shown)} />
+                      <input type="checkbox" checked={showReference} onChange={() => setShowReference(!showReference)} />
                       Show original
                     </label>
                     {showReference ? (
@@ -2148,21 +2308,21 @@ function App() {
                           min={0}
                           max={100}
                           value={referenceOpacity}
-                          onChange={(event) => setReferenceOpacity(Number(event.target.value))}
+                          onChange={(event) => updateReferenceOpacity(Number(event.target.value))}
                         />
                       </label>
                     ) : null}
                     <label>
-                      <input type="checkbox" checked={showCutline} onChange={() => setShowCutline((shown) => !shown)} />
+                      <input type="checkbox" checked={showCutline} onChange={() => setShowCutline(!showCutline)} />
                       Cutline
                     </label>
                     <label>
-                      <input type="checkbox" checked={showManualLines} onChange={() => setShowManualLines((shown) => !shown)} />
+                      <input type="checkbox" checked={showManualLines} onChange={() => setShowManualLines(!showManualLines)} />
                       {traceStudioOpen ? "Manual lines" : "Editable starter lines"}
                     </label>
                     {traceStudioOpen ? (
                       <label>
-                        <input type="checkbox" checked={showSuggestions} onChange={() => setShowSuggestions((shown) => !shown)} />
+                        <input type="checkbox" checked={showSuggestions} onChange={() => setShowSuggestions(!showSuggestions)} />
                         Starter lines
                       </label>
                     ) : null}
@@ -2421,8 +2581,8 @@ function App() {
               ) : null}
               {workflowProgress.activeStep === "colors" ? (
                 <div className="colors-step-actions" aria-label="Colors step actions">
-                  <button className="primary-action" onClick={() => finishColorReview("reviewed")}>Continue to Export</button>
-                  <button className="tool-button" onClick={() => finishColorReview("skipped")}>Skip Paint Guide</button>
+                  <button className="primary-action" onClick={() => finishColorReview("reviewed")} disabled={!projectCapabilities.guidedWorkflow.canCompleteColorReview}>Continue to Export</button>
+                  <button className="tool-button" onClick={() => finishColorReview("skipped")} disabled={!projectCapabilities.guidedWorkflow.canCompleteColorReview}>Skip Paint Guide</button>
                 </div>
               ) : null}
               {colorsStepActive ? (
@@ -2453,7 +2613,7 @@ function App() {
                 <details className="edit-color-details" aria-label="Edit Color Details" open={colorDetailsOpen} onToggle={(event) => setColorDetailsOpen(event.currentTarget.open)}>
                   <summary>Edit Color Details</summary>
                 <div className="paint-guide-disclosure-content">
-                  <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => setSettings((current) => ({ ...current, paletteSize: value }))} />
+                  <RangeField label="Paint colors" min={2} max={10} value={settings.paletteSize} onChange={(value) => updateProjectSettings({ ...settings, paletteSize: value })} />
                   <dl className="summary-grid">
                     <div>
                       <dt>Finished size</dt>
@@ -2682,7 +2842,13 @@ function App() {
                                 <input
                                   type="color"
                                   value={isValidHexColor(entry.hex) ? entry.hex : "#000000"}
-                                  onChange={(event) => updatePaintGuideEntry(entry.id, { hex: event.target.value })}
+                                  onChange={(event) => {
+                                    const transition = updatePaintGuideEntry(entry.id, { hex: event.target.value });
+                                    if (transition?.outcome.status === "applied" || transition?.outcome.status === "unchanged") {
+                                      clearPaintHexDraft(entry.id);
+                                      void refreshPaintMatchesForColor(entry.id);
+                                    }
+                                  }}
                                   aria-label={`Color picker for ${entry.label}`}
                                 />
                               </label>
@@ -2690,10 +2856,10 @@ function App() {
                                 <span>Hex</span>
                                 <input
                                   type="text"
-                                  value={entry.hex}
-                                  onChange={(event) => updatePaintGuideEntry(entry.id, { hex: event.target.value })}
+                                  value={paintHexDrafts[entry.id] ?? entry.hex}
+                                  onChange={(event) => setPaintHexDraft(entry.id, event.target.value)}
                                   onBlur={(event) => {
-                                    if (isValidHexColor(event.target.value)) void refreshPaintMatchesForColor(entry.id, event.target.value);
+                                    void commitPaintHexDraft(entry.id, event.target.value);
                                   }}
                                 />
                               </label>
@@ -2809,11 +2975,11 @@ function App() {
               canExportPdf={canExport}
               canExportSvg={canExportSvg}
               onNavigate={navigateToWorkflowStep}
-              onToggleCover={() => setSettings((current) => ({ ...current, includeInstructionCoverPage: !current.includeInstructionCoverPage }))}
+              onToggleCover={() => updateProjectSettings({ ...settings, includeInstructionCoverPage: !settings.includeInstructionCoverPage })}
               onToggleColorGuide={() => setExportColorGuide(!settings.includePaintGuidePage)}
               onDownloadPdf={() => void exportPdf()}
               onDownloadSvg={exportSvgLinework}
-              onSaveProject={() => downloadProjectFile("Saved")}
+              onSaveProject={downloadProjectFile}
             />
           </div>
         ) : null}
@@ -2840,7 +3006,7 @@ function ExportWorkspace({
   onSaveProject
 }: {
   analysis: Analysis;
-  steps: WorkflowStepItem[];
+  steps: readonly WorkflowStepItem[];
   includeCover: boolean;
   includeColorGuide: boolean;
   error: string | null;
@@ -2896,7 +3062,7 @@ function GuidedWorkflowCard({
   steps,
   onNavigate
 }: {
-  steps: WorkflowStepItem[];
+  steps: readonly WorkflowStepItem[];
   onNavigate: (step: WorkflowStep) => void;
 }) {
   return (
@@ -2969,6 +3135,20 @@ function paintSelectionPatch(entry: PaintGuideEntry, value: string): PaintGuideP
   return { selectedMatchId: value, manualOverride: "" };
 }
 
+function normalizePaintHexDraft(hex: string) {
+  const value = hex.trim().toLowerCase();
+  const prefixed = value.startsWith("#") ? value : `#${value}`;
+  if (/^#[0-9a-f]{3}$/i.test(prefixed)) {
+    const [hash, r, g, b] = prefixed;
+    return `${hash}${r}${r}${g}${g}${b}${b}`;
+  }
+  return prefixed;
+}
+
+function isValidSessionPaintHex(hex: string) {
+  return /^#?[0-9a-f]{3}$/i.test(hex.trim()) || /^#?[0-9a-f]{6}$/i.test(hex.trim());
+}
+
 function AiProposalCard({
   phase,
   proposal,
@@ -2977,6 +3157,10 @@ function AiProposalCard({
   originalPreviewPngDataUrl,
   outerLinePngDataUrl,
   error,
+  canBegin,
+  canConfirm,
+  canAccept,
+  canReject,
   onBegin,
   onCancel,
   onConfirm,
@@ -2984,13 +3168,17 @@ function AiProposalCard({
   onAccept,
   onReject
 }: {
-  phase: AiProposalPhase;
-  proposal: AiProposalResponse | null;
+  phase: ProjectSessionAiProposalState["status"];
+  proposal: ProjectSessionAiProposalResult | null;
   review: AiProposalReview | null;
   reviewView: AiProposalReviewView;
   originalPreviewPngDataUrl: string;
   outerLinePngDataUrl: string;
   error: string | null;
+  canBegin: boolean;
+  canConfirm: boolean;
+  canAccept: boolean;
+  canReject: boolean;
   onBegin: () => void;
   onCancel: () => void;
   onConfirm: () => void;
@@ -3006,7 +3194,7 @@ function AiProposalCard({
             <strong>Needs Simplification</strong>
             <p>Ask for one optional Wood-Transfer Style proposal. Your Cut Line, print geometry, and current Detail Lines stay unchanged.</p>
           </div>
-          <button className="tool-button" onClick={onBegin}><Sparkles size={16} /> Request AI proposal</button>
+          <button className="tool-button" onClick={onBegin} disabled={!canBegin}><Sparkles size={16} /> Request AI proposal</button>
         </>
       ) : null}
       {phase === "confirming" ? (
@@ -3016,7 +3204,7 @@ function AiProposalCard({
             <p>Your source image will be uploaded to OpenAI under its normal retention terms. Exact estimated cost: ${AI_PROPOSAL_ESTIMATE_USD.toFixed(2)}. No automatic retry will be sent.</p>
           </div>
           <div className="ai-proposal-actions">
-            <button className="primary-action" onClick={onConfirm}>Confirm upload and request one proposal</button>
+            <button className="primary-action" onClick={onConfirm} disabled={!canConfirm}>Confirm upload and request one proposal</button>
             <button className="tool-button" onClick={onCancel}>Cancel</button>
           </div>
         </>
@@ -3062,16 +3250,16 @@ function AiProposalCard({
               <div className="ai-proposal-actions">
                 {review.decision === "pending" ? (
                   <>
-                    <button className="primary-action" onClick={onAccept} disabled={!canAcceptAiProposal(review)}>Accept AI Detail Lines</button>
-                    <button className="tool-button" onClick={onReject}>Reject proposal</button>
+                    <button className="primary-action" onClick={onAccept} disabled={!canAccept}>Accept AI Detail Lines</button>
+                    <button className="tool-button" onClick={onReject} disabled={!canReject}>Reject proposal</button>
                   </>
                 ) : null}
-                {review.decision === "review-only" ? <button className="tool-button" onClick={onBegin}>Request another proposal</button> : null}
+                {review.decision === "review-only" ? <button className="tool-button" onClick={onBegin} disabled={!canBegin}>Request another proposal</button> : null}
               </div>
             </>
           ) : (
             <div className="ai-proposal-actions">
-              <button className="tool-button" onClick={onBegin}>Request another proposal</button>
+              <button className="tool-button" onClick={onBegin} disabled={!canBegin}>Request another proposal</button>
             </div>
           )}
         </>
@@ -3091,8 +3279,7 @@ function CleanLinesPrimaryControls({
   brushSize,
   undoDisabled,
   showReference,
-  cutlineValid,
-  acceptDisabled,
+  canAccept,
   removalPreviewCount,
   onRemove,
   onAdd,
@@ -3105,8 +3292,7 @@ function CleanLinesPrimaryControls({
   brushSize: BrushSize;
   undoDisabled: boolean;
   showReference: boolean;
-  cutlineValid: boolean;
-  acceptDisabled: boolean;
+  canAccept: boolean;
   removalPreviewCount: number;
   onRemove: () => void;
   onAdd: () => void;
@@ -3123,7 +3309,7 @@ function CleanLinesPrimaryControls({
         <button className="tool-button" onClick={onUndo} disabled={undoDisabled}><Undo2 size={16} /> Undo</button>
         <button className={showReference ? "tool-button selected" : "tool-button"} onClick={onToggleOriginal}><Eye size={16} /> Show Original</button>
         <button className="tool-button" onClick={onFit}><ZoomIn size={16} /> Fit</button>
-        <button className="primary-action" onClick={onAccept} disabled={!cutlineValid || acceptDisabled}><ChevronRight size={16} /> Looks Good - Continue to Colors</button>
+        <button className="primary-action" onClick={onAccept} disabled={!canAccept}><ChevronRight size={16} /> Looks Good - Continue to Colors</button>
       </div>
       <p className="clean-tool-instruction" id="connected-line-preview-status" aria-label="Clean Lines instruction" role="status">
         {editorTool === "remove"
@@ -3185,7 +3371,16 @@ function brushPixels(size: BrushSize) {
   return 20;
 }
 
-function parseAiProposalResponse(value: unknown, analysis: Analysis): AiProposalResponse {
+function inputReadinessForAnalysis(
+  analysis: Analysis,
+  svgLineworkDetected: boolean
+): ProjectSessionInputReadiness {
+  return analysis.traceQuality?.detailExtractionModeUsed === "rendered" && !svgLineworkDetected
+    ? "needs-simplification"
+    : "ready-line-art";
+}
+
+function parseAiProposalResponse(value: unknown, analysis: Analysis): ProjectSessionAiProposalResult {
   if (typeof value !== "object" || value === null) throw new Error("AI proposal response was malformed.");
   const proposal = value as Record<string, unknown>;
   if (proposal.status !== "pending-review" && proposal.status !== "review-only") {
@@ -3219,7 +3414,7 @@ function parseAiProposalResponse(value: unknown, analysis: Analysis): AiProposal
   ) {
     throw new Error("AI proposal response metadata was malformed.");
   }
-  return proposal as AiProposalResponse;
+  return proposal as ProjectSessionAiProposalResult;
 }
 
 function traceActionLabel({ image, analysis, busy, traceMode }: { image: File | null; analysis: Analysis | null; busy: boolean; traceMode: TraceMode }) {

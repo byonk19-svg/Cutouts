@@ -2,6 +2,289 @@ import { expect, test, type Download, type Locator, type Page } from "@playwrigh
 import { mkdirSync, readFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
+test("locked Guided Workflow requests stay rejected when disabled controls are bypassed", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+
+  const guidedWorkflow = page.getByLabel("Guided workflow");
+  const uploadButton = guidedWorkflow.getByRole("button", { name: /Upload/ });
+  const colorsButton = guidedWorkflow.getByRole("button", { name: /Colors/ });
+  await expect(colorsButton).toBeDisabled();
+  await colorsButton.evaluate((element) => {
+    element.removeAttribute("disabled");
+    (element as HTMLButtonElement).click();
+  });
+  await expect(uploadButton).toHaveAttribute("aria-current", "step");
+  await expect(page.getByLabel("Colors workspace")).toHaveCount(0);
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "capability-enforcement.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const cleanButton = guidedWorkflow.getByRole("button", { name: /Clean Lines/ });
+  const exportButton = guidedWorkflow.getByRole("button", { name: /Export/ });
+  await expect(cleanButton).toHaveAttribute("aria-current", "step");
+  await expect(exportButton).toBeDisabled();
+  await exportButton.evaluate((element) => {
+    element.removeAttribute("disabled");
+    (element as HTMLButtonElement).click();
+  });
+  await expect(cleanButton).toHaveAttribute("aria-current", "step");
+  await expect(page.getByLabel("Export workspace")).toHaveCount(0);
+
+  await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await expect(colorsButton).toHaveAttribute("aria-current", "step");
+  await cleanButton.click();
+  await expect(colorsButton).toBeDisabled();
+  await expect(colorsButton).toContainText("available");
+  await colorsButton.evaluate((element) => {
+    element.removeAttribute("disabled");
+    (element as HTMLButtonElement).click();
+  });
+  await expect(cleanButton).toHaveAttribute("aria-current", "step");
+});
+
+test("project persistence keeps one coherent revision and recovers from a visible Autosave failure", async ({ page }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("persistence-test-started")) return;
+    localStorage.clear();
+    sessionStorage.setItem("persistence-test-started", "true");
+  });
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "persistence-session.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByLabel("Project name (optional)").fill("Persistence Session");
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const fileMenu = page.getByLabel("File menu");
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByText("Auto-saved")).toBeVisible({ timeout: 15_000 });
+  const initialAutosave = await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"));
+  expect(initialAutosave).not.toBeNull();
+  await fileMenu.getByText("File", { exact: true }).click();
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    let remainingFailures = 1;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === "cutout-studio:auto-save:v1" && remainingFailures > 0) {
+        remainingFailures -= 1;
+        throw new Error("controlled Autosave failure");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  const showOriginal = page.getByLabel("Trace Studio layer visibility").getByLabel("Show original");
+  await expect(showOriginal).toBeChecked();
+  await showOriginal.uncheck();
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByText("Auto-save failed")).toBeVisible({ timeout: 15_000 });
+  await expect(showOriginal).not.toBeChecked();
+  expect(await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"))).toBe(initialAutosave);
+
+  const projectDownloadPromise = page.waitForEvent("download");
+  await fileMenu.getByRole("button", { name: "Save Project" }).click();
+  const projectDownload = await projectDownloadPromise;
+  const serializedProject = await readDownloadText(projectDownload);
+  const downloadedProject = JSON.parse(serializedProject);
+  expect(downloadedProject.projectName).toBe("Persistence Session");
+  expect(downloadedProject.layerVisibility.showReference).toBe(false);
+  for (const runtimeOnlyField of ["operation", "persistence", "pendingEffects", "unacceptedAiProposal", "manualHistory", "manualRedoHistory", "history", "redoHistory", "selectedStrokeId", "aiProposalReview"]) {
+    expect(downloadedProject).not.toHaveProperty(runtimeOnlyField);
+  }
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByText("Saved")).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"))).toBe(serializedProject);
+
+  await fileMenu.getByText("File", { exact: true }).click();
+  await showOriginal.check();
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "restored.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(serializedProject)
+  });
+  await expect(showOriginal).not.toBeChecked();
+  await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
+  const editorTools = page.getByLabel("Template editor tools");
+  await expect(editorTools.getByRole("button", { name: "Undo" })).toBeDisabled();
+  await expect(editorTools.getByRole("button", { name: "Redo" })).toBeDisabled();
+
+  await expect.poll(async () => {
+    const raw = await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"));
+    return raw && raw !== serializedProject
+      ? JSON.parse(raw).layerVisibility.showReference
+      : null;
+  }).toBe(false);
+  const autosaveBeforeInvalidOpen = await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"));
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "unsupported.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ schemaVersion: 999 }))
+  });
+  await fileMenu.getByText("File", { exact: true }).click();
+  await expect(fileMenu.getByText("Project import failed")).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"))).toBe(autosaveBeforeInvalidOpen);
+  await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
+
+  await page.reload();
+  await expect(page.getByLabel("Guided workflow").getByRole("button", { name: /Clean Lines/ })).toHaveAttribute("aria-current", "step");
+
+  const acceptedDetail = "data:image/png;base64,accepted-detail-preserved-for-reuse";
+  const manualProjectWithAcceptedDetail = {
+    ...downloadedProject,
+    traceMode: "manual",
+    settings: { ...downloadedProject.settings, templateStyle: "manual" },
+    editedDetailPngDataUrl: acceptedDetail
+  };
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "manual-with-accepted-detail.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(manualProjectWithAcceptedDetail))
+  });
+  await fileMenu.getByText("File", { exact: true }).click();
+  const manualDownloadPromise = page.waitForEvent("download");
+  await fileMenu.getByRole("button", { name: "Save Project" }).click();
+  const manualRoundTrip = JSON.parse(await readDownloadText(await manualDownloadPromise));
+  expect(manualRoundTrip.traceMode).toBe("manual");
+  expect(manualRoundTrip.editedDetailPngDataUrl).toBe(acceptedDetail);
+});
+
+test("Editor Transactions keep Undo and Redo artifact-only while preserving paint work", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "editor-transactions.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const guidedWorkflow = page.getByLabel("Guided workflow");
+  const cleanControls = page.getByLabel("Clean Lines primary controls");
+  await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  const colorDetails = page.getByLabel("Edit color details");
+  if (!await colorDetails.evaluate((element) => element instanceof HTMLDetailsElement && element.open)) {
+    await colorDetails.locator(":scope > summary").click();
+  }
+  await addProjectPaintColor(page, "#315c78", "Lifecycle paint");
+  await page.getByRole("button", { name: "Continue to Export" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
+
+  await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  const rasterBefore = await detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await cleanControls.getByRole("button", { name: "Add Missing Line" }).click();
+  await drawStroke(detailCanvas, [
+    [0.34, 0.31],
+    [0.44, 0.35],
+    [0.54, 0.35],
+    [0.64, 0.31]
+  ]);
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(rasterBefore);
+  const rasterAfter = await detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.projectPalette.some((color: { label: string }) => color.label === "Lifecycle paint")).toBe(true);
+
+  await cleanControls.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterBefore);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+
+  const moreTools = page.getByLabel("More Tools");
+  if (!await moreTools.evaluate((element) => element instanceof HTMLDetailsElement && element.open)) {
+    await moreTools.locator("summary").click();
+  }
+  await page.getByLabel("Template editor tools").getByRole("button", { name: "Redo" }).click();
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterAfter);
+
+  await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await page.getByRole("button", { name: "Continue to Export" }).click();
+  await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
+  if (!await moreTools.evaluate((element) => element instanceof HTMLDetailsElement && element.open)) {
+    await moreTools.locator("summary").click();
+  }
+  await page.getByLabel("Starter detail line guidance").getByRole("button", { name: "Use blank Trace Studio" }).click();
+  await cleanControls.getByRole("button", { name: "Add Missing Line" }).click();
+  await drawStroke(detailCanvas, [
+    [0.40, 0.42],
+    [0.48, 0.46],
+    [0.56, 0.46],
+    [0.64, 0.42]
+  ]);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.projectPalette.some((color: { label: string }) => color.label === "Lifecycle paint")).toBe(true);
+
+  await cleanControls.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(0);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+  await page.getByLabel("Template editor tools").getByRole("button", { name: "Redo" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+});
+
+test("project name and Finished Size preserve reviewed project work", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "session-transition.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByLabel("Project name (optional)").fill("Session Transition");
+  await uploadStep.getByLabel("Finished height").fill("42");
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const guidedWorkflow = page.getByLabel("Guided workflow");
+  const cleanControls = page.getByLabel("Clean Lines primary controls");
+  await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await expect(guidedWorkflow.getByRole("button", { name: /Colors/ })).toHaveAttribute("aria-current", "step");
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(true);
+  const before = await savedProjectSnapshot(page);
+  if (!before) throw new Error("Autosave did not contain the reviewed project.");
+
+  await guidedWorkflow.getByRole("button", { name: /Upload/ }).click();
+  await uploadStep.getByLabel("Project name (optional)").fill("Session Transition Revised");
+  await uploadStep.getByLabel("Finished height").fill("48");
+
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.projectName).toBe("Session Transition Revised");
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.settings.finishedHeightIn).toBe(48);
+  const after = await savedProjectSnapshot(page);
+  if (!after) throw new Error("Autosave did not contain the revised project.");
+
+  expect(after.analysis.finishedHeightIn).toBe(48);
+  expect(after.analysis.finishedWidthIn).toBeCloseTo(before.analysis.finishedWidthIn * (48 / 42), 2);
+  expect(after.analysis.outerCutPath).toBe(before.analysis.outerCutPath);
+  expect(after.analysis.detailLinePngDataUrl).toBe(before.analysis.detailLinePngDataUrl);
+  expect(after.editedDetailPngDataUrl).toBe(before.editedDetailPngDataUrl);
+  expect(after.manualStrokes).toEqual(before.manualStrokes);
+  expect(after.projectPalette).toEqual(before.projectPalette);
+  expect(after.sourceImage).toEqual(before.sourceImage);
+  expect(after.cleanupChecks).toEqual(before.cleanupChecks);
+  expect(after.layerVisibility).toEqual(before.layerVisibility);
+  expect(after.referenceOpacity).toBe(before.referenceOpacity);
+  expect(after.traceViewport).toEqual(before.traceViewport);
+  expect(after.workflowProgress).toEqual({
+    ...before.workflowProgress,
+    activeStep: "upload"
+  });
+});
+
 test("maker can use authored SVG ink as editable starter lines", async ({ page }) => {
   await page.goto("/");
   const uploadStep = page.getByLabel("Upload step");
@@ -183,17 +466,18 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await colorsWorkspace.getByRole("button", { name: "Skip Paint Guide" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
   const exportWorkspace = page.getByLabel("Export workspace");
-  await expect(exportWorkspace.getByLabel("Include Color Guide")).not.toBeChecked();
+  const includeColorGuide = exportWorkspace.getByLabel("Include Color Guide");
+  await expect(includeColorGuide).not.toBeChecked();
   await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(false);
-  await exportWorkspace.getByLabel("Include Color Guide").check();
-  await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(true);
+  await includeColorGuide.click();
+  await expect(includeColorGuide).not.toBeChecked();
+  await expect(page.getByText("Complete color review before including the Color Guide.")).toBeVisible();
   await expect.poll(() => savedProjectColorsOutcome(page)).toBe("skipped");
-  await exportWorkspace.getByLabel("Include Color Guide").uncheck();
-  await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(false);
   await guidedWorkflow.getByRole("button", { name: /Colors/ }).click();
   await expect(editColorDetails.getByLabel("Paint Palette Editor")).toBeVisible();
   await colorsWorkspace.getByRole("button", { name: "Continue to Export" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
+  await expect(page.getByText("Complete color review before including the Color Guide.")).toHaveCount(0);
   await expect(exportWorkspace.getByLabel("Include Color Guide")).toBeChecked();
   await exportWorkspace.getByLabel("Include Color Guide").uncheck();
   await expect.poll(() => savedProjectIncludesPaintGuide(page)).toBe(false);
@@ -785,6 +1069,13 @@ async function savedProjectColorsOutcome(page: Page) {
     const raw = localStorage.getItem("cutout-studio:auto-save:v1");
     if (!raw) return null;
     return JSON.parse(raw).workflowProgress.colorsOutcome as string;
+  });
+}
+
+async function savedProjectSnapshot(page: Page) {
+  return page.evaluate(() => {
+    const raw = localStorage.getItem("cutout-studio:auto-save:v1");
+    return raw ? JSON.parse(raw) : null;
   });
 }
 
