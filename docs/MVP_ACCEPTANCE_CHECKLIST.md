@@ -37,3 +37,18 @@ Use this checklist after `pnpm verify` and `pnpm test:e2e` pass. Automation prov
 - Confirm hidden colors are not in the shopping list.
 - Confirm selected matches and manual overrides are understandable as shopping guidance.
 - Treat all matches as approximate. Screen colors, printer output, store lighting, and paint batches can vary.
+
+## Accepted v0.1 Baseline — 2026-07-21
+
+- **Product commit:** `c1144b6` (`origin/main` when the packet was generated)
+- **Acceptance evidence head:** `711ca320e8722052303cf3cab314a3fe45697d52`
+- **Accepted packet:** `output/pdf/coraline-physical-mvp-template-packet.pdf`
+- **Packet identity:** `Coraline Physical MVP`, `30.00in` high x `11.97in` wide, 10 US-letter pages
+- **Packet SHA-256:** `6a7050fafeac0b53f831d985aa8027db51933e46ef56faefb46988581129f1c2`
+- **Automated verification:** `pnpm verify` passed (83 backend tests, all TypeScript suites, and production build); isolated `pnpm test:e2e` passed all 30 Chromium tests.
+- **Artifact verification:** all PDF pages rendered and were visually inspected; PDF structure, page size, page count, calibration geometry, and adjacent overlap strips passed digital inspection.
+- **Physical result:** the owner printed the cover at Actual size / 100%, reported calibration as working correctly, and reported that two adjacent printed pages taped and aligned correctly.
+- **Owner waivers:** the exact ruler measurement was not separately supplied; the outer/interior carbon-transfer exercise and separate in-store paint/shopping simulation were not performed. The owner explicitly accepted these waivers for v0.1; they are not claimed as completed physical observations.
+- **Must-fix defects:** none reported.
+- **Known product boundary:** v0.1 remains a developer-run local personal-workflow app, without installer, hosting, marketplace packaging, or new post-v0.1 capabilities.
+- **Release mechanics:** no tag, push, deployment, packaging, or worktree cleanup is authorized by this acceptance record.

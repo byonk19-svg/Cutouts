@@ -1,12 +1,12 @@
 # Cutout Studio Forward Plan
 
 **Generated:** 2026-07-21
-**Current objective:** Prove the existing personal wood-cutout workflow at the
-physical worktable, fix only demonstrated blockers, and establish a trustworthy
-v0.1 baseline before choosing another product capability.
-**Current gate:** Record the result in
-[.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md](../../../.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md)
-before starting any new feature or research work.
+**Current objective:** Preserve the accepted v0.1 personal wood-cutout workflow
+baseline and choose any next product capability from explicit maker friction or
+an explicit new goal.
+**Current gate:** The v0.1 physical acceptance record is complete in
+[.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md](../../../.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md).
+No new product lane has been selected.
 
 ## Why this plan exists
 
@@ -89,7 +89,16 @@ next.
 6. Record each result in the physical-validation issue.
 
 **Done when:** one named packet has a calibration measurement, alignment
-result, transfer result, and paint-guide result.
+result, transfer result, and paint-guide result, or the owner explicitly
+accepts a clearly recorded waiver without representing an unperformed check as
+physical evidence.
+
+**Result:** completed by owner acceptance on 2026-07-21. The owner reported
+successful 100% printing, calibration, and two-page alignment, then explicitly
+accepted the packet while waiving an exact numeric ruler record, a separate
+carbon-transfer exercise, and a separate in-store paint-guide simulation. The
+canonical issue records those waivers without claiming the checks were
+physically performed.
 
 ## Sprint 2: Fix only demonstrated blockers
 
@@ -110,6 +119,8 @@ For each failure:
    conventions.
 5. Repeat only the affected physical check and record the result.
 
+**Result:** skipped. Physical acceptance produced no reported must-fix defect.
+
 ## Sprint 3: Establish the v0.1 baseline
 
 1. Run `pnpm verify`, isolated full `pnpm test:e2e`, `git diff --check`, the
@@ -122,6 +133,15 @@ For each failure:
 
 **Done when:** one commit, one physically accepted packet, and one completed
 checklist define the v0.1 baseline.
+
+**Result:** completed on 2026-07-21. Product baseline `c1144b6` produced the
+accepted `Coraline Physical MVP` packet. `pnpm verify` passed with 83 backend
+tests plus all TypeScript suites and the production build; isolated
+`pnpm test:e2e` passed all 30 Chromium tests. The packet identity, SHA-256,
+physical results, explicit owner waivers, known limitations, and unauthorized
+release actions are recorded in `docs/MVP_ACCEPTANCE_CHECKLIST.md` and the
+canonical physical issue. Tagging, pushing, deployment, packaging, and
+branch/worktree cleanup remain separate decisions requiring authorization.
 
 ## Parked until after v0.1
 
