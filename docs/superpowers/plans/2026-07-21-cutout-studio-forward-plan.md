@@ -5,7 +5,7 @@
 physical worktable, fix only demonstrated blockers, and establish a trustworthy
 v0.1 baseline before choosing another product capability.
 **Current gate:** Record the result in
-`.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md`
+[.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md](../../../.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md)
 before starting any new feature or research work.
 
 ## Why this plan exists
@@ -65,13 +65,13 @@ next.
 ## Sprint 1: Physical MVP validation
 
 **Primary issue:**
-`.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md`
+[.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md](../../../.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md)
 
 ### Codex-owned preparation
 
 1. From current `origin/main`, produce a fresh Coraline Template Packet PDF
    under `output/pdf/`, and treat
-   `.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md`
+   [.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md](../../../.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md)
    as the authoritative record for the generated PDF path and physical results.
 2. Confirm the PDF opens and includes the expected cover, tiled pages, finished
    size, Cut Line, and accepted Detail Lines.

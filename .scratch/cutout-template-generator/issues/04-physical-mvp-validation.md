@@ -33,3 +33,5 @@ This issue should stay focused on physical trust. Do not expand the paint catalo
 
 - This is intentionally `ready-for-human` because it requires physical printing, measuring, taping, and tracing.
 - If physical validation exposes a concrete software issue, create a narrow follow-up implementation issue for that specific fix.
+- Partial evidence exists from the authored-line-art workflow ticket dated 2026-07-21: the saved authored-line-art PDF was printed at 100% / Actual Size and the maker found the calibration, tiled Cut Line continuity, and recognizable interior transfer details acceptable.
+- This broader gate is still open because it does not yet record the exact calibration measurement, the full explicit two-page tape procedure, one outer plus one interior transfer check, the line-weight assessment, or the paint-guide and shopping-list review for the canonical Coraline Template Packet.

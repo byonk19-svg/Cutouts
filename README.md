@@ -65,10 +65,10 @@ See `docs/MVP_ACCEPTANCE_CHECKLIST.md` for the manual print validation steps tha
 ## Current Status
 
 The current forward plan lives at
-`docs/superpowers/plans/2026-07-21-cutout-studio-forward-plan.md`.
+[docs/superpowers/plans/2026-07-21-cutout-studio-forward-plan.md](docs/superpowers/plans/2026-07-21-cutout-studio-forward-plan.md).
 
 The active gate is
-`.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md`.
+[.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md](.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md).
 No new feature or research work should begin until that issue records the
 physical MVP validation result.
 
