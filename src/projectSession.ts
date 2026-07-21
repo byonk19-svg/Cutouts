@@ -1262,10 +1262,13 @@ function guidedWorkflowCapabilities<TProject extends ProjectSessionProject>(
 function normalizeProjectWorkflow<TProject extends ProjectSessionProject>(project: TProject): TProject {
   const { unacceptedAiProposal: _legacyProposal, ...rest } = project as TProject & { unacceptedAiProposal?: unknown | null };
   const sanitized = rest as TProject;
-  const snappedProjectPalette = snapshotProjectPalette(sanitized.projectPalette);
-  const paletteNormalized = snappedProjectPalette === sanitized.projectPalette
-    ? sanitized
-    : { ...sanitized, projectPalette: snappedProjectPalette } as TProject;
+  const readinessNormalized = sanitized.analysis && sanitized.inputReadiness === undefined
+    ? { ...sanitized, inputReadiness: deriveInputReadiness(sanitized.analysis) } as TProject
+    : sanitized;
+  const snappedProjectPalette = snapshotProjectPalette(readinessNormalized.projectPalette);
+  const paletteNormalized = snappedProjectPalette === readinessNormalized.projectPalette
+    ? readinessNormalized
+    : { ...readinessNormalized, projectPalette: snappedProjectPalette } as TProject;
   const progress = normalizedWorkflowProgress(paletteNormalized);
   const current = paletteNormalized.workflowProgress;
   if (current && sameWorkflowProgress(current, progress)) return paletteNormalized;

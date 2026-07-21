@@ -213,7 +213,7 @@ const preservedProjectFields = {
   assert(view.capabilities.changeFinishedSize, "Finished Size capability should be available");
   assertDeepEqual(
     { ...view.project, projectName: "Coraline", settings, analysis },
-    { projectName: "Coraline", settings, analysis, ...preservedProjectFields },
+    { projectName: "Coraline", settings, analysis, ...preservedProjectFields, inputReadiness: "needs-simplification" },
     "project name should preserve every other durable field"
   );
   assertEqual(view.project.analysis.outerCutPath, analysis.outerCutPath, "Cut Line should be preserved");
@@ -342,6 +342,7 @@ const lifecycleProject = {
   settings,
   sourceImage: preservedProjectFields.sourceImage,
   analysis: analysisWithPalette,
+  inputReadiness: "needs-simplification" as const,
   editedDetailPngDataUrl: preservedProjectFields.editedDetailPngDataUrl,
   manualStrokes: preservedProjectFields.manualStrokes,
   projectPalette: defaultProjectPalette,
@@ -1569,6 +1570,29 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   });
   assertEqual(mismatchRejected.outcome.status, "failed", "restoring analysis for a different Finished Size should fail inside Project Session");
   assertEqual(mismatchRejected.session.project, reviewed.project, "mismatched-analysis restore should preserve the current active project");
+
+  const legacyRestorePreparing = transitionProjectSession(reviewed, { type: "begin-project-preparation", operation: "restore-project" });
+  if (legacyRestorePreparing.outcome.status !== "preparing") throw new Error("expected legacy restore token");
+  const { inputReadiness: _legacyReadiness, ...legacyRenderedProject } = lifecycleProject;
+  const legacyRestored = transitionProjectSession(legacyRestorePreparing.session, {
+    type: "complete-project-restore",
+    token: legacyRestorePreparing.outcome.token,
+    project: legacyRenderedProject,
+    requestAutosave: false
+  });
+  assertEqual(legacyRestored.outcome.status, "successful", "a project predating readiness metadata should restore successfully");
+  assertEqual(
+    legacyRestored.session.project.inputReadiness,
+    "needs-simplification",
+    "legacy rendered artwork should derive the conservative review-only readiness boundary"
+  );
+
+  const explicitReady = createProjectSession({ ...lifecycleProject, inputReadiness: "ready-line-art" as const });
+  assertEqual(
+    explicitReady.project.inputReadiness,
+    "ready-line-art",
+    "an explicit Ready Line Art classification should survive session normalization"
+  );
 }
 
 {

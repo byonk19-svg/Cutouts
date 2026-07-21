@@ -2094,7 +2094,7 @@ function App() {
                         reviewed={workflowProgress.lineworkReviewed}
                         review={traceQualityReview}
                       />
-                      {inputReadiness === "ready-line-art" ? <ReadyLineArtNotice /> : null}
+                      {inputReadiness === "ready-line-art" ? <ReadyLineArtNotice /> : <NeedsSimplificationNotice />}
                       {showAiProposal ? (
                         <AiProposalCard
                           phase={aiProposalState.status}
@@ -3386,6 +3386,18 @@ function ReadyLineArtNotice() {
         <p>Authored ink was prepared locally as aligned editable Detail Lines. Use Show Original to compare it with the underlay.</p>
       </div>
       <p>The protected Cut Line remains the only outside silhouette.</p>
+    </section>
+  );
+}
+
+function NeedsSimplificationNotice() {
+  return (
+    <section className="input-readiness-notice needs-simplification" aria-label="Input readiness">
+      <div>
+        <strong>Needs simplification</strong>
+        <p>The Cut Line is technically ready to review. Starter lines from color or rendered artwork are review-only and are not guaranteed Wood-Transfer Style transfer lines.</p>
+      </div>
+      <p>Keep, remove, or redraw them yourself. A separate proposal cannot replace accepted Detail Lines unless you explicitly review and accept it.</p>
     </section>
   );
 }

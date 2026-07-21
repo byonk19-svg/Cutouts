@@ -2330,6 +2330,12 @@ button:disabled {
   text-align: right;
 }
 
+.input-readiness-notice.needs-simplification {
+  border-color: #d8b36a;
+  background: #fff8e8;
+  color: #5b431c;
+}
+
 .clean-more-tools.always-open {
   border: 0;
   background: transparent;

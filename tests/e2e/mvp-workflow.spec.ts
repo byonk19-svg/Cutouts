@@ -1010,6 +1010,53 @@ test("existing line art is reported and can be overridden from More Tools", asyn
   await expect(imageType.getByRole("button", { name: "Rendered image" })).toHaveClass(/selected/);
 });
 
+test("rendered artwork stays review-only across legacy project restore", async ({ page }) => {
+  let providerRequests = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/generate-linework")) providerRequests += 1;
+  });
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  await page.getByLabel("Source image").setInputFiles({
+    name: "rendered-review-boundary.png",
+    mimeType: "image/png",
+    buffer: readFileSync("backend/tests/fixtures/coraline/coraline-best-clean-outline.png")
+  });
+  await page.getByRole("button", { name: "Generate Template" }).click();
+
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith("/api/analyze") && response.request().method() === "POST"),
+    moreTools.getByLabel("Image type").getByRole("button", { name: "Rendered image" }).click()
+  ]);
+
+  const readiness = page.getByLabel("Input readiness");
+  await expect(readiness).toContainText("Needs simplification");
+  await expect(readiness).toContainText("Cut Line is technically ready to review");
+  await expect(readiness).toContainText("not guaranteed Wood-Transfer Style transfer lines");
+  await expect(readiness).toContainText("cannot replace accepted Detail Lines unless you explicitly review and accept it");
+  await expect(readiness).not.toContainText("Ready line art");
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  const acceptedDetailBeforeRestore = await detailCanvas.evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL());
+
+  const fileMenu = page.getByLabel("File menu");
+  await fileMenu.getByText("File", { exact: true }).click();
+  const projectDownloadPromise = page.waitForEvent("download");
+  await fileMenu.getByRole("button", { name: "Save Project" }).click();
+  const legacyProject = JSON.parse(await readDownloadText(await projectDownloadPromise));
+  expect(legacyProject).not.toHaveProperty("inputReadiness");
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "legacy-rendered-review-boundary.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(legacyProject))
+  });
+
+  await expect(page.getByLabel("Input readiness")).toContainText("Needs simplification");
+  await expect.poll(() => detailCanvas.evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL())).toBe(acceptedDetailBeforeRestore);
+  expect(providerRequests).toBe(0);
+});
+
 async function captureResponsiveStep(page: Page, evidenceDir: string, step: string, workspace: Locator) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(workspace).toBeVisible();
