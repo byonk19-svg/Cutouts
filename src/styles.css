@@ -1030,6 +1030,7 @@ button:disabled {
 .suggestion-layer,
 .outer-line-layer,
 .detail-line-layer,
+.feature-line-layer,
 .removal-preview-layer {
   position: absolute;
   inset: 0;
@@ -1053,6 +1054,11 @@ button:disabled {
 .detail-line-layer {
   z-index: 4;
   cursor: crosshair;
+}
+
+.feature-line-layer {
+  z-index: 5;
+  pointer-events: none;
 }
 
 .hidden-layer {
@@ -1943,7 +1949,7 @@ button:disabled {
 }
 
 .removal-preview-layer {
-  z-index: 5;
+  z-index: 6;
   pointer-events: none;
   filter: drop-shadow(0 0 1px #ffffff);
 }

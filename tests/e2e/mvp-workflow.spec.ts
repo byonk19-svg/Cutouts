@@ -161,6 +161,90 @@ test("project persistence keeps one coherent revision and recovers from a visibl
   expect(manualRoundTrip.editedDetailPngDataUrl).toBe(acceptedDetail);
 });
 
+test("authored detail and Feature Lines stay aligned through restore and both exports", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  let providerRequestCount = 0;
+  let pdfRequestBody: Buffer | null = null;
+  await page.route("**/api/generate-linework", async (route) => {
+    providerRequestCount += 1;
+    await route.abort();
+  });
+  await page.route("**/api/export", async (route) => {
+    pdfRequestBody = route.request().postDataBuffer();
+    await route.fulfill({ status: 200, contentType: "application/pdf", body: Buffer.from("%PDF-1.4\n%%EOF") });
+  });
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "authored-detail-and-feature-lines.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const generated = await expect.poll(() => savedProjectSnapshot(page)).not.toBeNull().then(() => savedProjectSnapshot(page));
+  if (!generated?.analysis?.detailLinePngDataUrl) throw new Error("Generated project did not contain authored detail.");
+  const combinedProject = {
+    ...generated,
+    projectName: "Combined Detail Export",
+    traceMode: "manual",
+    settings: { ...generated.settings, templateStyle: "manual" },
+    editedDetailPngDataUrl: generated.analysis.detailLinePngDataUrl,
+    manualStrokes: [{
+      id: "ticket-02-feature-line",
+      points: [
+        { x: generated.analysis.previewWidthPx * 0.3, y: generated.analysis.previewHeightPx * 0.45 },
+        { x: generated.analysis.previewWidthPx * 0.5, y: generated.analysis.previewHeightPx * 0.5 },
+        { x: generated.analysis.previewWidthPx * 0.7, y: generated.analysis.previewHeightPx * 0.45 }
+      ],
+      width: 8,
+      color: "#000000",
+      tool: "draw"
+    }],
+    layerVisibility: { ...generated.layerVisibility, showReference: false, showManualLines: true }
+  };
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "combined-detail.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(combinedProject))
+  });
+
+  await expect(page.getByLabel("Trace Studio layer visibility").getByLabel("Show original")).not.toBeChecked();
+  await expect.poll(() => canvasVisiblePixelCount(page.getByLabel("Editable interior detail lines"))).toBeGreaterThan(0);
+  await expect.poll(() => canvasVisiblePixelCount(page.locator(".feature-line-layer"))).toBeGreaterThan(0);
+
+  const fileMenu = page.getByLabel("File menu");
+  await fileMenu.getByText("File", { exact: true }).click();
+  const savePromise = page.waitForEvent("download");
+  await fileMenu.getByRole("button", { name: "Save Project" }).click();
+  const savedProject = JSON.parse(await readDownloadText(await savePromise));
+  expect(savedProject.editedDetailPngDataUrl).toBe(combinedProject.editedDetailPngDataUrl);
+  expect(savedProject.manualStrokes).toEqual(combinedProject.manualStrokes);
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "restored-combined-detail.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(savedProject))
+  });
+  await expect.poll(() => canvasVisiblePixelCount(page.getByLabel("Editable interior detail lines"))).toBeGreaterThan(0);
+  await expect.poll(() => canvasVisiblePixelCount(page.locator(".feature-line-layer"))).toBeGreaterThan(0);
+
+  await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  const exportWorkspace = page.getByLabel("Export workspace");
+  await downloadFrom(page, "Download Printable PDF");
+  expect(pdfRequestBody?.toString("latin1")).toContain('name="editedDetail"');
+  expect(pdfRequestBody?.toString("latin1")).toContain('"manualStrokes":[{"id":"ticket-02-feature-line"');
+
+  const moreExportOptions = exportWorkspace.getByLabel("More Export Options");
+  await moreExportOptions.locator("summary").click();
+  const svg = await readDownloadText(await downloadFrom(page, "Download SVG Linework"));
+  expect(svg).toContain('id="accepted-detail-layer"');
+  expect(svg).toContain('id="manual-strokes"');
+  expect(svg.match(/id="cutline-layer"/g)).toHaveLength(1);
+  expect(providerRequestCount).toBe(0);
+});
+
 test("Editor Transactions keep Undo and Redo artifact-only while preserving paint work", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
   await page.goto("/");

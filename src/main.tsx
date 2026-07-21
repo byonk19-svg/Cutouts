@@ -336,6 +336,7 @@ function App() {
   const exportSectionRef = useRef<HTMLDivElement | null>(null);
   const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const detailCanvasLoadIdRef = useRef(0);
+  const featureLineCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const removalPreviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
   const drawingRef = useRef(false);
@@ -511,14 +512,8 @@ function App() {
 
   useEffect(() => {
     if (!analysis || !editorOpen) return;
-    if (traceStudioOpen) {
-      setEditableDetailLinesPresent(false);
-      setDetailLineBounds(null);
-      setDetailLineBoundsResolved(true);
-      renderManualTraceLayer(manualStrokes);
-      return;
-    }
     loadDetailCanvas(editedDetailDataUrl ?? analysis.detailLinePngDataUrl);
+    renderManualTraceLayer(manualStrokes);
   }, [analysis, dimUnselectedStrokes, editorOpen, editedDetailDataUrl, manualStrokes, printPreview, selectedStrokeId, traceStudioOpen, workflowProgress.activeStep]);
 
   useEffect(() => {
@@ -734,7 +729,7 @@ function App() {
     if (!canExport || !image) return;
     const authorized = applyProjectSessionAction({ type: "request-export" });
     if (authorized.outcome.status !== "applied") return;
-    if (traceStudioOpen && manualStrokes.length === 0) {
+    if (traceStudioOpen && manualStrokes.length === 0 && editedDetailDataUrl === null) {
       const shouldContinue = window.confirm("No manual detail lines have been drawn yet. Export an outside-cutline-only packet?");
       if (!shouldContinue) return;
     }
@@ -747,13 +742,13 @@ function App() {
         projectName,
         paintGuideEntries,
         paintGuideEntriesOnly: true,
-        manualStrokes: traceStudioOpen ? manualStrokes : [],
-        manualStrokeSourceWidthPx: traceStudioOpen && analysis ? analysis.previewWidthPx : 0,
-        manualStrokeSourceHeightPx: traceStudioOpen && analysis ? analysis.previewHeightPx : 0
+        manualStrokes,
+        manualStrokeSourceWidthPx: manualStrokes.length > 0 && analysis ? analysis.previewWidthPx : 0,
+        manualStrokeSourceHeightPx: manualStrokes.length > 0 && analysis ? analysis.previewHeightPx : 0
       };
       payload.append("image", image);
       payload.append("settings", JSON.stringify(pdfSettings));
-      const editedDetail = traceStudioOpen || editedDetailDataUrl === null ? null : currentDetailDataUrl();
+      const editedDetail = editedDetailDataUrl === null ? null : currentDetailDataUrl();
       if (editedDetail) payload.append("editedDetail", editedDetail);
       const response = await fetch("/api/export", { method: "POST", body: payload });
       if (!response.ok) {
@@ -771,9 +766,6 @@ function App() {
       setError(err instanceof Error ? err.message : "Unable to export PDF.");
     } finally {
       setBusy(false);
-      if (traceStudioOpen) {
-        window.setTimeout(() => renderManualTraceLayer(manualStrokes), 0);
-      }
     }
   }
 
@@ -790,7 +782,7 @@ function App() {
         projectName,
         analysis,
         manualStrokes,
-        acceptedDetailPngDataUrl: traceStudioOpen ? null : currentDetailDataUrl(),
+        acceptedDetailPngDataUrl: editedDetailDataUrl === null ? null : currentDetailDataUrl(),
         includeCutline: true,
         includeSuggestions: showSuggestions,
         includeWhiteBackground: true,
@@ -1319,9 +1311,6 @@ function App() {
   function currentDetailDataUrl() {
     const canvas = detailCanvasRef.current;
     if (!canvas || !analysis) return editedDetailDataUrl;
-    if (traceStudioOpen) {
-      renderManualTraceLayer(manualStrokes, undefined, false);
-    }
     return canvas.toDataURL("image/png");
   }
 
@@ -1722,7 +1711,7 @@ function App() {
 
   function renderManualTraceLayer(strokes: TraceStroke[], draftStroke?: TraceStroke, showSelection = !printPreview) {
     clearRemovalPreview();
-    const canvas = detailCanvasRef.current;
+    const canvas = featureLineCanvasRef.current;
     if (!canvas || !analysis) return;
     canvas.width = analysis.previewWidthPx;
     canvas.height = analysis.previewHeightPx;
@@ -2488,6 +2477,13 @@ function App() {
                         tabIndex={editorTool === "remove" ? 0 : -1}
                         aria-describedby="connected-line-preview-status"
                         aria-label="Editable interior detail lines"
+                      />
+                      <canvas
+                        ref={featureLineCanvasRef}
+                        className={showManualLines ? "feature-line-layer" : "feature-line-layer hidden-layer"}
+                        width={analysis.previewWidthPx}
+                        height={analysis.previewHeightPx}
+                        aria-hidden="true"
                       />
                       <canvas
                         ref={removalPreviewCanvasRef}
