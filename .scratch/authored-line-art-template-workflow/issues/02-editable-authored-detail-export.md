@@ -6,7 +6,7 @@ one clean Cut Line in matching SVG and tiled PDF outputs.
 
 **Blocked by:** 01 - Reliable Authored Line-Art Import.
 
-**Status:** ready-for-human
+**Status:** complete
 
 - [x] Authored detail ink adjacent to the Cut Line is suppressed so the printable
   drawing does not show a duplicate exterior contour.
@@ -18,6 +18,8 @@ one clean Cut Line in matching SVG and tiled PDF outputs.
   the authoritative Cut Line.
 
 ## Comments
+
+- Human workflow acceptance completed through ticket 04's physical print check on 2026-07-21.
 
 - Implemented test-first on `codex/detailed-line-art-routing`. Clean Lines now
   keeps accepted authored detail and manual Feature Lines on separate aligned

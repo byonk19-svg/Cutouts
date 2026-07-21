@@ -7,7 +7,7 @@ drawing.
 
 **Blocked by:** 01 - Reliable Authored Line-Art Import.
 
-**Status:** ready-for-human
+**Status:** complete
 
 - [x] Needs-simplification artwork is visibly distinct from Ready line art at
   the point where the maker reviews Clean Lines.
@@ -21,6 +21,8 @@ drawing.
   backwards-compatible restore behavior.
 
 ## Comments
+
+- Human workflow acceptance completed through ticket 04's physical print check on 2026-07-21.
 
 - Implemented test-first on `codex/detailed-line-art-routing`. Clean Lines now
   shows a visually distinct **Needs simplification** notice for color or

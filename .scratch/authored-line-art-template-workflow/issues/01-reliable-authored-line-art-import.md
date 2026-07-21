@@ -8,7 +8,7 @@ layer instead of rendered-image edge output.
 
 **Blocked by:** None - can start immediately.
 
-**Status:** ready-for-human
+**Status:** complete
 
 - [x] Safe self-contained SVG artwork and usable existing line-art rasters enter
   the Ready line-art workflow without a cloud request.
@@ -21,6 +21,8 @@ layer instead of rendered-image edge output.
   failure recovery through observable behavior.
 
 ## Comments
+
+- Human workflow acceptance completed through ticket 04's physical print check on 2026-07-21.
 
 - Implemented test-first on `codex/detailed-line-art-routing`. Safe SVG imports
   now reject document declarations, embedded or animated content, event
