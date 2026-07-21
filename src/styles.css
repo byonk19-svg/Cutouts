@@ -2294,6 +2294,36 @@ button:disabled {
   font-size: 14px;
 }
 
+.input-readiness-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 10px 12px;
+  border: 1px solid #a9cdb7;
+  border-radius: 7px;
+  background: #f2faf5;
+  color: #29463a;
+}
+
+.input-readiness-notice strong {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 14px;
+}
+
+.input-readiness-notice p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.input-readiness-notice > p {
+  max-width: 280px;
+  font-weight: 700;
+  text-align: right;
+}
+
 .clean-more-tools.always-open {
   border: 0;
   background: transparent;

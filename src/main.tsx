@@ -1936,7 +1936,7 @@ function App() {
               </label>
               {(sourceCandidate?.lineworkDetected ?? svgLineworkDetected) ? <p className="helper-note">SVG linework detected. Its authored dark ink will open as editable starter lines.</p> : null}
               <p className="helper-note">Choose one complete character on a simple background.</p>
-              {error ? <div className="error-box">{error}</div> : null}
+              {error ? <div className="error-box" role="alert">{error}</div> : null}
               <NumberField
                 label="Finished height"
                 suffix="in"
@@ -2105,6 +2105,7 @@ function App() {
                         reviewed={workflowProgress.lineworkReviewed}
                         review={traceQualityReview}
                       />
+                      {inputReadiness === "ready-line-art" ? <ReadyLineArtNotice /> : null}
                       {showAiProposal ? (
                         <AiProposalCard
                           phase={aiProposalState.status}
@@ -3378,6 +3379,18 @@ function CleanLinesStatus({
         </section>
       ) : null}
     </details>
+  );
+}
+
+function ReadyLineArtNotice() {
+  return (
+    <section className="input-readiness-notice" aria-label="Input readiness">
+      <div>
+        <strong>Ready line art</strong>
+        <p>Authored ink was prepared locally as aligned editable Detail Lines. Use Show Original to compare it with the underlay.</p>
+      </div>
+      <p>The protected Cut Line remains the only outside silhouette.</p>
+    </section>
   );
 }
 

@@ -286,6 +286,10 @@ test("project name and Finished Size preserve reviewed project work", async ({ p
 });
 
 test("maker can use authored SVG ink as editable starter lines", async ({ page }) => {
+  let providerRequests = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/generate-linework")) providerRequests += 1;
+  });
   await page.goto("/");
   const uploadStep = page.getByLabel("Upload step");
   const sourceInput = uploadStep.getByLabel("Source image");
@@ -302,6 +306,7 @@ test("maker can use authored SVG ink as editable starter lines", async ({ page }
         <circle cx="235" cy="300" r="18" fill="none" stroke="#111" stroke-width="8"/>
         <path d="M150 350 Q200 380 250 350" fill="none" stroke="#111" stroke-width="8"/>
         <path d="M200 395 L200 500 M140 500 L260 500" fill="none" stroke="#111" stroke-width="8"/>
+        <path d="M110 410 L130 410" fill="none" stroke="#111" stroke-width="8"/>
       </svg>
     `)
   });
@@ -310,8 +315,15 @@ test("maker can use authored SVG ink as editable starter lines", async ({ page }
   await uploadStep.getByRole("button", { name: "Generate Template" }).click();
   const detailCanvas = page.getByLabel("Editable interior detail lines");
   await expect(detailCanvas).toBeVisible();
+  await expect(page.getByLabel("Input readiness")).toContainText("Ready line art");
   await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).toBeGreaterThan(0);
+  await expect.poll(() => canvasVisiblePixelCountInRatioRegion(detailCanvas, { left: 0.02, top: 0.55, right: 0.18, bottom: 0.72 })).toBeGreaterThan(0);
   await expect(page.getByLabel("Clean Lines workspace")).toContainText("Editable starter lines");
+  await expect(page.getByLabel("Original underlay guide")).toContainText("visible");
+  await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Show Original" }).click();
+  await expect(page.getByLabel("Original underlay guide")).toContainText("hidden");
+  await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Show Original" }).click();
+  await expect(page.getByLabel("Original underlay guide")).toContainText("visible");
   const originalDetail = await detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
   const detailPoint = await waitForCanvasInkPoint(detailCanvas);
   await detailCanvas.click({ position: await canvasLocalPoint(detailCanvas, detailPoint.x, detailPoint.y) });
@@ -320,6 +332,34 @@ test("maker can use authored SVG ink as editable starter lines", async ({ page }
   await moreTools.locator("summary").click();
   await moreTools.getByRole("button", { name: "Reset details" }).click();
   await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(originalDetail);
+  expect(providerRequests).toBe(0);
+});
+
+test("unsafe SVG import reports a local error and preserves the current project", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "safe-existing-project.png",
+    mimeType: "image/png",
+    buffer: readFileSync("backend/tests/fixtures/coraline/coraline-best-clean-outline.png")
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+  await expect(page.getByLabel("Input readiness")).toContainText("Ready line art");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"))).not.toBeNull();
+  const before = await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"));
+
+  await page.getByLabel("Guided workflow").getByRole("button", { name: /Upload/ }).click();
+  await page.getByLabel("Upload step").getByLabel("Source image").setInputFiles({
+    name: "unsafe.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><path d="M0 0 L10 10" stroke="black"/></svg>')
+  });
+
+  await expect(page.getByRole("alert")).toContainText("interactive behavior");
+  expect(await page.evaluate(() => localStorage.getItem("cutout-studio:auto-save:v1"))).toBe(before);
+  await expect(page.getByLabel("Upload step")).toContainText("safe-existing-project.png");
+  await expect(page.getByLabel("Upload step").getByRole("button", { name: "Generate Template" })).toBeEnabled();
 });
 
 test("SVG without dark authored ink uses the ordinary image workflow", async ({ page }) => {
@@ -805,6 +845,10 @@ test("guided workflow remains focused and responsive through Coraline acceptance
 });
 
 test("existing line art is reported and can be overridden from More Tools", async ({ page }) => {
+  let providerRequests = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/generate-linework")) providerRequests += 1;
+  });
   await page.addInitScript(() => localStorage.clear());
   await page.goto("/");
   await page.getByLabel("Source image").setInputFiles({
@@ -815,10 +859,12 @@ test("existing line art is reported and can be overridden from More Tools", asyn
   await page.getByRole("button", { name: "Generate Template" }).click();
 
   const cleanStatus = page.getByLabel("Clean Lines status");
+  await expect(page.getByLabel("Input readiness")).toContainText("Ready line art");
   await expect(cleanStatus).toContainText("Existing line art detected");
   await cleanStatus.locator("summary").click();
   await expect(cleanStatus.getByLabel("Trace Quality Review")).toContainText("Existing line art detected");
   await page.screenshot({ path: "output/screenshots/latest/flat-line-art-auto-detected.png" });
+  expect(providerRequests).toBe(0);
 
   const moreTools = page.getByLabel("More Tools");
   await moreTools.locator("summary").click();
@@ -1054,6 +1100,29 @@ async function canvasVisiblePixelCount(canvas: Locator) {
     }
     return count;
   });
+}
+
+async function canvasVisiblePixelCountInRatioRegion(
+  canvas: Locator,
+  region: { left: number; top: number; right: number; bottom: number }
+) {
+  return canvas.evaluate((element, targetRegion) => {
+    const target = element as HTMLCanvasElement;
+    const context = target.getContext("2d");
+    if (!context) return 0;
+    const pixels = context.getImageData(0, 0, target.width, target.height).data;
+    const left = Math.floor(target.width * targetRegion.left);
+    const top = Math.floor(target.height * targetRegion.top);
+    const right = Math.ceil(target.width * targetRegion.right);
+    const bottom = Math.ceil(target.height * targetRegion.bottom);
+    let count = 0;
+    for (let y = top; y < bottom; y += 1) {
+      for (let x = left; x < right; x += 1) {
+        if (pixels[(y * target.width + x) * 4 + 3] > 0) count += 1;
+      }
+    }
+    return count;
+  }, region);
 }
 
 async function savedProjectIncludesPaintGuide(page: Page) {
