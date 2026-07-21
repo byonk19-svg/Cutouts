@@ -213,7 +213,7 @@ const preservedProjectFields = {
   assert(view.capabilities.changeFinishedSize, "Finished Size capability should be available");
   assertDeepEqual(
     { ...view.project, projectName: "Coraline", settings, analysis },
-    { projectName: "Coraline", settings, analysis, ...preservedProjectFields },
+    { projectName: "Coraline", settings, analysis, ...preservedProjectFields, inputReadiness: "needs-simplification" },
     "project name should preserve every other durable field"
   );
   assertEqual(view.project.analysis.outerCutPath, analysis.outerCutPath, "Cut Line should be preserved");
@@ -342,6 +342,7 @@ const lifecycleProject = {
   settings,
   sourceImage: preservedProjectFields.sourceImage,
   analysis: analysisWithPalette,
+  inputReadiness: "needs-simplification" as const,
   editedDetailPngDataUrl: preservedProjectFields.editedDetailPngDataUrl,
   manualStrokes: preservedProjectFields.manualStrokes,
   projectPalette: defaultProjectPalette,
@@ -401,27 +402,16 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     ...analysis,
     traceQuality: { ...analysis.traceQuality, detailExtractionModeUsed: "rendered" as const }
   }, "explicit input readiness should not alter the durable analysis shape");
-  assertEqual(projectSessionView(readyLineArt).capabilities.aiProposal.canBeginRequest, false, "Ready Line Art should not expose AI proposal request capability");
+  assertEqual(projectSessionView(readyLineArt).capabilities.aiProposal.canBeginRequest, true, "Ready Line Art should expose an explicit simplification request capability");
   assertEqual(projectSessionView(missingCutLine).capabilities.aiProposal.canBeginRequest, false, "AI proposal request capability should require a valid Cut Line");
   assertEqual(projectSessionView(missingSourceImage).capabilities.aiProposal.canBeginRequest, false, "AI proposal request capability should require a current Source Image");
   assertEqual(projectSessionView(eligible).capabilities.aiProposal.canBeginRequest, true, "Needs Simplification should expose AI proposal request capability");
 
-  const beginRejected = transitionProjectSession(readyLineArt, { type: "begin-ai-proposal-request" });
-  assertEqual(beginRejected.outcome.status, "rejected", "Ready Line Art should reject AI proposal request attempts at the public seam");
+  const beginReadyLineArt = transitionProjectSession(readyLineArt, { type: "begin-ai-proposal-request" });
+  assertEqual(beginReadyLineArt.outcome.status, "applied", "Ready Line Art should begin an explicit simplification request at the public seam");
 
   const missingSourceBeginRejected = transitionProjectSession(missingSourceImage, { type: "begin-ai-proposal-request" });
   assertEqual(missingSourceBeginRejected.outcome.status, "rejected", "missing Source Image should reject AI proposal request attempts at the public seam");
-
-  const forcedConfirming = {
-    ...readyLineArt,
-    aiProposal: { status: "confirming" as const, estimatedCostUsd: 0.10 }
-  };
-  const confirmRejected = transitionProjectSession(forcedConfirming, {
-    type: "confirm-ai-proposal-request",
-    estimatedCostUsd: 0.10,
-    uploadConfirmed: true
-  });
-  assertEqual(confirmRejected.outcome.status, "rejected", "Ready Line Art should reject AI proposal confirmation even if the view attempts it directly");
 
   const forcedMissingSourceConfirming = {
     ...missingSourceImage,
@@ -1580,6 +1570,29 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   });
   assertEqual(mismatchRejected.outcome.status, "failed", "restoring analysis for a different Finished Size should fail inside Project Session");
   assertEqual(mismatchRejected.session.project, reviewed.project, "mismatched-analysis restore should preserve the current active project");
+
+  const legacyRestorePreparing = transitionProjectSession(reviewed, { type: "begin-project-preparation", operation: "restore-project" });
+  if (legacyRestorePreparing.outcome.status !== "preparing") throw new Error("expected legacy restore token");
+  const { inputReadiness: _legacyReadiness, ...legacyRenderedProject } = lifecycleProject;
+  const legacyRestored = transitionProjectSession(legacyRestorePreparing.session, {
+    type: "complete-project-restore",
+    token: legacyRestorePreparing.outcome.token,
+    project: legacyRenderedProject,
+    requestAutosave: false
+  });
+  assertEqual(legacyRestored.outcome.status, "successful", "a project predating readiness metadata should restore successfully");
+  assertEqual(
+    legacyRestored.session.project.inputReadiness,
+    "needs-simplification",
+    "legacy rendered artwork should derive the conservative review-only readiness boundary"
+  );
+
+  const explicitReady = createProjectSession({ ...lifecycleProject, inputReadiness: "ready-line-art" as const });
+  assertEqual(
+    explicitReady.project.inputReadiness,
+    "ready-line-art",
+    "an explicit Ready Line Art classification should survive session normalization"
+  );
 }
 
 {

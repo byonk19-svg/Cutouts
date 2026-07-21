@@ -252,6 +252,7 @@ function App() {
     projectName,
     settings,
     analysis,
+    inputReadiness = "ready-line-art",
     editedDetailPngDataUrl: editedDetailDataUrl,
     manualStrokes,
     projectPalette,
@@ -335,6 +336,7 @@ function App() {
   const exportSectionRef = useRef<HTMLDivElement | null>(null);
   const detailCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const detailCanvasLoadIdRef = useRef(0);
+  const featureLineCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const removalPreviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
   const drawingRef = useRef(false);
@@ -510,14 +512,8 @@ function App() {
 
   useEffect(() => {
     if (!analysis || !editorOpen) return;
-    if (traceStudioOpen) {
-      setEditableDetailLinesPresent(false);
-      setDetailLineBounds(null);
-      setDetailLineBoundsResolved(true);
-      renderManualTraceLayer(manualStrokes);
-      return;
-    }
     loadDetailCanvas(editedDetailDataUrl ?? analysis.detailLinePngDataUrl);
+    renderManualTraceLayer(manualStrokes);
   }, [analysis, dimUnselectedStrokes, editorOpen, editedDetailDataUrl, manualStrokes, printPreview, selectedStrokeId, traceStudioOpen, workflowProgress.activeStep]);
 
   useEffect(() => {
@@ -733,7 +729,7 @@ function App() {
     if (!canExport || !image) return;
     const authorized = applyProjectSessionAction({ type: "request-export" });
     if (authorized.outcome.status !== "applied") return;
-    if (traceStudioOpen && manualStrokes.length === 0) {
+    if (traceStudioOpen && manualStrokes.length === 0 && editedDetailDataUrl === null) {
       const shouldContinue = window.confirm("No manual detail lines have been drawn yet. Export an outside-cutline-only packet?");
       if (!shouldContinue) return;
     }
@@ -746,13 +742,13 @@ function App() {
         projectName,
         paintGuideEntries,
         paintGuideEntriesOnly: true,
-        manualStrokes: traceStudioOpen ? manualStrokes : [],
-        manualStrokeSourceWidthPx: traceStudioOpen && analysis ? analysis.previewWidthPx : 0,
-        manualStrokeSourceHeightPx: traceStudioOpen && analysis ? analysis.previewHeightPx : 0
+        manualStrokes,
+        manualStrokeSourceWidthPx: manualStrokes.length > 0 && analysis ? analysis.previewWidthPx : 0,
+        manualStrokeSourceHeightPx: manualStrokes.length > 0 && analysis ? analysis.previewHeightPx : 0
       };
       payload.append("image", image);
       payload.append("settings", JSON.stringify(pdfSettings));
-      const editedDetail = traceStudioOpen || editedDetailDataUrl === null ? null : currentDetailDataUrl();
+      const editedDetail = editedDetailDataUrl === null ? null : currentDetailDataUrl();
       if (editedDetail) payload.append("editedDetail", editedDetail);
       const response = await fetch("/api/export", { method: "POST", body: payload });
       if (!response.ok) {
@@ -770,9 +766,6 @@ function App() {
       setError(err instanceof Error ? err.message : "Unable to export PDF.");
     } finally {
       setBusy(false);
-      if (traceStudioOpen) {
-        window.setTimeout(() => renderManualTraceLayer(manualStrokes), 0);
-      }
     }
   }
 
@@ -789,7 +782,7 @@ function App() {
         projectName,
         analysis,
         manualStrokes,
-        acceptedDetailPngDataUrl: traceStudioOpen ? null : currentDetailDataUrl(),
+        acceptedDetailPngDataUrl: editedDetailDataUrl === null ? null : currentDetailDataUrl(),
         includeCutline: true,
         includeSuggestions: showSuggestions,
         includeWhiteBackground: true,
@@ -1318,9 +1311,6 @@ function App() {
   function currentDetailDataUrl() {
     const canvas = detailCanvasRef.current;
     if (!canvas || !analysis) return editedDetailDataUrl;
-    if (traceStudioOpen) {
-      renderManualTraceLayer(manualStrokes, undefined, false);
-    }
     return canvas.toDataURL("image/png");
   }
 
@@ -1721,7 +1711,7 @@ function App() {
 
   function renderManualTraceLayer(strokes: TraceStroke[], draftStroke?: TraceStroke, showSelection = !printPreview) {
     clearRemovalPreview();
-    const canvas = detailCanvasRef.current;
+    const canvas = featureLineCanvasRef.current;
     if (!canvas || !analysis) return;
     canvas.width = analysis.previewWidthPx;
     canvas.height = analysis.previewHeightPx;
@@ -1935,7 +1925,7 @@ function App() {
               </label>
               {(sourceCandidate?.lineworkDetected ?? svgLineworkDetected) ? <p className="helper-note">SVG linework detected. Its authored dark ink will open as editable starter lines.</p> : null}
               <p className="helper-note">Choose one complete character on a simple background.</p>
-              {error ? <div className="error-box">{error}</div> : null}
+              {error ? <div className="error-box" role="alert">{error}</div> : null}
               <NumberField
                 label="Finished height"
                 suffix="in"
@@ -2104,12 +2094,16 @@ function App() {
                         reviewed={workflowProgress.lineworkReviewed}
                         review={traceQualityReview}
                       />
+                      {inputReadiness === "ready-line-art" ? <ReadyLineArtNotice /> : <NeedsSimplificationNotice />}
                       {showAiProposal ? (
                         <AiProposalCard
                           phase={aiProposalState.status}
                           proposal={aiProposal}
                           review={aiProposalReview}
                           reviewView={aiProposalReviewView}
+                          inputReadiness={inputReadiness}
+                          previewWidthPx={analysis.previewWidthPx}
+                          previewHeightPx={analysis.previewHeightPx}
                           originalPreviewPngDataUrl={analysis.paintGuidePngDataUrl}
                           outerLinePngDataUrl={analysis.outerLinePngDataUrl}
                           error={aiProposalError}
@@ -2483,6 +2477,13 @@ function App() {
                         tabIndex={editorTool === "remove" ? 0 : -1}
                         aria-describedby="connected-line-preview-status"
                         aria-label="Editable interior detail lines"
+                      />
+                      <canvas
+                        ref={featureLineCanvasRef}
+                        className={showManualLines ? "feature-line-layer" : "feature-line-layer hidden-layer"}
+                        width={analysis.previewWidthPx}
+                        height={analysis.previewHeightPx}
+                        aria-hidden="true"
                       />
                       <canvas
                         ref={removalPreviewCanvasRef}
@@ -3154,6 +3155,9 @@ function AiProposalCard({
   proposal,
   review,
   reviewView,
+  inputReadiness,
+  previewWidthPx,
+  previewHeightPx,
   originalPreviewPngDataUrl,
   outerLinePngDataUrl,
   error,
@@ -3172,6 +3176,9 @@ function AiProposalCard({
   proposal: ProjectSessionAiProposalResult | null;
   review: AiProposalReview | null;
   reviewView: AiProposalReviewView;
+  inputReadiness: ProjectSessionInputReadiness;
+  previewWidthPx: number;
+  previewHeightPx: number;
   originalPreviewPngDataUrl: string;
   outerLinePngDataUrl: string;
   error: string | null;
@@ -3191,17 +3198,19 @@ function AiProposalCard({
       {phase === "idle" ? (
         <>
           <div>
-            <strong>Needs Simplification</strong>
-            <p>Ask for one optional Wood-Transfer Style proposal. Your Cut Line, print geometry, and current Detail Lines stay unchanged.</p>
+            <strong>Simplify for wood template</strong>
+            <p>{inputReadiness === "ready-line-art"
+              ? "Existing ink was found. Ask for one optional Wood-Transfer Style proposal when the artwork is too detailed to transfer directly."
+              : "Ask for one optional Wood-Transfer Style proposal. Your Cut Line, print geometry, and current Detail Lines stay unchanged."}</p>
           </div>
-          <button className="tool-button" onClick={onBegin} disabled={!canBegin}><Sparkles size={16} /> Request AI proposal</button>
+          <button className="tool-button" onClick={onBegin} disabled={!canBegin}><Sparkles size={16} /> Simplify for wood template</button>
         </>
       ) : null}
       {phase === "confirming" ? (
         <>
           <div>
             <strong>Confirm one provider request</strong>
-            <p>Your source image will be uploaded to OpenAI under its normal retention terms. Exact estimated cost: ${AI_PROPOSAL_ESTIMATE_USD.toFixed(2)}. No automatic retry will be sent.</p>
+            <p>Your cropped source preview will be uploaded to OpenAI under its normal retention terms. Exact estimated cost: ${AI_PROPOSAL_ESTIMATE_USD.toFixed(2)}. No automatic retry will be sent.</p>
           </div>
           <div className="ai-proposal-actions">
             <button className="primary-action" onClick={onConfirm} disabled={!canConfirm}>Confirm upload and request one proposal</button>
@@ -3242,7 +3251,11 @@ function AiProposalCard({
                   </button>
                 ))}
               </div>
-              <div className="ai-proposal-review-frame" aria-label={`${reviewView === "ai-lines-only" ? "AI lines only" : reviewView === "original-overlay" ? "Original Overlay" : "Print Preview"} review`}>
+              <div
+                className="ai-proposal-review-frame"
+                aria-label={`${reviewView === "ai-lines-only" ? "AI lines only" : reviewView === "original-overlay" ? "Original Overlay" : "Print Preview"} review`}
+                style={{ aspectRatio: `${previewWidthPx} / ${previewHeightPx}` }}
+              >
                 {reviewView === "original-overlay" ? <img src={originalPreviewPngDataUrl} alt="Original artwork" /> : null}
                 {reviewView === "print-preview" ? <img src={outerLinePngDataUrl} alt="Protected Cut Line" /> : null}
                 <img className={reviewView === "ai-lines-only" ? "" : "ai-proposal-review-overlay"} src={proposal.proposalDetailPngDataUrl} alt="AI linework proposal" />
@@ -3254,12 +3267,12 @@ function AiProposalCard({
                     <button className="tool-button" onClick={onReject} disabled={!canReject}>Reject proposal</button>
                   </>
                 ) : null}
-                {review.decision === "review-only" ? <button className="tool-button" onClick={onBegin} disabled={!canBegin}>Request another proposal</button> : null}
+                {review.decision === "review-only" ? <button className="tool-button" onClick={onBegin} disabled={!canBegin}>Simplify another version</button> : null}
               </div>
             </>
           ) : (
             <div className="ai-proposal-actions">
-              <button className="tool-button" onClick={onBegin} disabled={!canBegin}>Request another proposal</button>
+              <button className="tool-button" onClick={onBegin} disabled={!canBegin}>Simplify another version</button>
             </div>
           )}
         </>
@@ -3362,6 +3375,30 @@ function CleanLinesStatus({
         </section>
       ) : null}
     </details>
+  );
+}
+
+function ReadyLineArtNotice() {
+  return (
+    <section className="input-readiness-notice" aria-label="Input readiness">
+      <div>
+        <strong>Ready line art</strong>
+        <p>Authored ink was prepared locally as aligned editable Detail Lines. Use Show Original to compare it with the underlay.</p>
+      </div>
+      <p>The protected Cut Line remains the only outside silhouette.</p>
+    </section>
+  );
+}
+
+function NeedsSimplificationNotice() {
+  return (
+    <section className="input-readiness-notice needs-simplification" aria-label="Input readiness">
+      <div>
+        <strong>Needs simplification</strong>
+        <p>The Cut Line is technically ready to review. Starter lines from color or rendered artwork are review-only and are not guaranteed Wood-Transfer Style transfer lines.</p>
+      </div>
+      <p>Keep, remove, or redraw them yourself. A separate proposal cannot replace accepted Detail Lines unless you explicitly review and accept it.</p>
+    </section>
   );
 }
 

@@ -13,6 +13,7 @@ from backend.cutout_studio.ai_linework import (
     LineworkGenerationError,
     generate_linework_proposal,
     normalize_generated_proposal,
+    wood_transfer_prompt,
 )
 
 
@@ -35,8 +36,8 @@ class NormalizeGeneratedProposalTest(unittest.TestCase):
     def test_alpha_composites_output_and_returns_preview_sized_transparent_black_detail(self) -> None:
         generated = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
         generated_draw = ImageDraw.Draw(generated)
-        generated_draw.line((100, 50, 100, 150), fill=(0, 0, 0, 255), width=6)
-        generated_draw.line((32, 50, 32, 150), fill=(0, 0, 0, 255), width=6)
+        generated_draw.line((100, 78, 100, 122), fill=(0, 0, 0, 255), width=6)
+        generated_draw.line((78, 110, 122, 110), fill=(0, 0, 0, 255), width=6)
 
         proposal = normalize_generated_proposal(
             png_bytes(generated),
@@ -74,6 +75,38 @@ class NormalizeGeneratedProposalTest(unittest.TestCase):
         self.assertEqual(detail.getpixel((42, 50))[3], 255)
         self.assertGreater(proposal.suppressed_pixel_count, 0)
 
+    def test_rejects_linework_materially_displaced_from_the_protected_cutline(self) -> None:
+        generated = Image.new("RGB", (200, 200), "white")
+        draw = ImageDraw.Draw(generated)
+        draw.line((138, 85, 162, 115), fill="black", width=3)
+        draw.line((138, 115, 162, 85), fill="black", width=3)
+
+        proposal = normalize_generated_proposal(
+            png_bytes(generated),
+            expected_generated_size=(200, 200),
+            preview_size=(200, 200),
+            protected_cutline_png=protected_cutline((200, 200)),
+        )
+
+        self.assertEqual(proposal.status, "review-only")
+        self.assertIn("misaligned", proposal.validation_issues)
+
+    def test_rejects_linework_that_covers_only_a_thin_slice_of_the_composition(self) -> None:
+        generated = Image.new("RGB", (200, 200), "white")
+        draw = ImageDraw.Draw(generated)
+        draw.line((60, 96, 140, 96), fill="black", width=3)
+        draw.line((60, 104, 140, 104), fill="black", width=3)
+
+        proposal = normalize_generated_proposal(
+            png_bytes(generated),
+            expected_generated_size=(200, 200),
+            preview_size=(200, 200),
+            protected_cutline_png=protected_cutline((200, 200)),
+        )
+
+        self.assertEqual(proposal.status, "review-only")
+        self.assertIn("incomplete-composition", proposal.validation_issues)
+
     def test_invalid_outputs_are_review_only(self) -> None:
         cases: list[tuple[str, bytes, tuple[int, int], bytes, str]] = []
         cases.append(("malformed", b"not-an-image", (100, 100), protected_cutline(), "malformed"))
@@ -107,6 +140,14 @@ class NormalizeGeneratedProposalTest(unittest.TestCase):
 
 
 class GenerateLineworkProposalTest(unittest.TestCase):
+    def test_prompt_requires_the_complete_foreground_composition_and_major_props(self) -> None:
+        prompt = wood_transfer_prompt().lower()
+
+        self.assertIn("complete foreground composition", prompt)
+        self.assertIn("major foreground prop", prompt)
+        self.assertIn("do not omit", prompt)
+        self.assertIn("same positions and scale", prompt)
+
     @patch("backend.cutout_studio.ai_linework.urlopen")
     def test_unconfirmed_request_is_rejected_before_provider_transport(self, mock_urlopen: MagicMock) -> None:
         with self.assertRaisesRegex(LineworkGenerationError, "(?i)confirm"):
@@ -124,6 +165,7 @@ class GenerateLineworkProposalTest(unittest.TestCase):
     def test_confirmed_request_posts_once_without_retry_and_normalizes_response(self, mock_urlopen: MagicMock) -> None:
         generated = Image.new("RGB", (1024, 1536), "white")
         ImageDraw.Draw(generated).line((512, 500, 512, 1000), fill="black", width=12)
+        ImageDraw.Draw(generated).line((300, 800, 700, 800), fill="black", width=12)
         response = MagicMock()
         response.read.return_value = json.dumps({
             "data": [{"b64_json": base64.b64encode(png_bytes(generated)).decode("ascii")}]

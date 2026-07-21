@@ -65,12 +65,44 @@ export async function svgInkForPreview({
 
 export function validateSvgMarkup(markup: string) {
   if (!/<svg\b/i.test(markup)) throw new Error("The selected file is not a valid SVG image.");
-  if (/<\s*(script|foreignObject|iframe|object|embed|image|audio|video)\b/i.test(markup)) {
+  if (/<!\s*(?:doctype|entity)\b|<\?xml-stylesheet\b/i.test(markup)) {
+    throw new Error("This SVG includes document declarations and cannot be imported locally.");
+  }
+  if (/<\s*(script|foreignObject|iframe|object|embed|image|audio|video|animate|animateMotion|animateTransform|set)\b/i.test(markup)) {
     throw new Error("This SVG includes embedded content and cannot be imported locally.");
   }
-  if (/\b(?:href|src)\s*=\s*["']\s*(?:https?:|\/\/|data:)|\b(?:url\s*\(|@import\b)/i.test(markup)) {
+  if (/\s+on[a-z][\w:.-]*\s*=/i.test(markup)) {
+    throw new Error("This SVG includes interactive behavior and cannot be imported locally.");
+  }
+  if (/\b(?:javascript|vbscript)\s*:|@import\b|expression\s*\(|-moz-binding\s*:|behavior\s*:/i.test(markup)) {
+    throw new Error("This SVG includes interactive behavior and cannot be imported locally.");
+  }
+  if (hasNonLocalResourceReference(markup) || hasNonLocalCssUrl(markup)) {
     throw new Error("This SVG references external content and cannot be imported locally.");
   }
+}
+
+function hasNonLocalResourceReference(markup: string) {
+  const resourceAttribute = /\b(?:href|xlink:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+  let match: RegExpExecArray | null;
+  let matchedAttributes = 0;
+  while ((match = resourceAttribute.exec(markup)) !== null) {
+    matchedAttributes += 1;
+    const value = (match[1] ?? match[2] ?? "").trim();
+    if (!/^#[A-Za-z_][\w:.-]*$/.test(value)) return true;
+  }
+  const declaredAttributes = markup.match(/\b(?:href|xlink:href|src)\s*=/gi)?.length ?? 0;
+  return matchedAttributes !== declaredAttributes;
+}
+
+function hasNonLocalCssUrl(markup: string) {
+  const cssUrl = /url\s*\(\s*([^)]+?)\s*\)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = cssUrl.exec(markup)) !== null) {
+    const value = match[1].trim().replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2").trim();
+    if (!/^#[A-Za-z_][\w:.-]*$/.test(value)) return true;
+  }
+  return false;
 }
 
 async function loadSvgImage(markup: string) {

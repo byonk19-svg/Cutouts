@@ -265,7 +265,7 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_de
     cropped_mask = mask.crop(bounds)
     finished_width = settings.finished_height_in * (cropped_source.width / cropped_source.height)
     tile_cols, tile_rows = tile_grid(finished_width, settings.finished_height_in)
-    edited_detail_for_trace = None if settings.manual_strokes else edited_detail_png
+    edited_detail_for_trace = edited_detail_png
     trace = _make_trace_image(cropped_source, cropped_mask, settings, finished_width, settings.finished_height_in, edited_detail_for_trace)
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
     manual_stroke_source_size = _manual_stroke_source_size(cropped_source, settings)

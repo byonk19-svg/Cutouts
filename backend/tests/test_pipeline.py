@@ -1247,6 +1247,57 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertEqual(baseline_dark_pixels, 0)
         self.assertGreater(accepted_detail_dark_pixels, 1_000)
 
+    def test_pdf_combines_accepted_authored_detail_with_manual_feature_lines(self) -> None:
+        base_settings = {
+            "finishedHeightIn": 18,
+            "threshold": 40,
+            "paletteSize": 3,
+            "detailLines": False,
+            "includeInstructionCoverPage": False,
+            "includePaintGuidePage": False,
+        }
+        accepted_settings = TemplateSettings.from_mapping(base_settings)
+        combined_settings = TemplateSettings.from_mapping({
+            **base_settings,
+            "manualStrokes": [{
+                "id": "manual-mouth",
+                "width": 20,
+                "color": "#000000",
+                "tool": "draw",
+                "points": [{"x": 20, "y": 35}, {"x": 100, "y": 45}],
+            }],
+            "manualStrokeSourceWidthPx": 120,
+            "manualStrokeSourceHeightPx": 160,
+        })
+        accepted_detail = Image.new("RGBA", (120, 160), (255, 255, 255, 0))
+        ImageDraw.Draw(accepted_detail).line((20, 80, 100, 80), fill=(0, 0, 0, 255), width=8)
+        encoded_detail = io.BytesIO()
+        accepted_detail.save(encoded_detail, format="PNG")
+
+        accepted_pdf = build_template_pdf(
+            transparent_fixture(),
+            accepted_settings,
+            edited_detail_png=encoded_detail.getvalue(),
+        )
+        combined_pdf = build_template_pdf(
+            transparent_fixture(),
+            combined_settings,
+            edited_detail_png=encoded_detail.getvalue(),
+        )
+        accepted_reader = PdfReader(io.BytesIO(accepted_pdf))
+        combined_reader = PdfReader(io.BytesIO(combined_pdf))
+        accepted_trace_raster = accepted_reader.pages[0].images[0].image.convert("L")
+        combined_trace_raster = combined_reader.pages[0].images[0].image.convert("L")
+        combined_content = "\n".join(
+            page.get_contents().get_data().decode("latin-1", errors="ignore")
+            for page in combined_reader.pages
+        )
+
+        self.assertEqual(len(combined_reader.pages), len(accepted_reader.pages))
+        self.assertEqual(combined_reader.pages[0].mediabox, accepted_reader.pages[0].mediabox)
+        self.assertEqual(combined_trace_raster.tobytes(), accepted_trace_raster.tobytes())
+        self.assertIn("4 w", combined_content)
+
     def test_accepted_ai_fixture_preserves_protected_pdf_geometry_digest(self) -> None:
         settings = TemplateSettings(
             project_name="Accepted AI Fixture",

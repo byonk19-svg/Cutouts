@@ -23,6 +23,8 @@ CONFIRMED_ESTIMATE_USD = 0.10
 SUPPRESSION_BAND_PX = 24
 MIN_INK_COVERAGE = 0.0005
 MAX_INK_COVERAGE = 0.22
+MAX_CUTLINE_CENTER_OFFSET_RATIO = 0.20
+MIN_COMPOSITION_SPAN_RATIO = 0.25
 
 ValidationIssue = Literal[
     "malformed",
@@ -32,6 +34,8 @@ ValidationIssue = Literal[
     "noisy",
     "missing-cutline",
     "duplicate-contour",
+    "misaligned",
+    "incomplete-composition",
 ]
 
 
@@ -63,9 +67,12 @@ class LineworkProposal:
 def wood_transfer_prompt() -> str:
     return (
         "Create one sparse black-and-white wood-transfer linework proposal from this exact image. "
-        "Preserve recognizable face, hair, clothing, limbs, hands, footwear, accessories, and major "
-        "paint boundaries. Use one clean line per intended interior feature. Remove shading, texture, "
-        "hatching, color, lettering, background decoration, and duplicate contours. Do not add or "
+        "Preserve the complete foreground composition, including recognizable face, hair, clothing, "
+        "limbs, hands, footwear, accessories, major foreground props, and major paint boundaries. "
+        "Use one clean line per intended interior feature. Keep every retained feature in the same "
+        "positions and scale as the source image. Do not omit a large foreground area or turn a major "
+        "foreground prop into isolated decorative marks. Remove shading, texture, hatching, "
+        "color, lettering, unrelated background decoration, and duplicate contours. Do not add or "
         "invent features. Do not draw an outside silhouette or any print, tiling, or calibration marks."
     )
 
@@ -143,6 +150,26 @@ def normalize_generated_proposal(
         exterior_pixels = max(1, int(np.count_nonzero(exterior_component)))
         if residual_near_exterior / exterior_pixels >= 0.20:
             issues.append("duplicate-contour")
+
+        ink_points = cv2.findNonZero(ink)
+        exterior_points = cv2.findNonZero(exterior_component)
+        if ink_points is not None and exterior_points is not None:
+            ink_x, ink_y, ink_width, ink_height = cv2.boundingRect(ink_points)
+            cut_x, cut_y, cut_width, cut_height = cv2.boundingRect(exterior_points)
+            ink_center_x = ink_x + ink_width / 2
+            ink_center_y = ink_y + ink_height / 2
+            cut_center_x = cut_x + cut_width / 2
+            cut_center_y = cut_y + cut_height / 2
+            if (
+                abs(ink_center_x - cut_center_x) / max(1, cut_width) > MAX_CUTLINE_CENTER_OFFSET_RATIO
+                or abs(ink_center_y - cut_center_y) / max(1, cut_height) > MAX_CUTLINE_CENTER_OFFSET_RATIO
+            ):
+                issues.append("misaligned")
+            if (
+                ink_width / max(1, cut_width) < MIN_COMPOSITION_SPAN_RATIO
+                or ink_height / max(1, cut_height) < MIN_COMPOSITION_SPAN_RATIO
+            ):
+                issues.append("incomplete-composition")
 
     coverage = float(np.count_nonzero(ink)) / float(ink.size)
     if coverage < MIN_INK_COVERAGE:

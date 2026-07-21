@@ -1262,10 +1262,13 @@ function guidedWorkflowCapabilities<TProject extends ProjectSessionProject>(
 function normalizeProjectWorkflow<TProject extends ProjectSessionProject>(project: TProject): TProject {
   const { unacceptedAiProposal: _legacyProposal, ...rest } = project as TProject & { unacceptedAiProposal?: unknown | null };
   const sanitized = rest as TProject;
-  const snappedProjectPalette = snapshotProjectPalette(sanitized.projectPalette);
-  const paletteNormalized = snappedProjectPalette === sanitized.projectPalette
-    ? sanitized
-    : { ...sanitized, projectPalette: snappedProjectPalette } as TProject;
+  const readinessNormalized = sanitized.analysis && sanitized.inputReadiness === undefined
+    ? { ...sanitized, inputReadiness: deriveInputReadiness(sanitized.analysis) } as TProject
+    : sanitized;
+  const snappedProjectPalette = snapshotProjectPalette(readinessNormalized.projectPalette);
+  const paletteNormalized = snappedProjectPalette === readinessNormalized.projectPalette
+    ? readinessNormalized
+    : { ...readinessNormalized, projectPalette: snappedProjectPalette } as TProject;
   const progress = normalizedWorkflowProgress(paletteNormalized);
   const current = paletteNormalized.workflowProgress;
   if (current && sameWorkflowProgress(current, progress)) return paletteNormalized;
@@ -1327,13 +1330,6 @@ function hasValidCutLine(project: ProjectSessionProject) {
   return Boolean(project.analysis?.outerCutPath.trim());
 }
 
-function needsAiSimplification(project: ProjectSessionProject) {
-  const inputReadiness = project.inputReadiness;
-  if (inputReadiness === "needs-simplification") return true;
-  if (inputReadiness === "ready-line-art") return false;
-  return project.analysis?.traceQuality?.detailExtractionModeUsed === "rendered";
-}
-
 function deriveInputReadiness(analysis: CutoutProjectAnalysis): ProjectSessionInputReadiness {
   return analysis.traceQuality?.detailExtractionModeUsed === "rendered"
     ? "needs-simplification"
@@ -1341,8 +1337,7 @@ function deriveInputReadiness(analysis: CutoutProjectAnalysis): ProjectSessionIn
 }
 
 function canAiProposalRequestPrerequisites<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
-  return needsAiSimplification(session.project)
-    && session.project.sourceImage != null
+  return session.project.sourceImage != null
     && hasValidCutLine(session.project)
     && session.aiProposal.status !== "requesting";
 }

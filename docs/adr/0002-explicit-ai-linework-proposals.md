@@ -17,16 +17,20 @@ Cut Line or printable geometry.
 
 ## Decision
 
-Allow AI-Assisted Simplification only when local analysis classifies a source
-as Needs Simplification and has produced a valid Cut Line.
+Allow AI-Assisted Simplification when local analysis has produced a valid Cut
+Line. Ready Line Art remains local by default, but the maker may explicitly
+request one proposal when its existing detail is too dense to transfer.
 
-Before a request, disclose that the Source Image will be uploaded to OpenAI
-under its normal retention terms and require confirmation of the exact $0.10
-estimate. Send one fixed Wood-Transfer Style request with no automatic retry.
-Ready Line Art and the SVG Fast Path remain local.
+Before a request, disclose that the cropped Source Image preview will be
+uploaded to OpenAI under its normal retention terms and require confirmation
+of the exact $0.10 estimate. Send one fixed Wood-Transfer Style request with
+no automatic retry.
+The SVG Fast Path and local existing line-art detail remain the default until
+the maker explicitly asks for a proposal.
 
-Treat provider output only as a proposal. Normalize it to preview-sized
-transparent black Detail Lines, apply deterministic validation and
+Treat provider output only as a proposal. Send the provider the same cropped
+preview used by the editor and protected Cut Line, normalize the response in
+that same preview-sized coordinate space, apply deterministic validation and
 `exterior-component-band-24` suppression, and keep it separate from accepted
 Detail Lines. The provider has no authority over the source image, subject
 mask, Cut Line, Finished Size, tile grid, overlap, calibration, SVG viewBox, or
