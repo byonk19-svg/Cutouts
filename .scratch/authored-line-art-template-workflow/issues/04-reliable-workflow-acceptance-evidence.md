@@ -7,7 +7,7 @@ regress.
 
 **Blocked by:** 02 - Editable Authored Detail Export; 03 - Review-Only Color Artwork Boundary.
 
-**Status:** ready-for-human
+**Status:** complete
 
 - [x] Browser acceptance runs cover authored SVG and line-art raster upload,
   original-on/original-off review, one detail edit, and advancement through the
@@ -48,8 +48,6 @@ regress.
 - Standards and Spec re-reviews passed with no remaining findings. No provider
   request was made, no ticket 02 or 03 implementation was reopened, and no
   protected geometry code was modified.
-- Physical print remains **ready-for-human**: print the saved PDF at 100% / Actual
-  Size with scaling disabled, measure the calibration square, tape the tiled
-  overlap marks and confirm the Cut Line is continuous across seams, then
-  confirm the selected interior details are recognizable and useful for wood
-  transfer.
+- Physical print acceptance passed on 2026-07-21. The maker printed the saved
+  PDF at 100% / Actual Size and confirmed the calibration, tiled Cut Line
+  continuity, and recognizable interior transfer details were acceptable.
