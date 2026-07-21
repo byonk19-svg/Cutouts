@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "generatedOn": "2026-07-21",
+  "projectName": "Coraline Physical MVP",
+  "finishedHeightIn": 30,
+  "sourceFixture": "backend/tests/fixtures/coraline/coraline-best-clean-outline.png",
+  "productBaseline": "c1144b6",
+  "branchHead": "8ad948eaee55b1e57a1127e191cc4b927d86376f",
+  "printablePdf": "output/pdf/coraline-physical-mvp-template-packet.pdf",
+  "renderedPages": [
+    "output/acceptance/physical-mvp/page-01-cover.png",
+    "output/acceptance/physical-mvp/page-02-paint-guide.png",
+    "output/acceptance/physical-mvp/page-03-first-tile.png",
+    "output/acceptance/physical-mvp/page-04-adjacent-tile.png"
+  ]
+}
