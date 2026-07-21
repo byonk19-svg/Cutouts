@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "ticket": "04-reliable-workflow-acceptance-evidence",
+  "evidence": {
+    "authoredSvg": {
+      "originalOnPreview": "output/acceptance/authored-line-art/svg-original-on.png",
+      "originalOffPreview": "output/acceptance/authored-line-art/svg-original-off.png",
+      "editedOriginalOffPreview": "output/acceptance/authored-line-art/svg-edited-original-off.png",
+      "acceptedLineworkSvg": "output/acceptance/authored-line-art/authored-line-art.svg",
+      "renderedCutlinePage": "output/acceptance/authored-line-art/authored-line-art-cutline-page.png",
+      "renderedDetailPage": "output/acceptance/authored-line-art/authored-line-art-detail-page.png",
+      "printablePdf": "output/pdf/authored-line-art-acceptance.pdf",
+      "editedDetailPixelsRemaining": 3498,
+      "cutlineLayerCount": 1,
+      "hasAcceptedDetailLayer": true,
+      "hasOriginalUnderlay": false
+    },
+    "authoredRaster": {
+      "editedOriginalOffPreview": "output/acceptance/authored-line-art/raster-edited-original-off.png",
+      "editedDetailPixelsRemaining": 12974
+    },
+    "colorArtwork": {
+      "reviewOnlyPreview": "output/acceptance/authored-line-art/color-review-only.png",
+      "acceptedArtifactPreservedAtProposalConsentGate": true
+    }
+  },
+  "providerRequests": 0,
+  "protectedGeometry": {
+    "changedByTicket": false,
+    "regressionCoverageRequired": [
+      "cutline continuity",
+      "SVG viewBox",
+      "finished size",
+      "tiling overlap",
+      "calibration square"
+    ]
+  },
+  "physicalPrintCheck": {
+    "status": "ready-for-human",
+    "instructions": [
+      "Print the PDF at 100% or Actual Size with printer scaling disabled.",
+      "Measure the calibration square and confirm its labeled dimensions.",
+      "Tape tiled pages at their overlap marks and confirm the Cut Line remains continuous.",
+      "Confirm the selected interior details are recognizable and useful for transfer."
+    ]
+  }
+}
