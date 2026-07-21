@@ -1,12 +1,13 @@
 # Cutout Studio Forward Plan
 
 **Generated:** 2026-07-21
-**Current objective:** Preserve the accepted v0.1 personal wood-cutout workflow
-baseline and choose any next product capability from explicit maker friction or
-an explicit new goal.
-**Current gate:** The v0.1 physical acceptance record is complete in
-[.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md](../../../.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md).
-No new product lane has been selected.
+**Current objective:** Produce one Maker-Ready Jigsaw Template from a real color
+Source Image without changing the validated print geometry or expanding into
+layered, stencil, laser, or CNC work.
+**Current gate:** Resolve and complete
+[.scratch/cutout-template-generator/issues/09-maker-ready-jigsaw-template.md](../../../.scratch/cutout-template-generator/issues/09-maker-ready-jigsaw-template.md).
+The required real colored Coraline Source Image is not currently present in the
+repository or preserved primary checkout.
 
 ## Why this plan exists
 
@@ -93,12 +94,12 @@ result, transfer result, and paint-guide result, or the owner explicitly
 accepts a clearly recorded waiver without representing an unperformed check as
 physical evidence.
 
-**Result:** completed by owner acceptance on 2026-07-21. The owner reported
-successful 100% printing, calibration, and two-page alignment, then explicitly
-accepted the packet while waiving an exact numeric ruler record, a separate
-carbon-transfer exercise, and a separate in-store paint-guide simulation. The
-canonical issue records those waivers without claiming the checks were
-physically performed.
+**Result:** the mechanical check completed on 2026-07-21. The owner reported
+successful 100% printing, calibration, and two-page alignment. Later direct
+quality review rejected the packet as maker-ready: it used the wrong processed
+outline fixture, produced rough and ambiguous enlarged linework, and yielded a
+non-actionable two-color paint guide. The canonical issue preserves both the
+mechanical results and the later correction.
 
 ## Sprint 2: Fix only demonstrated blockers
 
@@ -119,7 +120,10 @@ For each failure:
    conventions.
 5. Repeat only the affected physical check and record the result.
 
-**Result:** skipped. Physical acceptance produced no reported must-fix defect.
+**Result:** active through issue 09 after the later quality review identified a
+must-fix maker-readiness defect. Work is blocked only on obtaining the real
+colored Source Image; no algorithm or dependency change is authorized before
+that source reproduces the failure through the real workflow.
 
 ## Sprint 3: Establish the v0.1 baseline
 
@@ -134,14 +138,14 @@ For each failure:
 **Done when:** one commit, one physically accepted packet, and one completed
 checklist define the v0.1 baseline.
 
-**Result:** completed on 2026-07-21. Product baseline `c1144b6` produced the
-accepted `Coraline Physical MVP` packet. `pnpm verify` passed with 83 backend
-tests plus all TypeScript suites and the production build; isolated
-`pnpm test:e2e` passed all 30 Chromium tests. The packet identity, SHA-256,
-physical results, explicit owner waivers, known limitations, and unauthorized
-release actions are recorded in `docs/MVP_ACCEPTANCE_CHECKLIST.md` and the
-canonical physical issue. Tagging, pushing, deployment, packaging, and
-branch/worktree cleanup remain separate decisions requiring authorization.
+**Result:** reopened on 2026-07-21 after direct quality review. Product baseline
+`c1144b6` produced a Mechanically Valid Template Packet, and `pnpm verify` plus
+all 30 Chromium tests passed, but the packet is not a Maker-Ready Jigsaw
+Template. It was generated from a processed black-and-white outline fixture;
+the enlarged artwork is rough and ambiguous, and its two-color paint guide is
+not useful. The mechanical evidence remains valid, but no v0.1 baseline exists
+until issue 09 passes with a real color Source Image. Tagging, pushing,
+deployment, packaging, and branch/worktree cleanup remain unauthorized.
 
 ## Parked until after v0.1
 

@@ -6,6 +6,31 @@
 
 The first product boundary: a workflow for creating printable wood cutout templates for the maker's own use. It does not include Etsy listing preparation, buyer support, commercial licensing, or marketplace packaging.
 
+### Jigsaw Template
+
+The product's fabrication boundary: a full-size paper template for transferring
+one outer Cut Line and optional interior Detail Lines onto wood for hand cutting
+with a jigsaw and later painting. Interior Detail Lines guide transfer and
+painting; they are not additional cutting contours. Stencil bridges, floating
+islands, layered-cut geometry, kerf compensation, laser paths, CNC paths, and
+machine-ready exports remain outside this boundary unless the maker explicitly
+chooses a different product direction.
+
+### Mechanically Valid Template Packet
+
+A Template Pack whose physical production mechanics are trustworthy: finished
+scale, calibration, page tiling, overlap, labels, and PDF assembly work as
+specified. Mechanical validity does not mean the artwork is clean, recognizable,
+paintable, or ready for a maker to use.
+
+### Maker-Ready Jigsaw Template
+
+A Mechanically Valid Template Packet with one clear outer Cut Line, sparse and
+deliberate interior Detail Lines, and a useful Color Guide derived from the real
+Source Image. At full printed size the maker can unambiguously identify what to
+cut, what to transfer for painting, and which colors belong to meaningful
+areas. Passing automated export checks alone cannot establish maker readiness.
+
 ### Template Pack
 
 A printable output bundle that helps a maker transfer an image to wood and paint it. A template pack may contain tiled outline pages, assembly guidance, and a paint color guide.
