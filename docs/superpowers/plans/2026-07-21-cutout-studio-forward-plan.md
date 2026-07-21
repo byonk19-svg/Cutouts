@@ -6,8 +6,10 @@ Source Image without changing the validated print geometry or expanding into
 layered, stencil, laser, or CNC work.
 **Current gate:** Resolve and complete
 [.scratch/cutout-template-generator/issues/09-maker-ready-jigsaw-template.md](../../../.scratch/cutout-template-generator/issues/09-maker-ready-jigsaw-template.md).
-The required real colored Coraline Source Image is not currently present in the
-repository or preserved primary checkout.
+The real colored Coraline Source Image is available locally, identified by
+SHA-256 in issue 09, and intentionally remains outside the repository. The
+canonical target is 36 inches tall with a maximum Light Cleanup budget of 15
+minutes and 15 deliberate delete/add actions.
 
 ## Why this plan exists
 
@@ -121,9 +123,10 @@ For each failure:
 5. Repeat only the affected physical check and record the result.
 
 **Result:** active through issue 09 after the later quality review identified a
-must-fix maker-readiness defect. Work is blocked only on obtaining the real
-colored Source Image; no algorithm or dependency change is authorized before
-that source reproduces the failure through the real workflow.
+must-fix maker-readiness defect. The real colored Source Image, finished height,
+and measurable Light Cleanup budget are now resolved. No algorithm or
+dependency change is authorized before that source reproduces the failure
+through the real workflow.
 
 ## Sprint 3: Establish the v0.1 baseline
 

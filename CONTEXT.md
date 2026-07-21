@@ -31,6 +31,14 @@ Source Image. At full printed size the maker can unambiguously identify what to
 cut, what to transfer for painting, and which colors belong to meaningful
 areas. Passing automated export checks alone cannot establish maker readiness.
 
+### Light Cleanup
+
+Small corrections to an already recognizable starter template: deleting
+unwanted Connected Line Segments and adding a few short missing Feature Lines.
+Light Cleanup preserves generated lines for every major character region and
+never requires the maker to redraw a face, hair shape, garment, limb, hand,
+footwear, or accessory from scratch.
+
 ### Template Pack
 
 A printable output bundle that helps a maker transfer an image to wood and paint it. A template pack may contain tiled outline pages, assembly guidance, and a paint color guide.
