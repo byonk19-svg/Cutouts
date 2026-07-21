@@ -62,6 +62,16 @@ That smoke starts its own current dev server and expects ports `5173` and `8787`
 
 See `docs/MVP_ACCEPTANCE_CHECKLIST.md` for the manual print validation steps that still need a real printer and paper.
 
+## Current Status
+
+The current forward plan lives at
+`docs/superpowers/plans/2026-07-21-cutout-studio-forward-plan.md`.
+
+The active gate is
+`.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md`.
+No new feature or research work should begin until that issue records the
+physical MVP validation result.
+
 ## Notes
 
 Tracing baseline: commit `ddcaeb5` is the known-good vector cutline baseline. It moves source analysis toward subject-silhouette detection, returns preview-space `outerCutPath`, exports SVG cutlines as real vector paths, guards old saved projects with missing vector cutlines, and includes high-resolution geometry plus debug-layer regression coverage.
