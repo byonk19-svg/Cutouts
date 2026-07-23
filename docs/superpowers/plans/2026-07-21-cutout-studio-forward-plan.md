@@ -1,15 +1,13 @@
 # Cutout Studio Forward Plan
 
 **Generated:** 2026-07-21
-**Current objective:** Produce one Maker-Ready Jigsaw Template from a real color
-Source Image without changing the validated print geometry or expanding into
-layered, stencil, laser, or CNC work.
-**Current gate:** Resolve and complete
-[.scratch/cutout-template-generator/issues/09-maker-ready-jigsaw-template.md](../../../.scratch/cutout-template-generator/issues/09-maker-ready-jigsaw-template.md).
-The real colored Coraline Source Image is available locally, identified by
-SHA-256 in issue 09, and intentionally remains outside the repository. The
-canonical target is 36 inches tall with a maximum Light Cleanup budget of 15
-minutes and 15 deliberate delete/add actions.
+**Current objective:** Close the physically accepted Maker-Ready work as the
+verified v0.1 baseline without expanding into layered, stencil, laser, or CNC
+work.
+**Current gate:** Complete. The real-color Coraline acceptance is recorded in
+[issue 09](../../../.scratch/cutout-template-generator/issues/09-maker-ready-jigsaw-template.md),
+and the accepted Grinch authored-SVG packet supplies a second character run.
+Release mechanics remain a separate, explicitly authorized decision.
 
 ## Why this plan exists
 
@@ -122,11 +120,11 @@ For each failure:
    conventions.
 5. Repeat only the affected physical check and record the result.
 
-**Result:** active through issue 09 after the later quality review identified a
-must-fix maker-readiness defect. The real colored Source Image, finished height,
-and measurable Light Cleanup budget are now resolved. No algorithm or
-dependency change is authorized before that source reproduces the failure
-through the real workflow.
+**Result:** complete. Issue 09 reproduced and fixed the maker-readiness defects
+using the real colored Source Image while preserving print geometry. The owner
+accepted the corrected print after three Connected Line Segment deletions,
+zero Feature Line additions, and no paid AI request. The later Grinch run also
+passed through the authored-SVG path and was explicitly accepted.
 
 ## Sprint 3: Establish the v0.1 baseline
 
@@ -141,14 +139,13 @@ through the real workflow.
 **Done when:** one commit, one physically accepted packet, and one completed
 checklist define the v0.1 baseline.
 
-**Result:** reopened on 2026-07-21 after direct quality review. Product baseline
-`c1144b6` produced a Mechanically Valid Template Packet, and `pnpm verify` plus
-all 30 Chromium tests passed, but the packet is not a Maker-Ready Jigsaw
-Template. It was generated from a processed black-and-white outline fixture;
-the enlarged artwork is rough and ambiguous, and its two-color paint guide is
-not useful. The mechanical evidence remains valid, but no v0.1 baseline exists
-until issue 09 passes with a real color Source Image. Tagging, pushing,
-deployment, packaging, and branch/worktree cleanup remain unauthorized.
+**Result:** accepted locally on 2026-07-22. The rejected processed-outline
+packet remains historical mechanical evidence, while issue 09 identifies the
+accepted real-color Coraline packet and its physical decision. The accepted
+Grinch packet adds authored-SVG coverage. The final verification and local
+implementation commits are recorded in `docs/MVP_ACCEPTANCE_CHECKLIST.md`.
+Tagging, pushing, deployment, packaging, and branch/worktree cleanup remain
+unauthorized.
 
 ## Parked until after v0.1
 

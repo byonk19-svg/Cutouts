@@ -60,17 +60,20 @@ pnpm test:e2e
 
 That smoke starts its own current dev server and expects ports `5173` and `8787` to be free. Stop any existing `pnpm dev` session before running it. The smoke covers upload, Trace Studio manual strokes, project persistence, Paint Match Review, shopping list updates, SVG export, and PDF export response type.
 
-See `docs/MVP_ACCEPTANCE_CHECKLIST.md` for the manual print validation steps that still need a real printer and paper.
+See `docs/MVP_ACCEPTANCE_CHECKLIST.md` for the verified v0.1 software and physical acceptance record.
 
 ## Current Status
 
 The current forward plan lives at
 [docs/superpowers/plans/2026-07-21-cutout-studio-forward-plan.md](docs/superpowers/plans/2026-07-21-cutout-studio-forward-plan.md).
 
-The active gate is
-[.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md](.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md).
-No new feature or research work should begin until that issue records the
-physical MVP validation result.
+The v0.1 maker-readiness gate is complete. The accepted real-color Coraline
+packet is recorded in
+[issue 09](.scratch/cutout-template-generator/issues/09-maker-ready-jigsaw-template.md),
+and the Grinch authored-SVG packet provides a second accepted character run.
+Release tagging, publishing, packaging, and branch cleanup remain separate
+decisions that require explicit authorization. New product work should begin
+only from an explicit goal informed by real maker-workflow friction.
 
 ## Notes
 
