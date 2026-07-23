@@ -317,15 +317,30 @@ def extract_palette(image: Image.Image, mask: Image.Image, palette_size: int) ->
 
     quantized = (pixels // 24) * 24 + 12
     values, counts = np.unique(quantized, axis=0, return_counts=True)
-    order = np.argsort(counts)[::-1][:palette_size]
+    ranked = np.argsort(counts)[::-1]
+    clusters: list[dict[str, Any]] = []
+    for idx in ranked:
+        color = tuple(int(v) for v in values[idx])
+        lab = _rgb_to_lab(color)
+        nearest = min(
+            clusters,
+            key=lambda cluster: float(np.linalg.norm(lab - cluster["lab"])),
+            default=None,
+        )
+        if nearest is not None and float(np.linalg.norm(lab - nearest["lab"])) < 28:
+            nearest["count"] += int(counts[idx])
+        else:
+            clusters.append({"idx": int(idx), "lab": lab, "count": int(counts[idx])})
+    clusters.sort(key=lambda cluster: cluster["count"], reverse=True)
     paints = load_paint_catalog()
     total = float(counts.sum())
 
     colors_out = []
-    for idx in order:
+    for cluster in clusters[:palette_size]:
+        idx = cluster["idx"]
         color = tuple(int(v) for v in values[idx])
         matches = tuple(match_paints(color, paints, limit=3))
-        colors_out.append(PaletteColor(rgb=color, coverage=float(counts[idx]) / total, matches=matches))
+        colors_out.append(PaletteColor(rgb=color, coverage=float(cluster["count"]) / total, matches=matches))
     return tuple(colors_out)
 
 
@@ -549,13 +564,35 @@ def _looks_like_fake_checkerboard_background(image: Image.Image) -> bool:
     high = float(np.percentile(gray, 90))
     dark_ratio = float(np.mean(gray <= low + 6))
     light_ratio = float(np.mean(gray >= high - 6))
+    strips = [
+        np.mean(rgb[:edge, :, :], axis=2),
+        np.mean(rgb[-edge:, :, :], axis=2),
+        np.mean(rgb[:, :edge, :], axis=2).T,
+        np.mean(rgb[:, -edge:, :], axis=2).T,
+    ]
+    midpoint = (low + high) / 2
+    repeating_tiles = False
+    max_lag = min(48, min(strip.shape[1] for strip in strips) // 3)
+    for lag in range(6, max_lag + 1):
+        inverse_agreement = float(np.mean([
+            np.mean((strip[:, :-lag] >= midpoint) == (strip[:, lag:] >= midpoint))
+            for strip in strips
+        ]))
+        repeat_agreement = float(np.mean([
+            np.mean((strip[:, :-(lag * 2)] >= midpoint) == (strip[:, lag * 2:] >= midpoint))
+            for strip in strips
+        ]))
+        if inverse_agreement < 0.58 and repeat_agreement > 0.78:
+            repeating_tiles = True
+            break
     return (
-        high - low > 24
+        high - low >= 14
         and float(np.mean(saturation)) < 10
-        and 155 <= low <= 235
+        and 155 <= low <= 245
         and high >= 220
         and dark_ratio > 0.18
         and light_ratio > 0.18
+        and repeating_tiles
     )
 
 
@@ -1024,7 +1061,7 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
     gray = flattened.convert("L").filter(ImageFilter.GaussianBlur(radius=blur_radius))
     edge_arr = np.asarray(gray.filter(ImageFilter.FIND_EDGES), dtype=np.uint8) > edge_threshold
     mask_arr = np.asarray(work_mask.convert("L")) > 0
-    interior_arr = np.asarray(_erode_mask(work_mask, 9)) > 0
+    interior_arr = np.asarray(_feature_line_interior(work_mask)) > 0
     detail_arr = edge_arr & mask_arr & interior_arr
 
     detail = Image.fromarray(detail_arr.astype(np.uint8) * 255, mode="L")
@@ -1037,7 +1074,7 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
     detail = _remove_small_components(detail, max(24, min_area - 14))
     detail = _filter_clean_detail_components(detail)
     if detail.size != original_size:
-        detail = detail.resize(original_size, Image.Resampling.NEAREST)
+        detail = detail.resize(original_size, Image.Resampling.LANCZOS if print_scale else Image.Resampling.NEAREST)
     return detail
 
 
@@ -1274,7 +1311,7 @@ def _clean_color_boundary_mask(image: Image.Image, mask: Image.Image, cleanup: i
     smoothed = cv2.GaussianBlur(rgb, ksize=(0, 0), sigmaX=blur_sigma, sigmaY=blur_sigma)
     lab = cv2.cvtColor(smoothed, cv2.COLOR_RGB2LAB).astype(np.int16)
     mask_arr = np.asarray(mask.convert("L")) > 0
-    interior_arr = np.asarray(_erode_mask(mask, 9)) > 0
+    interior_arr = np.asarray(_feature_line_interior(mask)) > 0
     threshold = 12 + round(((cleanup - 76) / 24) * (8 if print_scale else 6))
 
     horizontal_delta = np.linalg.norm(lab[:, 1:, :] - lab[:, :-1, :], axis=2)
@@ -1298,7 +1335,7 @@ def _head_feature_boost_mask(image: Image.Image, mask: Image.Image, cleanup: int
     background = np.asarray(image.convert("L").filter(ImageFilter.GaussianBlur(11)), dtype=np.int16)
     mask_l = mask.convert("L")
     mask_arr = np.asarray(mask_l) > 0
-    interior_arr = np.asarray(_erode_mask(mask_l, 9)) > 0
+    interior_arr = np.asarray(_feature_line_interior(mask_l)) > 0
     height, width = mask_arr.shape
     cleanup_ratio = (cleanup - 76) / 24
     dark_delta = 18 + round(cleanup_ratio * 8)
@@ -1329,6 +1366,16 @@ def _head_feature_boost_mask(image: Image.Image, mask: Image.Image, cleanup: int
 
     keep = (labels > 0) & np.isin(labels, keep_labels)
     return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
+
+
+def _feature_line_interior(mask: Image.Image) -> Image.Image:
+    bounds = mask.getbbox()
+    if bounds is None:
+        return Image.new("L", mask.size, 0)
+    subject_width = bounds[2] - bounds[0]
+    subject_height = bounds[3] - bounds[1]
+    perimeter_clearance = max(4, round(min(subject_width, subject_height) * 0.04))
+    return _erode_mask(mask, perimeter_clearance * 2 + 1)
 
 
 def _detail_work_image(

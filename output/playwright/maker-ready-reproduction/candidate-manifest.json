@@ -1,0 +1,52 @@
+{
+  "accepted": true,
+  "candidateStatus": "maker-ready-accepted",
+  "ownerAcceptance": {
+    "acceptedOn": "2026-07-21",
+    "decision": "The owner printed the corrected packet, reported that it looked good, and continued to the Grinch source."
+  },
+  "source": {
+    "path": "C:\\Users\\byonk\\Downloads\\coraline-jones-wybie-lovat-youtube-other-mother-png-favpng-KtJE4LMVAEBZCVcR067bzMXqu.jpg",
+    "widthPx": 820,
+    "heightPx": 960,
+    "sha256": "0242226d8b59a9591073d649f55dd98a725c10a406633dc0220881e7832f8124",
+    "committed": false
+  },
+  "settings": {
+    "finishedHeightIn": 36,
+    "templateStyle": "clean",
+    "detailCleanup": 88,
+    "threshold": 42,
+    "paidAiRequestMade": false,
+    "cleanupSegmentDeletes": 3,
+    "cleanupFeatureLineAdds": 0,
+    "cleanupMinutes": "under 5"
+  },
+  "analysis": {
+    "subjectBoundsPx": [211, 1, 607, 960],
+    "finishedWidthIn": 14.87,
+    "finishedHeightIn": 36,
+    "tileCols": 2,
+    "tileRows": 4,
+    "tileCount": 8,
+    "detailExtractionModeUsed": "rendered",
+    "fakeCheckerboardBackground": true,
+    "paletteHex": ["#E4CC3C", "#CC9C24", "#FCFCFC", "#0C0C24", "#542424", "#E4CCB4"]
+  },
+  "paintGuide": [
+    {"area": "Yellow raincoat", "decision": "FolkArt Outdoor School Bus Yellow"},
+    {"area": "Boots and yellow shadows", "decision": "FolkArt Outdoor School Bus Yellow"},
+    {"area": "Eyes and white highlights", "decision": "Apple Barrel Matte Acrylic White"},
+    {"area": "Blue hair and stockings", "decision": "FolkArt Outdoor Navy"},
+    {"area": "Burgundy bag and skirt", "decision": "No match / choose in store"},
+    {"area": "Face and hands", "decision": "Craft Smart Acrylic Vanilla"}
+  ],
+  "pdf": {
+    "path": "output/pdf/coraline-maker-ready-jigsaw-template.pdf",
+    "bytes": 1174567,
+    "pages": 10,
+    "pageSize": "US Letter",
+    "sha256": "318921bfc3d3a6264c026a0f4972abca6f5b80d0e3197376b73bbc1cc269c08b"
+  },
+  "remainingAcceptance": []
+}
