@@ -399,7 +399,21 @@ test("maker can use authored SVG ink as editable starter lines", async ({ page }
   await uploadStep.getByRole("button", { name: "Generate Template" }).click();
   const detailCanvas = page.getByLabel("Editable interior detail lines");
   await expect(detailCanvas).toBeVisible();
+  await expect.poll(() => detailCanvas.evaluate((element) => {
+    const detail = element as HTMLCanvasElement;
+    const logicalOverlay = detail.nextElementSibling as HTMLCanvasElement | null;
+    return logicalOverlay ? detail.width / logicalOverlay.width : 0;
+  })).toBeGreaterThanOrEqual(3);
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).height)).toBe(36 * 144);
   await expect(page.getByLabel("Input readiness")).toContainText("Ready line art");
+  await expect.poll(() => page.evaluate(async () => {
+    const raw = localStorage.getItem("cutout-studio:auto-save:v1");
+    if (!raw) return 0;
+    const image = new Image();
+    image.src = JSON.parse(raw).sourceImage.dataUrl;
+    await image.decode();
+    return image.naturalWidth;
+  })).toBe(400);
   await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).toBeGreaterThan(0);
   await expect.poll(() => canvasVisiblePixelCountInRatioRegion(detailCanvas, { left: 0.02, top: 0.55, right: 0.18, bottom: 0.72 })).toBeGreaterThan(0);
   await expect(page.getByLabel("Clean Lines workspace")).toContainText("Editable starter lines");
@@ -417,6 +431,35 @@ test("maker can use authored SVG ink as editable starter lines", async ({ page }
   await moreTools.getByRole("button", { name: "Reset details" }).click();
   await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(originalDetail);
   expect(providerRequests).toBe(0);
+});
+
+test("authored SVG starter lines do not duplicate the protected outer cut line", async ({ page }) => {
+  await page.goto("/");
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "outlined-character.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
+        <rect width="400" height="600" fill="white"/>
+        <path d="M100 550 L80 300 Q90 80 200 60 Q310 80 320 300 L300 550 Z" fill="#d40000" stroke="#111" stroke-width="12"/>
+        <path d="M145 280 Q200 320 255 280" fill="none" stroke="#111" stroke-width="8"/>
+        <path d="M120 350 L120 450" fill="none" stroke="#111" stroke-width="8"/>
+      </svg>
+    `)
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  await expect(detailCanvas).toBeVisible();
+  await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).toBeGreaterThan(0);
+  await expect.poll(() => canvasVisiblePixelCountNearBorder(detailCanvas, 0.025)).toBe(0);
+  await expect.poll(() => canvasVisiblePixelCountInRatioRegion(detailCanvas, {
+    left: 0.12,
+    top: 0.55,
+    right: 0.22,
+    bottom: 0.80
+  })).toBeGreaterThan(0);
 });
 
 test("unsafe SVG import reports a local error and preserves the current project", async ({ page }) => {
@@ -463,6 +506,96 @@ test("SVG without dark authored ink uses the ordinary image workflow", async ({ 
   await expect(uploadStep.getByText("SVG linework detected")).toHaveCount(0);
   await uploadStep.getByRole("button", { name: "Generate Template" }).click();
   await expect(page.getByLabel("Clean Lines workspace")).toBeVisible();
+});
+
+test("filled compound outlines are recognized as authored SVG linework", async ({ page }) => {
+  await page.goto("/");
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "filled-outline-character.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
+        <rect width="400" height="600" fill="white"/>
+        <path d="M95 560 L80 330 Q90 130 200 80 Q310 130 320 330 L305 560 Z" fill="#d40000"/>
+        <path d="M120 250 H280 V258 H120 Z M140 310 H260 V318 H140 Z M160 370 H240 V378 H160 Z M175 220 H183 V430 H175 Z M217 220 H225 V430 H217 Z" fill="#111111"/>
+      </svg>
+    `)
+  });
+
+  await expect(uploadStep.getByText("SVG linework detected")).toBeVisible();
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+  await expect(page.getByLabel("Input readiness")).toContainText("Ready line art");
+  await expect.poll(() => canvasVisiblePixelCount(page.getByLabel("Editable interior detail lines"))).toBeGreaterThan(0);
+});
+
+test("SVG linework classification is independent of declared viewport size", async ({ page }) => {
+  await page.goto("/");
+  const sourceInput = page.getByLabel("Upload step").getByLabel("Source image");
+  const svgAtSize = (width: number, height: number) => Buffer.from(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 400 600">
+      <rect width="400" height="600" fill="white"/>
+      <path d="M95 560 L80 330 Q90 130 200 80 Q310 130 320 330 L305 560 Z" fill="#d40000"/>
+      <path d="M120 250 H280 V258 H120 Z M140 310 H260 V318 H140 Z M160 370 H240 V378 H160 Z M175 220 H183 V430 H175 Z M217 220 H225 V430 H217 Z" fill="#111111"/>
+    </svg>
+  `);
+
+  for (const [width, height] of [[40, 60], [800, 1200]]) {
+    await sourceInput.setInputFiles({ name: `linework-${width}.svg`, mimeType: "image/svg+xml", buffer: svgAtSize(width, height) });
+    await expect(page.getByLabel("Upload step").getByText("SVG linework detected")).toBeVisible();
+  }
+});
+
+test("filled-color SVG artwork does not masquerade as ready authored line art", async ({ page }) => {
+  await page.goto("/");
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "filled-color-character.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
+        <defs><style>.unused-export-style { fill: #252121; stroke: #252121; }</style></defs>
+        <rect width="400" height="600" fill="white"/>
+        <path d="M95 560 L80 330 Q90 130 200 80 Q310 130 320 330 L305 560 Z" fill="#d40000"/>
+        <path d="M125 290 Q200 160 275 290 L250 380 L150 380 Z" fill="#55d400"/>
+        <rect x="160" y="260" width="80" height="80" fill="#000000"/>
+      </svg>
+    `)
+  });
+
+  await expect(uploadStep.getByText("SVG linework detected")).toHaveCount(0);
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+  await expect(page.getByLabel("Input readiness")).toContainText("Needs simplification");
+  await expect(page.getByLabel("Input readiness")).not.toContainText("Ready line art");
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  await expect(detailCanvas).toBeVisible();
+  await expect.poll(() => canvasVisiblePixelCount(detailCanvas)).toBeGreaterThan(0);
+  await expect.poll(() => canvasVisiblePixelCountInRatioRegion(detailCanvas, {
+    left: 0.46,
+    top: 0.44,
+    right: 0.54,
+    bottom: 0.50
+  })).toBe(0);
+});
+
+test("large solid SVG ink is explicit simplification evidence", async ({ page }) => {
+  await page.goto("/");
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "solid-dark-region.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
+        <rect width="400" height="600" fill="white"/>
+        <rect x="70" y="100" width="260" height="400" fill="#111111"/>
+      </svg>
+    `)
+  });
+
+  await expect(uploadStep.getByText("SVG linework detected")).toHaveCount(0);
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+  await expect(page.getByLabel("Input readiness")).toContainText("Needs simplification");
+  await expect(page.getByLabel("Input readiness")).not.toContainText("Ready line art");
 });
 
 test("maker can complete the MVP trace, restore, paint review, and export workflow", async ({ page, request }) => {
@@ -1254,6 +1387,25 @@ async function canvasVisiblePixelCountInRatioRegion(
     }
     return count;
   }, region);
+}
+
+async function canvasVisiblePixelCountNearBorder(canvas: Locator, borderRatio: number) {
+  return canvas.evaluate((element, ratio) => {
+    const target = element as HTMLCanvasElement;
+    const context = target.getContext("2d");
+    if (!context) return 0;
+    const pixels = context.getImageData(0, 0, target.width, target.height).data;
+    const borderX = Math.ceil(target.width * ratio);
+    const borderY = Math.ceil(target.height * ratio);
+    let count = 0;
+    for (let y = 0; y < target.height; y += 1) {
+      for (let x = 0; x < target.width; x += 1) {
+        if (x >= borderX && x < target.width - borderX && y >= borderY && y < target.height - borderY) continue;
+        if (pixels[(y * target.width + x) * 4 + 3] > 0) count += 1;
+      }
+    }
+    return count;
+  }, borderRatio);
 }
 
 async function savedProjectIncludesPaintGuide(page: Page) {

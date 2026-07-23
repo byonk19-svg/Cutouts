@@ -1,0 +1,22 @@
+{
+  "status": "maker-ready-accepted",
+  "accepted": true,
+  "physicalReview": {
+    "acceptedBy": "owner",
+    "acceptedAt": "2026-07-22T20:24:11.5704821-05:00",
+    "note": "Owner accepted the printed Grinch template packet."
+  },
+  "providerRequests": 0,
+  "lineCleanupActions": 1,
+  "previewStatus": "Connected line preview: 1476 pixels. Click or press Enter to remove it.",
+  "metrics": {
+    "width": 2975,
+    "height": 5184,
+    "logicalWidth": 551,
+    "logicalHeight": 960,
+    "inkPixels": 429894,
+    "coverage": 0.02787464985994398
+  },
+  "exportText": "1\nUpload\nCOMPLETED\n2\nClean Lines\nCOMPLETED\n3\nColors\nCOMPLETED\n4\nExport\nCURRENT\nTEMPLATE PACK\nReady to Print\nFinished Size\n20.66 x 36 in\nTrace pages\n12 tiled pages\nPrint setting\nPrint at 100% / actual size\n\nMeasure the calibration square before taping the full template together.\n\nInclude cover page\nInclude Color Guide\nDownload Printable PDF\nMore Export Options",
+  "pdf": "C:\\Users\\byonk\\.codex\\worktrees\\cutout-forward-plan\\Cutouts\\output\\pdf\\grinch-decorating-maker-ready.pdf"
+}
