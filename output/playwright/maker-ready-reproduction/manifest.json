@@ -1,0 +1,55 @@
+{
+  "accepted": false,
+  "decision": "mechanically-valid-maker-ready-rejected",
+  "source": {
+    "path": "C:\\Users\\byonk\\Downloads\\coraline-jones-wybie-lovat-youtube-other-mother-png-favpng-KtJE4LMVAEBZCVcR067bzMXqu.jpg",
+    "widthPx": 820,
+    "heightPx": 960,
+    "sha256": "0242226d8b59a9591073d649f55dd98a725c10a406633dc0220881e7832f8124",
+    "committed": false
+  },
+  "settings": {
+    "finishedHeightIn": 36,
+    "templateStyle": "clean",
+    "detailCleanup": 88,
+    "threshold": 42,
+    "smoothing": 4,
+    "paidAiRequestMade": false,
+    "cleanupActionsApplied": 0
+  },
+  "analysis": {
+    "subjectBoundsPx": [211, 1, 607, 960],
+    "finishedWidthIn": 14.87,
+    "finishedHeightIn": 36,
+    "tileCols": 2,
+    "tileRows": 4,
+    "tileCount": 8,
+    "detailExtractionModeUsed": "rendered",
+    "fakeCheckerboardBackground": false,
+    "warnings": [],
+    "paletteHex": ["#FCFCFC", "#E4CC3C", "#E4B424", "#E4CC24", "#E4E4E4", "#CC9C24"]
+  },
+  "pdf": {
+    "path": "output/pdf/coraline-maker-ready-baseline-rejected.pdf",
+    "bytes": 239460,
+    "pages": 10,
+    "pageSize": "US Letter",
+    "sha256": "df85ddcea6ae184a58dfcd78f40f566529006cf3cf394f97a4e01b1dff5f1570"
+  },
+  "failures": [
+    "baked checkerboard warning missed",
+    "detail contours duplicate and compete with the outer Cut Line",
+    "print-scale detail lines are stair-stepped and overly heavy",
+    "near-duplicate yellow and neutral palette bins crowd out major semantic colors",
+    "paint rows remain generic and unresolved"
+  ],
+  "screenshots": [
+    "output/playwright/maker-ready-reproduction/01-upload.png",
+    "output/playwright/maker-ready-reproduction/02-clean-lines-initial.png",
+    "output/playwright/maker-ready-reproduction/03-clean-lines-original-hidden.png",
+    "output/playwright/maker-ready-reproduction/04-linework-canvas.png",
+    "output/playwright/maker-ready-reproduction/05-print-preview.png",
+    "output/playwright/maker-ready-reproduction/06-colors-initial.png",
+    "output/playwright/maker-ready-reproduction/07-export.png"
+  ]
+}

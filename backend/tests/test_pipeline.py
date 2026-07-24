@@ -143,6 +143,34 @@ def checkerboard_background_fixture() -> bytes:
     return out.getvalue()
 
 
+def subtle_checkerboard_background_fixture() -> bytes:
+    image = Image.new("RGB", (320, 360), "white")
+    pixels = image.load()
+    colors = [(237, 237, 237), (255, 255, 255)]
+    for y in range(image.height):
+        for x in range(image.width):
+            pixels[x, y] = colors[((x // 18) + (y // 18)) % 2]
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((96, 52, 224, 300), fill=(242, 212, 86), outline=(12, 12, 12), width=8)
+    out = io.BytesIO()
+    image.save(out, format="JPEG", quality=94)
+    return out.getvalue()
+
+
+def subtle_gradient_background_fixture() -> bytes:
+    image = Image.new("RGB", (320, 360), "white")
+    pixels = image.load()
+    for y in range(image.height):
+        shade = round(237 + 18 * y / max(1, image.height - 1))
+        for x in range(image.width):
+            pixels[x, y] = (shade, shade, shade)
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((96, 52, 224, 300), fill=(242, 212, 86), outline=(12, 12, 12), width=8)
+    out = io.BytesIO()
+    image.save(out, format="JPEG", quality=94)
+    return out.getvalue()
+
+
 def ten_color_fixture() -> bytes:
     image = Image.new("RGBA", (300, 300), (255, 255, 255, 0))
     draw = ImageDraw.Draw(image)
@@ -308,6 +336,32 @@ def soft_shaded_render_fixture() -> tuple[Image.Image, Image.Image]:
     draw.arc((78, 74, 142, 132), start=200, end=340, fill=(22, 22, 26, 255), width=4)
     draw.line((70, 158, 152, 158), fill=(45, 42, 80, 255), width=5)
     draw.line((110, 126, 110, 204), fill=(48, 44, 82, 255), width=4)
+    return image, mask
+
+
+def cutline_echo_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGBA", (220, 280), (255, 255, 255, 0))
+    mask = Image.new("L", image.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((20, 20, 200, 260), radius=28, fill=255)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((20, 20, 200, 260), radius=28, fill=(228, 196, 52, 255))
+    draw.rounded_rectangle((20, 20, 200, 260), radius=28, outline=(28, 24, 28, 255), width=3)
+    draw.line((60, 140, 160, 140), fill=(28, 24, 28, 255), width=5)
+    return image, mask
+
+
+def small_character_feature_fixture() -> tuple[Image.Image, Image.Image]:
+    image = Image.new("RGBA", (96, 128), (255, 255, 255, 0))
+    mask = Image.new("L", image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((22, 6, 74, 50), fill=255)
+    mask_draw.rectangle((30, 46, 66, 96), fill=255)
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((22, 6, 74, 50), fill=(242, 200, 170, 255))
+    draw.rectangle((30, 46, 66, 96), fill=(236, 201, 42, 255))
+    draw.ellipse((34, 24, 40, 32), fill=(0, 0, 0, 255))
+    draw.ellipse((56, 24, 62, 32), fill=(0, 0, 0, 255))
+    draw.line((42, 39, 54, 39), fill=(145, 26, 52, 255), width=2)
     return image, mask
 
 
@@ -590,6 +644,20 @@ class PrintPipelineTest(unittest.TestCase):
 
         self.assertTrue(analysis.trace_quality["fakeCheckerboardBackground"])
         self.assertTrue(any("checkerboard background" in warning for warning in analysis.trace_quality["warnings"]))
+
+    def test_trace_quality_detects_subtle_baked_in_checkerboard_backgrounds(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)
+
+        analysis = analyze_template(subtle_checkerboard_background_fixture(), settings)
+
+        self.assertTrue(analysis.trace_quality["fakeCheckerboardBackground"])
+
+    def test_trace_quality_does_not_mistake_a_subtle_gradient_for_checkerboard(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)
+
+        analysis = analyze_template(subtle_gradient_background_fixture(), settings)
+
+        self.assertFalse(analysis.trace_quality["fakeCheckerboardBackground"])
 
     def test_trace_debug_export_writes_inspection_layers(self) -> None:
         settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)
@@ -940,6 +1008,31 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertLessEqual(len(palette), 2)
         self.assertGreater(len(palette[0].matches), 0)
 
+    def test_palette_extraction_preserves_smaller_distinct_character_colors(self) -> None:
+        image = Image.new("RGB", (100, 100), (252, 252, 252))
+        draw = ImageDraw.Draw(image)
+        bands = [
+            (0, 19, (228, 204, 60)),
+            (20, 39, (228, 180, 36)),
+            (40, 57, (228, 204, 36)),
+            (58, 71, (204, 156, 36)),
+            (72, 81, (12, 12, 36)),
+            (82, 89, (84, 36, 36)),
+            (90, 99, (228, 180, 156)),
+        ]
+        for top, bottom, color in bands:
+            draw.rectangle((0, top, 99, bottom), fill=color)
+        mask = Image.new("L", image.size, 255)
+
+        palette = extract_palette(image, mask, 6)
+        colors = [entry.rgb for entry in palette]
+        yellow_count = sum(red > 180 and green > 130 and blue < 100 for red, green, blue in colors)
+
+        self.assertLessEqual(yellow_count, 2)
+        self.assertTrue(any(blue > red * 1.5 and blue > green * 1.5 for red, green, blue in colors))
+        self.assertTrue(any(red > green * 1.5 and red > blue * 1.5 and red < 140 for red, green, blue in colors))
+        self.assertTrue(any(red > 180 and 120 < green < 220 and 100 < blue < 200 for red, green, blue in colors))
+
     def test_marker_template_style_is_accepted_from_settings(self) -> None:
         settings = TemplateSettings.from_mapping({"templateStyle": "marker"})
 
@@ -1146,13 +1239,12 @@ class PrintPipelineTest(unittest.TestCase):
 
         self.assertGreater(self._count_region_pixels(clean, (84, 34, 96, 186)), 100)
 
-    def test_shading_flattening_suppresses_soft_render_detail_noise(self) -> None:
+    def test_shading_flattening_and_perimeter_guard_suppress_soft_render_detail_noise(self) -> None:
         image, mask = soft_shaded_render_fixture()
         original_flatten = pipeline._flatten_shading
         try:
             pipeline._flatten_shading = lambda source, spatial_radius=10, color_radius=22: source.convert("RGB")
             raw_detailed = _detail_line_mask(image, mask, cleanup=72, print_scale=False, template_style="detailed")
-            raw_clean = _clean_feature_line_mask(image, mask, cleanup=92, print_scale=False)
         finally:
             pipeline._flatten_shading = original_flatten
 
@@ -1160,9 +1252,41 @@ class PrintPipelineTest(unittest.TestCase):
         flattened_clean = _clean_feature_line_mask(image, mask, cleanup=92, print_scale=False)
 
         self.assertLess(self._count_components(flattened_detailed), self._count_components(raw_detailed) * 0.7)
-        self.assertLess(self._count_mask_pixels(flattened_clean), self._count_mask_pixels(raw_clean) * 0.9)
-        self.assertLess(self._count_components(flattened_clean), self._count_components(raw_clean) * 0.7)
+        self.assertLess(self._count_mask_pixels(flattened_clean), 2_200)
+        self.assertLessEqual(self._count_components(flattened_clean), 2)
         self.assertGreater(self._count_region_pixels(flattened_clean, (72, 70, 148, 170)), 70)
+
+    def test_clean_template_style_suppresses_cutline_echoes_near_subject_perimeter(self) -> None:
+        image, mask = cutline_echo_fixture()
+
+        clean = _clean_feature_line_mask(image, mask, cleanup=88, print_scale=False)
+
+        perimeter_echo = sum([
+            self._count_region_pixels(clean, (22, 22, 198, 34)),
+            self._count_region_pixels(clean, (22, 246, 198, 258)),
+            self._count_region_pixels(clean, (22, 34, 34, 246)),
+            self._count_region_pixels(clean, (186, 34, 198, 246)),
+        ])
+        self.assertLess(perimeter_echo, 30)
+        self.assertGreater(self._count_region_pixels(clean, (54, 134, 166, 147)), 120)
+
+    def test_clean_template_style_keeps_editable_features_on_small_characters(self) -> None:
+        image, mask = small_character_feature_fixture()
+
+        clean = _clean_feature_line_mask(image, mask, cleanup=88, print_scale=False)
+
+        self.assertGreater(self._count_region_pixels(clean, (28, 16, 68, 44)), 20)
+
+    def test_print_scale_clean_feature_lines_are_antialiased_after_work_resize(self) -> None:
+        image, mask = cutline_echo_fixture()
+        large_size = (image.width * 7, image.height * 7)
+        image = image.resize(large_size, Image.Resampling.NEAREST)
+        mask = mask.resize(large_size, Image.Resampling.NEAREST)
+
+        clean = _clean_feature_line_mask(image, mask, cleanup=88, print_scale=True)
+        values = np.asarray(clean.convert("L"))
+
+        self.assertTrue(np.any((values > 0) & (values < 255)))
 
     def test_clean_template_style_drops_lower_body_texture_fragments(self) -> None:
         image, mask = simple_character_with_lower_texture_fixture()
