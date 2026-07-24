@@ -60,6 +60,17 @@ pnpm test:e2e
 
 That smoke starts its own current dev server and expects ports `5173` and `8787` to be free. Stop any existing `pnpm dev` session before running it. The smoke covers upload, Trace Studio manual strokes, project persistence, Paint Match Review, shopping list updates, SVG export, and PDF export response type.
 
+Workflow orchestration checks:
+
+```powershell
+pnpm workflow:doctor
+pnpm verify:release
+```
+
+`pnpm workflow:doctor` is read-only. It reports the current worktree, branch or detached state, dirty and untracked files, the recorded canonical worktree and active ticket, the base and head relationship, duplicate or unexplained feature worktrees, ports `5173` and `8787`, and cleanup candidates without modifying tracker files.
+
+`pnpm verify:release` writes one Markdown evidence summary under `.scratch/workflow-hygiene/evidence/`, runs `pnpm workflow:doctor`, `pnpm verify`, serial Playwright, and `git diff --check`, then records the commit SHA and final working-tree state. Any nonzero doctor result makes the release verification fail, even though warning-state doctor runs still record the required checks. It never pushes, merges, deletes, or changes ticket status.
+
 See `docs/MVP_ACCEPTANCE_CHECKLIST.md` for the manual print validation steps that still need a real printer and paper.
 
 ## Notes
