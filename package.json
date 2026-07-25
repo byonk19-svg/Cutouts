@@ -13,7 +13,7 @@
     "typecheck:tests": "tsc --project tsconfig.tests.json",
     "test:backend": "python -m unittest discover -s backend/tests -p \"test_*.py\"",
     "test:frontend": "node scripts/run-ts-tests.mjs",
-    "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
+    "test:e2e": "node scripts/run-playwright.mjs",
     "test:e2e:install": "playwright install chromium",
     "test:workflow": "node --test --experimental-strip-types tests/workflowDoctor.test.ts tests/verifyRelease.test.ts",
     "test": "pnpm test:backend && pnpm test:frontend && pnpm typecheck:tests",
