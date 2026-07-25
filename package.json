@@ -8,11 +8,15 @@
     "dev:backend": "python -m backend.cutout_studio.server",
     "dev:frontend": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
+    "typecheck": "tsc --project tsconfig.json",
+    "typecheck:tests": "tsc --project tsconfig.tests.json",
+    "test:backend": "python -m unittest discover -s backend/tests -p \"test_*.py\"",
+    "test:frontend": "node scripts/run-ts-tests.mjs",
     "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
     "test:e2e:install": "playwright install chromium",
     "test:workflow": "node --test --experimental-strip-types tests/workflowDoctor.test.ts tests/verifyRelease.test.ts",
-    "test": "python -m unittest discover -s backend/tests -p \"test_*.py\" && node --experimental-strip-types tests/projectSession.test.ts && node --experimental-strip-types tests/editorTransactions.test.ts && node --experimental-strip-types tests/aiLineworkReview.test.ts && node --experimental-strip-types tests/detailEditor.test.ts && node --experimental-strip-types tests/guidedWorkflow.test.ts && node --experimental-strip-types tests/traceWorkflow.test.ts && node --experimental-strip-types tests/traceStrokes.test.ts && node --experimental-strip-types tests/traceViewport.test.ts && node --experimental-strip-types tests/cutoutProject.test.ts && node --experimental-strip-types tests/paintGuide.test.ts && node --experimental-strip-types tests/traceLineworkSvg.test.ts && node --experimental-strip-types tests/traceQuality.test.ts && node --experimental-strip-types tests/svgFastPath.test.ts && pnpm test:workflow",
-    "verify": "pnpm test && pnpm build",
+    "test": "pnpm test:backend && pnpm test:frontend && pnpm typecheck:tests",
+    "verify": "pnpm typecheck && pnpm test && pnpm build",
     "workflow:doctor": "node scripts/workflow-doctor.mjs",
     "verify:release": "node scripts/verify-release.mjs"
   },
@@ -27,6 +31,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2"
   }

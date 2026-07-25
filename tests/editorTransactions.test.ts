@@ -5,7 +5,7 @@ import {
   undoEditorTransaction
 } from "../src/editorTransactions.ts";
 
-function assert(condition: unknown, message: string) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 

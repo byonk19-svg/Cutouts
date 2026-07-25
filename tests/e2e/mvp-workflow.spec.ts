@@ -233,8 +233,13 @@ test("authored detail and Feature Lines stay aligned through restore and both ex
   await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
   const exportWorkspace = page.getByLabel("Export workspace");
   await downloadFrom(page, "Download Printable PDF");
-  expect(pdfRequestBody?.toString("latin1")).toContain('name="editedDetail"');
-  expect(pdfRequestBody?.toString("latin1")).toContain('"manualStrokes":[{"id":"ticket-02-feature-line"');
+  expect(pdfRequestBody).not.toBeNull();
+  const pdfRequestBodyBytes = pdfRequestBody as Uint8Array | null;
+  const pdfRequestBodyText = pdfRequestBodyBytes
+    ? new TextDecoder("latin1").decode(pdfRequestBodyBytes)
+    : "";
+  expect(pdfRequestBodyText).toContain('name="editedDetail"');
+  expect(pdfRequestBodyText).toContain('"manualStrokes":[{"id":"ticket-02-feature-line"');
 
   const moreExportOptions = exportWorkspace.getByLabel("More Export Options");
   await moreExportOptions.locator("summary").click();

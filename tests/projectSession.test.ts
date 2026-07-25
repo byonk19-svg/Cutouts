@@ -3,10 +3,20 @@ import {
   createProjectSession,
   executeProjectSessionEffects,
   projectSessionView,
-  transitionProjectSession
+  transitionProjectSession,
+  type ProjectPreparationToken,
+  type ProjectSessionAiProposalResult,
+  type ProjectSessionAiProposalToken,
+  type ProjectSessionEffect,
+  type ProjectSessionPaintMatchState,
+  type ProjectSessionPaintMatchToken,
+  type ProjectSessionProject
 } from "../src/projectSession.ts";
+import type { CutoutProjectAnalysis } from "../src/cutoutProject.ts";
 import { buildTraceLineworkSvg } from "../src/traceLineworkSvg.ts";
 import type { Settings } from "../src/traceWorkflow.ts";
+import type { CraftPaintMatch, ProjectPaintColor } from "../src/paintGuide.ts";
+import type { WorkflowProgress } from "../src/guidedWorkflow.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -22,7 +32,77 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string) {
   }
 }
 
-function paintMatch(id: string, brand: string, line: string, colorName: string, hex: string) {
+function assertAnalysisPresent(
+  analysis: ProjectSessionProject["analysis"],
+  message = "expected project analysis"
+): asserts analysis is CutoutProjectAnalysis {
+  assert(analysis !== null, message);
+}
+
+function assertProjectPalettePresent(
+  projectPalette: ProjectSessionProject["projectPalette"],
+  message = "expected project palette"
+): asserts projectPalette is readonly ProjectPaintColor[] {
+  assert(projectPalette !== undefined, message);
+}
+
+function assertWorkflowProgressPresent(
+  workflowProgress: ProjectSessionProject["workflowProgress"],
+  message = "expected workflow progress"
+): asserts workflowProgress is WorkflowProgress {
+  assert(workflowProgress !== undefined, message);
+}
+
+function autosaveEffect(effects: readonly ProjectSessionEffect[]) {
+  const effect = effects[0];
+  if (!effect || effect.type !== "request-autosave") {
+    throw new Error("expected a request-autosave effect");
+  }
+  return effect;
+}
+
+function aiProposalToken(outcome: unknown) {
+  if (!outcome || typeof outcome !== "object" || !("token" in outcome) || !outcome.token) {
+    throw new Error("expected AI proposal token");
+  }
+  return outcome.token as ProjectSessionAiProposalToken;
+}
+
+function preparationToken(outcome: unknown) {
+  if (!outcome || typeof outcome !== "object" || !("token" in outcome) || !outcome.token) {
+    throw new Error("expected preparation token");
+  }
+  return outcome.token as ProjectPreparationToken;
+}
+
+function paintMatchToken(state: ProjectSessionPaintMatchState) {
+  if (state.status !== "requesting" && state.status !== "failed") {
+    throw new Error("expected paint match token");
+  }
+  return state.token;
+}
+
+type CompleteProject = ProjectSessionProject & {
+  analysis: CutoutProjectAnalysis;
+  inputReadiness: NonNullable<ProjectSessionProject["inputReadiness"]>;
+  sourceImage: NonNullable<ProjectSessionProject["sourceImage"]>;
+  editedDetailPngDataUrl: string | null;
+  manualStrokes: readonly unknown[];
+  projectPalette: readonly ProjectPaintColor[];
+  workflowProgress: WorkflowProgress;
+  cleanupChecks: NonNullable<ProjectSessionProject["cleanupChecks"]>;
+  referenceOpacity: number;
+  layerVisibility: NonNullable<ProjectSessionProject["layerVisibility"]>;
+  traceViewport: NonNullable<ProjectSessionProject["traceViewport"]>;
+};
+
+function paintMatch(
+  id: string,
+  brand: string,
+  line: string,
+  colorName: string,
+  hex: string
+): CraftPaintMatch {
   return {
     id,
     brand,
@@ -51,7 +131,7 @@ function projectPaintColor(input: {
   matches?: ReturnType<typeof paintMatch>[];
   locked?: boolean;
   source?: "detected" | "manual";
-}) {
+}): ProjectPaintColor {
   return {
     id: input.id,
     hex: input.hex,
@@ -82,7 +162,7 @@ const settings: Settings = {
   includePaintGuidePage: true
 };
 
-const analysis = {
+const analysis: CutoutProjectAnalysis = {
   finishedWidthIn: 14.25,
   finishedHeightIn: 36,
   tileCols: 2,
@@ -108,15 +188,15 @@ const navyPaintMatch = paintMatch("folkart-outdoor-navy", "FolkArt", "Outdoor", 
 const yellowPaintMatch = paintMatch("apple-barrel-bright-yellow", "Apple Barrel", "Matte Acrylic", "Bright Yellow", "#f6cc27");
 const bluePaintMatch = paintMatch("folkart-deep-blue", "FolkArt", "Outdoor", "Deep Blue", "#2563eb");
 const peachPaintMatch = paintMatch("folkart-skin-tone", "FolkArt", "Multi-Surface", "Portrait Light", "#f0c3a2");
-const detectedPalette = [
+const detectedPalette: CutoutProjectAnalysis["palette"] = [
   { hex: "#0c143a", coverage: 0.32, matches: [navyPaintMatch] },
   { hex: "#f1ce2d", coverage: 0.24, matches: [yellowPaintMatch] }
 ];
-const analysisWithPalette = {
+const analysisWithPalette: CutoutProjectAnalysis = {
   ...analysis,
   palette: detectedPalette
 };
-const defaultProjectPalette = [
+const defaultProjectPalette: ProjectPaintColor[] = [
   projectPaintColor({
     id: "detected-1-0c143a",
     hex: "#0c143a",
@@ -146,7 +226,7 @@ const defaultProjectPalette = [
   })
 ];
 
-const pendingAiProposal = {
+const pendingAiProposal: ProjectSessionAiProposalResult = {
   status: "pending-review" as const,
   validationIssues: [],
   canReplaceAcceptedDetail: false as const,
@@ -161,13 +241,26 @@ const pendingAiProposal = {
   estimatedCostUsd: 0.10
 };
 
-const reviewOnlyAiProposal = {
+const reviewOnlyAiProposal: ProjectSessionAiProposalResult = {
   ...pendingAiProposal,
   status: "review-only" as const,
   validationIssues: ["duplicate silhouette"]
 };
 
-const preservedProjectFields = {
+const preservedProjectFields: Required<
+  Pick<
+    ProjectSessionProject,
+    | "sourceImage"
+    | "editedDetailPngDataUrl"
+    | "manualStrokes"
+    | "projectPalette"
+    | "workflowProgress"
+    | "cleanupChecks"
+    | "referenceOpacity"
+    | "layerVisibility"
+    | "traceViewport"
+  >
+> = {
   sourceImage: {
     name: "coraline.png",
     type: "image/png",
@@ -207,8 +300,7 @@ const preservedProjectFields = {
   assertEqual(view.revision, 1, "project name should advance the Project Revision once");
   assertEqual(transition.outcome.status, "applied", "project name should expose an applied outcome");
   assertEqual(transition.effects.length, 1, "project name should request one external effect");
-  assertEqual(transition.effects[0]?.type, "request-autosave", "project name should request Autosave");
-  assertEqual(transition.effects[0]?.revision, 1, "Autosave should target the changed revision");
+  assertEqual(autosaveEffect(transition.effects).revision, 1, "Autosave should target the changed revision");
   assert(view.capabilities.renameProject, "project name capability should be available");
   assert(view.capabilities.changeFinishedSize, "Finished Size capability should be available");
   assertDeepEqual(
@@ -216,6 +308,7 @@ const preservedProjectFields = {
     { projectName: "Coraline", settings, analysis, ...preservedProjectFields, inputReadiness: "needs-simplification" },
     "project name should preserve every other durable field"
   );
+  assertAnalysisPresent(view.project.analysis);
   assertEqual(view.project.analysis.outerCutPath, analysis.outerCutPath, "Cut Line should be preserved");
 }
 
@@ -247,6 +340,7 @@ const preservedProjectFields = {
 
   assertEqual(view.revision, 1, "Finished Size should advance the Project Revision once");
   assertEqual(transition.outcome.status, "applied", "Finished Size should expose an applied outcome");
+  assertAnalysisPresent(view.project.analysis);
   assertEqual(view.project.settings.finishedHeightIn, 48, "Finished Size should update settings");
   assertEqual(view.project.analysis.finishedHeightIn, 48, "Finished Size should update analysis geometry atomically");
   assertEqual(view.project.analysis.finishedWidthIn, 19, "Finished Size should preserve the analyzed aspect ratio");
@@ -259,8 +353,7 @@ const preservedProjectFields = {
   for (const [key, value] of Object.entries(preservedProjectFields)) {
     assertDeepEqual(view.project[key as keyof typeof view.project], value, `Finished Size should preserve ${key}`);
   }
-  assertEqual(transition.effects[0]?.type, "request-autosave", "Finished Size should request Autosave");
-  assertEqual(transition.effects[0]?.revision, 1, "Autosave should target the changed revision");
+  assertEqual(autosaveEffect(transition.effects).revision, 1, "Autosave should target the changed revision");
   const printableSvg = buildTraceLineworkSvg({
     projectName: view.project.projectName,
     analysis: view.project.analysis,
@@ -337,17 +430,20 @@ for (const finishedHeightIn of [Number.NaN, -1, 5, 97]) {
   assertEqual(bypassedSave.outcome.status, "rejected", "save enforcement should share the displayed Project Session authority");
 }
 
-const lifecycleProject = {
+const lifecycleProject: CompleteProject = {
   projectName: "Coraline",
   settings,
-  sourceImage: preservedProjectFields.sourceImage,
+  sourceImage: preservedProjectFields.sourceImage!,
   analysis: analysisWithPalette,
   inputReadiness: "needs-simplification" as const,
   editedDetailPngDataUrl: preservedProjectFields.editedDetailPngDataUrl,
   manualStrokes: preservedProjectFields.manualStrokes,
   projectPalette: defaultProjectPalette,
   workflowProgress: preservedProjectFields.workflowProgress,
-  cleanupChecks: preservedProjectFields.cleanupChecks
+  cleanupChecks: preservedProjectFields.cleanupChecks,
+  referenceOpacity: preservedProjectFields.referenceOpacity,
+  layerVisibility: preservedProjectFields.layerVisibility,
+  traceViewport: preservedProjectFields.traceViewport
 };
 
 {
@@ -365,14 +461,17 @@ function requestAiProposal(session: ReturnType<typeof createProjectSession>) {
     uploadConfirmed: true
   });
   if (requesting.outcome.status !== "requesting") throw new Error("expected AI proposal request token");
-  return requesting;
+  return {
+    ...requesting,
+    token: requesting.outcome.token
+  };
 }
 
 function completePendingAiProposal(session: ReturnType<typeof createProjectSession>) {
   const requesting = requestAiProposal(session);
   const completed = transitionProjectSession(requesting.session, {
     type: "complete-ai-proposal-request",
-    token: requesting.outcome.token,
+    token: requesting.token,
     proposal: pendingAiProposal
   });
   if (completed.outcome.status !== "successful") throw new Error("expected pending AI proposal completion");
@@ -384,7 +483,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     ...lifecycleProject,
     analysis: {
       ...analysis,
-      traceQuality: { ...analysis.traceQuality, detailExtractionModeUsed: "rendered" as const }
+      traceQuality: { ...analysis.traceQuality!, detailExtractionModeUsed: "rendered" as const }
     },
     inputReadiness: "ready-line-art" as const
   });
@@ -474,7 +573,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   const requesting = requestAiProposal(session);
   const failed = transitionProjectSession(requesting.session, {
     type: "fail-ai-proposal-request",
-    token: requesting.outcome.token,
+    token: requesting.token,
     error: "Unable to generate the AI proposal."
   });
 
@@ -496,7 +595,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   assertEqual(requestingExport.outcome.status, "rejected", "a requesting proposal should reject direct Export requests even when Export was already active");
   const completed = transitionProjectSession(requesting.session, {
     type: "complete-ai-proposal-request",
-    token: requesting.outcome.token,
+    token: requesting.token,
     proposal: pendingAiProposal
   });
   assertEqual(completed.outcome.status, "successful", "AI proposal completion should expose successful transient status");
@@ -586,7 +685,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   const requesting = requestAiProposal(session);
   const reviewOnly = transitionProjectSession(requesting.session, {
     type: "complete-ai-proposal-request",
-    token: requesting.outcome.token,
+    token: requesting.token,
     proposal: reviewOnlyAiProposal
   });
   const overlayReviewed = transitionProjectSession(reviewOnly.session, { type: "review-ai-proposal-view", view: "original-overlay" });
@@ -618,7 +717,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   });
   const completedAfterRename = transitionProjectSession(renamed.session, {
     type: "complete-ai-proposal-request",
-    token: requesting.outcome.token,
+    token: requesting.token,
     proposal: pendingAiProposal
   });
   assertEqual(completedAfterRename.outcome.status, "successful", "non-conflicting project changes should not stale an AI proposal result");
@@ -633,7 +732,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   });
   const stale = transitionProjectSession(conflictingLinework.session, {
     type: "complete-ai-proposal-request",
-    token: requestingAgain.outcome.token,
+    token: requestingAgain.token,
     proposal: pendingAiProposal
   });
   assertEqual(stale.outcome.status, "stale", "accepted-linework changes should stale older AI proposal results");
@@ -651,7 +750,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 
   const read = transitionProjectSession(preparing.session, {
     type: "complete-project-preparation",
-    token: preparing.outcome.token
+    token: preparationToken(preparing.outcome)
   });
   assertEqual(read.outcome.status, "successful", "successful file reading should expose successful status");
   assertEqual(read.session.project, session.project, "successful file reading should not replace durable state before analysis");
@@ -662,7 +761,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 
   const failed = transitionProjectSession(retrying.session, {
     type: "fail-project-preparation",
-    token: retrying.outcome.token,
+    token: preparationToken(retrying.outcome),
     error: "Unable to read the selected image."
   });
   assertEqual(failed.outcome.status, "failed", "read failure should expose failed status");
@@ -690,7 +789,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     ...analysis,
     previewPngDataUrl: "data:image/png;base64,replacement-preview",
     outerCutPath: "M 5 5 L 105 5 L 105 155 L 5 155 Z",
-    palette: [{ index: 0, hex: "#2563eb", weight: 1, matches: [] }]
+    palette: [{ hex: "#2563eb", coverage: 1, matches: [] }]
   };
   const replacementPalette = [
     projectPaintColor({
@@ -861,7 +960,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 }
 
 {
-  const session = createProjectSession(lifecycleProject);
+  const session = createProjectSession<ProjectSessionProject>(lifecycleProject);
   const preparing = transitionProjectSession(session, { type: "begin-project-preparation", operation: "regenerate-analysis" });
   if (preparing.outcome.status !== "preparing") throw new Error("expected a preparation token");
   const regeneratedAnalysis = { ...analysis, detailLinePngDataUrl: "data:image/png;base64,regenerated-detail" };
@@ -889,13 +988,14 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   assertDeepEqual(completed.session.project.manualStrokes, lifecycleProject.manualStrokes, "same-source regeneration should preserve manual Feature Lines");
   assertEqual(completed.session.project.analysis, regeneratedAnalysis, "same-source regeneration should install the new analysis");
   assertEqual(completed.session.project.editedDetailPngDataUrl, "data:image/png;base64,regenerated-imported-detail", "same-source regeneration should replace generated detail work");
+  assertWorkflowProgressPresent(completed.session.project.workflowProgress);
   assertEqual(completed.session.project.workflowProgress.lineworkReviewed, false, "regeneration should invalidate stale linework review");
   assertEqual(completed.session.project.workflowProgress.colorsOutcome, "incomplete", "regeneration should invalidate stale color review");
   assertEqual(projectSessionView(completed.session).aiProposal.status, "idle", "regeneration should clear transient proposal state");
 }
 
 {
-  const session = createProjectSession(lifecycleProject);
+  const session = createProjectSession<ProjectSessionProject>(lifecycleProject);
   const first = transitionProjectSession(session, { type: "begin-project-preparation", operation: "replace-source" });
   if (first.outcome.status !== "preparing") throw new Error("expected first preparation token");
   const second = transitionProjectSession(first.session, { type: "begin-project-preparation", operation: "replace-source" });
@@ -930,6 +1030,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     openEditorAfterCompletion: false
   });
   assertEqual(current.outcome.status, "successful", "the newest controlled response should apply");
+  assert(current.session.project.sourceImage, "the newest Source Image should be present");
   assertEqual(current.session.project.sourceImage.name, "newer.png", "the newest Source Image should win");
 }
 
@@ -960,7 +1061,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   assertEqual(cancelled.session, session, "cancelled new project should preserve the entire Project Session");
   assertEqual(cancelled.effects.length, 0, "cancelled new project should preserve Autosave");
 
-  const emptyProject = {
+  const emptyProject: ProjectSessionProject = {
     projectName: "Cutout Project",
     settings,
     sourceImage: null,
@@ -1059,7 +1160,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 }
 
 {
-  const reviewed = createProjectSession({
+  const reviewed = createProjectSession<ProjectSessionProject>({
     ...lifecycleProject,
     workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
   });
@@ -1083,7 +1184,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 }
 
 {
-  const reviewed = createProjectSession({
+  const reviewed = createProjectSession<ProjectSessionProject>({
     ...lifecycleProject,
     workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
   });
@@ -1132,8 +1233,8 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   const redone = transitionProjectSession(undone.session, {
     type: "commit-editor-transaction",
     outcome: {
-      editedDetailPngDataUrl: committed.session.project.editedDetailPngDataUrl,
-      manualStrokes: committed.session.project.manualStrokes
+      editedDetailPngDataUrl: committed.session.project.editedDetailPngDataUrl ?? null,
+      manualStrokes: committed.session.project.manualStrokes ?? []
     }
   });
   assertEqual(redone.session.project.editedDetailPngDataUrl, "data:image/png;base64,editor-detail", "Redo outcome should reapply the edited artifact");
@@ -1159,7 +1260,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 }
 
 {
-  const reviewed = createProjectSession({
+  const reviewed = createProjectSession<ProjectSessionProject>({
     ...lifecycleProject,
     workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
   });
@@ -1173,6 +1274,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   assertEqual(added.session.revision, reviewed.revision + 1, "adding a manual paint color should create one Project Revision");
   assertEqual(added.effects.length, 1, "adding a manual paint color should request one Autosave");
   assertEqual(added.session.project.workflowProgress?.colorsOutcome, "reviewed", "adding a manual paint color after Colors review should retain the milestone");
+  assertProjectPalettePresent(added.session.project.projectPalette);
   const addedColor = added.session.project.projectPalette.at(-1);
   assert(addedColor, "a manual paint color should be appended");
   assertEqual(
@@ -1189,6 +1291,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   });
   assertEqual(removed.outcome.status, "applied", "removing a paint color should apply");
   assertEqual(removed.session.project.workflowProgress?.colorsOutcome, "reviewed", "removing a paint color after Colors review should retain the milestone");
+  assertProjectPalettePresent(removed.session.project.projectPalette);
   assert(!removed.session.project.projectPalette.some((color) => color.id === addedColor.id), "removed colors should leave the palette");
 
   const readded = transitionProjectSession(removed.session, {
@@ -1197,6 +1300,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     label: "Trim",
     note: "buttons"
   });
+  assertProjectPalettePresent(readded.session.project.projectPalette);
   const readdedColor = readded.session.project.projectPalette.at(-1);
   assert(readdedColor, "re-adding should append a new color");
   assert(readdedColor.id !== addedColor.id, "removing and re-adding a manual color should not reuse palette identity");
@@ -1346,14 +1450,14 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   });
   assertEqual(begin.outcome.status, "requesting-paint-match", "beginning a paint match should expose a transient request outcome");
   assertEqual(begin.session.revision, reviewed.revision, "beginning a paint match should not advance the Project Revision");
-  assertEqual(projectSessionView(begin.session).paintMatch.status, "requesting", "beginning a paint match should expose transient requesting state");
-  assertEqual(projectSessionView(begin.session).paintMatch.token.revision, reviewed.revision, "paint match tokens should carry the originating Project Revision");
-  assertEqual(projectSessionView(begin.session).paintMatch.token.colorId, reviewed.project.projectPalette[0].id, "paint match tokens should carry the targeted color identity");
-  assertEqual(projectSessionView(begin.session).paintMatch.token.expectedHex, "#0c143a", "paint match tokens should carry the normalized expected hex");
+  const beginPaintMatchToken = paintMatchToken(projectSessionView(begin.session).paintMatch);
+  assertEqual(beginPaintMatchToken.revision, reviewed.revision, "paint match tokens should carry the originating Project Revision");
+  assertEqual(beginPaintMatchToken.colorId, reviewed.project.projectPalette[0].id, "paint match tokens should carry the targeted color identity");
+  assertEqual(beginPaintMatchToken.expectedHex, "#0c143a", "paint match tokens should carry the normalized expected hex");
 
   const failed = transitionProjectSession(begin.session, {
     type: "fail-project-paint-match",
-    token: projectSessionView(begin.session).paintMatch.token,
+    token: beginPaintMatchToken,
     error: "Unable to match paint colors."
   });
   assertEqual(failed.outcome.status, "failed", "paint match failure should report transient failure");
@@ -1494,7 +1598,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     id: reviewed.project.projectPalette[0].id
   });
   assert(beginBeforeNewProject.outcome.status === "requesting-paint-match", "paint match begin should return a request token");
-  const emptyProject = {
+  const emptyProject: ProjectSessionProject = {
     projectName: "Cutout Project",
     settings,
     sourceImage: null,
@@ -1513,7 +1617,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 }
 
 {
-  const duplicatePaletteProject = {
+  const duplicatePaletteProject: ProjectSessionProject = {
     ...lifecycleProject,
     projectPalette: [
       projectPaintColor({ id: "shared", hex: "#0c143a", label: "Hair", matches: [navyPaintMatch] }),
@@ -1528,7 +1632,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   }
   assert(duplicateCreateRejected, "session creation should reject duplicate restored palette IDs");
 
-  const reviewed = createProjectSession({
+  const reviewed = createProjectSession<ProjectSessionProject>({
     ...lifecycleProject,
     workflowProgress: { activeStep: "export" as const, lineworkReviewed: true, colorsOutcome: "reviewed" as const }
   });
@@ -1581,15 +1685,15 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     requestAutosave: false
   });
   assertEqual(legacyRestored.outcome.status, "successful", "a project predating readiness metadata should restore successfully");
-  assertEqual(
-    legacyRestored.session.project.inputReadiness,
-    "needs-simplification",
+  assertDeepEqual(
+    projectSessionView(legacyRestored.session).project,
+    { ...projectSessionView(legacyRestored.session).project, inputReadiness: "needs-simplification" },
     "legacy rendered artwork should derive the conservative review-only readiness boundary"
   );
 
   const explicitReady = createProjectSession({ ...lifecycleProject, inputReadiness: "ready-line-art" as const });
   assertEqual(
-    explicitReady.project.inputReadiness,
+    projectSessionView(explicitReady).project.inputReadiness,
     "ready-line-art",
     "an explicit Ready Line Art classification should survive session normalization"
   );
@@ -1662,7 +1766,11 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
     ...lifecycleProject,
     workflowProgress: { activeStep: "unknown", lineworkReviewed: true, colorsOutcome: "reviewed" } as never
   });
-  assertEqual(malformedStep.project.workflowProgress?.activeStep, "export", "a malformed active step should normalize to the furthest artifact-supported step");
+  assertEqual(
+    projectSessionView(malformedStep).capabilities.guidedWorkflow.progress.activeStep,
+    "export",
+    "a malformed active step should normalize to the furthest artifact-supported step"
+  );
 }
 
 {
@@ -1672,6 +1780,7 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   });
   const requesting = requestAiProposal(session);
   const requestingWorkflow = projectSessionView(requesting.session).capabilities.guidedWorkflow;
+  assertProjectPalettePresent(requesting.session.project.projectPalette);
   assertEqual(requestingWorkflow.canCompleteLineworkReview, false, "a requesting proposal should disable displayed Clean Lines completion");
   const requestingBypass = transitionProjectSession(requesting.session, { type: "complete-linework-review" });
   assertEqual(requestingBypass.outcome.status, "rejected", "a requesting proposal should reject Clean Lines completion through the same session policy");
@@ -1725,7 +1834,10 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   assertEqual(bypassed.session, clean.session, "available-step bypass should preserve the current Clean Lines state");
 }
 
-const persistedWorkspace = {
+const persistedWorkspace: Pick<
+  ProjectSessionProject,
+  "createdAt" | "traceMode" | "referenceOpacity" | "layerVisibility" | "traceViewport"
+> = {
   createdAt: "2026-07-18T10:00:00.000Z",
   traceMode: "manual" as const,
   referenceOpacity: 57,
@@ -1758,6 +1870,7 @@ const persistedWorkspace = {
   const incompleteSession = createProjectSession({
     ...persistedWorkspace,
     projectName: "Not ready",
+    settings,
     sourceImage: null,
     analysis: null
   });
@@ -1855,8 +1968,12 @@ const persistedWorkspace = {
       if (failAutosave) throw new Error("Storage quota exceeded");
       autosaves.push(serialized);
     },
-    downloadProject: (serialized) => downloads.push(serialized),
-    clearAutosave: () => autosaves.splice(0)
+    downloadProject: (serialized) => {
+      downloads.push(serialized);
+    },
+    clearAutosave: () => {
+      autosaves.splice(0);
+    }
   });
   const initial = createProjectSession({ ...lifecycleProject, ...persistedWorkspace });
   const first = transitionProjectSession(initial, { type: "rename-project", projectName: "First debounce value" });
