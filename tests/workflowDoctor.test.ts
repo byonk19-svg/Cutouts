@@ -91,7 +91,7 @@ test("workflow doctor reports a healthy canonical worktree", async () => {
 HEAD abc1234def5678
 branch refs/heads/codex/workflow-hygiene
 
-worktree C:/Users/byonk/OneDrive/Documents/Cutouts
+worktree C:/repo/primary-checkout
 HEAD base0001
 branch refs/heads/main
 `

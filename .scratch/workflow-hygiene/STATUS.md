@@ -1,12 +1,16 @@
 # Feature Status
 
+> Historical snapshot from the `codex/workflow-hygiene` source lane. This file
+> records the pre-integration state and is not operational evidence for the
+> current integration HEAD.
+
 Updated: 2026-07-24
 Feature: workflow-hygiene
 Phase: integration-ready
 
 ## Repository state
 
-Canonical worktree: C:\Users\byonk\.codex\worktrees\d2a4\Cutouts
+Canonical worktree: worktree for `codex/workflow-hygiene`
 Feature branch: codex/workflow-hygiene
 Base branch: main
 Base commit: c1144b656a2897a1444c82be3b4edb35a985431e

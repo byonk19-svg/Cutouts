@@ -20,13 +20,14 @@ clean obsolete worktrees and then verify every retained worktree.
 
 ## Human authorization
 
-The user explicitly authorized cleanup of these five exact paths on 2026-07-23:
+The user explicitly authorized cleanup of these five worktrees on 2026-07-23.
+The portable identifiers below replace the original machine-local paths:
 
-- [x] `C:/Users/byonk/.codex/worktrees/0037/Cutouts` - authorized
-- [x] `C:/Users/byonk/.codex/worktrees/3e18/Cutouts` - authorized
-- [x] `C:/Users/byonk/.codex/worktrees/a358/Cutouts` - authorized
-- [x] `C:/Users/byonk/.codex/worktrees/project-session-ticket-01/Cutouts` - authorized
-- [x] `C:/Users/byonk/.codex/worktrees/svg-linework-import` - authorized
+- [x] worktree for `codex/project-session-ticket-07` - authorized
+- [x] worktree for `codex/project-session-ticket-02` - authorized
+- [x] worktree for `codex/ai-linework-ticket-01` - authorized
+- [x] worktree for `codex/project-session-ticket-01` - authorized
+- [x] worktree for `codex/svg-linework-import` - authorized
 
 If the registered-worktree count or membership changes before authorization,
 refresh Ticket 02's read-only audit before deleting anything.
@@ -37,13 +38,13 @@ Completed on 2026-07-23 after a fresh target-by-target safety check confirmed
 that every authorized worktree was registered, clean, contained zero commits
 outside `origin/main`, and was already merged into `origin/main`.
 
-Removed worktree paths:
+Removed worktrees:
 
-- `C:/Users/byonk/.codex/worktrees/0037/Cutouts`
-- `C:/Users/byonk/.codex/worktrees/3e18/Cutouts`
-- `C:/Users/byonk/.codex/worktrees/a358/Cutouts`
-- `C:/Users/byonk/.codex/worktrees/project-session-ticket-01/Cutouts`
-- `C:/Users/byonk/.codex/worktrees/svg-linework-import`
+- worktree for `codex/project-session-ticket-07`
+- worktree for `codex/project-session-ticket-02`
+- worktree for `codex/ai-linework-ticket-01`
+- worktree for `codex/project-session-ticket-01`
+- worktree for `codex/svg-linework-import`
 
 Preserved branch refs:
 
