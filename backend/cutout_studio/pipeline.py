@@ -31,6 +31,7 @@ PRINT_DPI = 144
 CALIBRATION_SQUARE_PT = 72
 DETAIL_LINE_COLOR = (118, 118, 118)
 BLACK_LINE_COLOR = (0, 0, 0, 255)
+MAX_DECODED_IMAGE_PIXELS = 50_000_000
 
 
 @dataclass(frozen=True)
@@ -412,12 +413,18 @@ def load_paint_catalog() -> list[Paint]:
 
 def _load_image(image_bytes: bytes) -> Image.Image:
     try:
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            if image.width * image.height > MAX_DECODED_IMAGE_PIXELS:
+                raise ValueError("Image is too large to create a printable template.")
+            if image.width < 20 or image.height < 20:
+                raise ValueError("Image is too small to create a printable template.")
+            return image.convert("RGBA")
+    except ValueError:
+        raise
+    except Image.DecompressionBombError as exc:
+        raise ValueError("Image is too large to create a printable template.") from exc
     except Exception as exc:
         raise ValueError("Upload must be a readable PNG or JPG image.") from exc
-    if image.width < 20 or image.height < 20:
-        raise ValueError("Image is too small to create a printable template.")
-    return image
 
 
 def _subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image:

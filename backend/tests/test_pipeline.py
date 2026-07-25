@@ -5,6 +5,7 @@ import math
 import re
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import fitz
 import numpy as np
@@ -413,6 +414,32 @@ def jpeg_dark_color_cartoon_fixture() -> tuple[Image.Image, Image.Image]:
 
 
 class PrintPipelineTest(unittest.TestCase):
+    def test_rejects_over_limit_image_header_before_rgba_conversion(self) -> None:
+        class FakeLargeImage:
+            width = 10_000
+            height = 5_001
+
+            def __enter__(self) -> "FakeLargeImage":
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+            def convert(self, mode: str) -> Image.Image:
+                raise AssertionError("RGBA conversion should not run for oversized images.")
+
+        with patch("backend.cutout_studio.pipeline.Image.open", return_value=FakeLargeImage()):
+            with self.assertRaisesRegex(ValueError, "Image is too large to create a printable template."):
+                pipeline._load_image(b"oversized-header")
+
+    def test_maps_pillow_decompression_bomb_to_stable_size_error(self) -> None:
+        with patch(
+            "backend.cutout_studio.pipeline.Image.open",
+            side_effect=Image.DecompressionBombError("bomb"),
+        ):
+            with self.assertRaisesRegex(ValueError, "Image is too large to create a printable template."):
+                pipeline._load_image(b"bomb")
+
     def test_detail_extraction_mode_is_validated_from_settings(self) -> None:
         self.assertEqual(TemplateSettings.from_mapping({"detailExtractionMode": "auto"}).detail_extraction_mode, "auto")
         self.assertEqual(TemplateSettings.from_mapping({"detailExtractionMode": "lineArt"}).detail_extraction_mode, "lineArt")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -11,34 +12,65 @@ from .pipeline import TemplateSettings, analyze_template, build_template_pdf, ma
 
 HOST = "127.0.0.1"
 PORT = 8787
+ALLOWED_BROWSER_ORIGINS = {
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+}
+MULTIPART_BODY_LIMIT_BYTES = 25 * 1024 * 1024
+JSON_BODY_LIMIT_BYTES = 64 * 1024
+JSON_POST_ROUTES = {"/api/match-color"}
+MULTIPART_POST_ROUTES = {"/api/analyze", "/api/export", "/api/generate-linework"}
+GET_ROUTES = {"/api/health"}
+ALL_API_ROUTES = GET_ROUTES | JSON_POST_ROUTES | MULTIPART_POST_ROUTES
+
+logger = logging.getLogger(__name__)
+
+
+class RequestError(Exception):
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
 
 
 class CutoutStudioHandler(BaseHTTPRequestHandler):
     server_version = "CutoutStudio/0.1"
 
     def do_OPTIONS(self) -> None:
-        self._send_empty(204)
+        try:
+            self._require_allowed_origin(require_origin=True)
+            if self.path not in ALL_API_ROUTES:
+                raise RequestError(404, "Not found")
+            self._send_empty(204)
+        except RequestError as exc:
+            self._send_json({"error": exc.message}, status=exc.status)
 
     def do_GET(self) -> None:
-        if self.path == "/api/health":
-            self._send_json({"ok": True})
-            return
-        self._send_json({"error": "Not found"}, status=404)
+        try:
+            self._require_allowed_origin()
+            if self.path == "/api/health":
+                self._send_json({"ok": True})
+                return
+            raise RequestError(404, "Not found")
+        except RequestError as exc:
+            self._send_json({"error": exc.message}, status=exc.status)
 
     def do_POST(self) -> None:
         try:
+            self._require_allowed_origin()
             if self.path == "/api/match-color":
                 self._handle_match_color()
                 return
             if self.path == "/api/generate-linework":
                 self._handle_generate_linework()
                 return
-            image_bytes, settings, edited_detail = self._read_template_request()
             if self.path == "/api/analyze":
+                image_bytes, settings, _edited_detail = self._read_template_request()
                 analysis = analyze_template(image_bytes, settings)
                 self._send_json(analysis.to_json())
                 return
             if self.path == "/api/export":
+                image_bytes, settings, edited_detail = self._read_template_request()
                 pdf = build_template_pdf(image_bytes, settings, edited_detail_png=edited_detail)
                 self._send_bytes(
                     pdf,
@@ -46,11 +78,14 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
                     headers={"Content-Disposition": 'attachment; filename="cutout-template-pack.pdf"'},
                 )
                 return
-            self._send_json({"error": "Not found"}, status=404)
+            raise RequestError(404, "Not found")
+        except RequestError as exc:
+            self._send_json({"error": exc.message}, status=exc.status)
         except ValueError as exc:
             self._send_json({"error": str(exc)}, status=400)
         except Exception as exc:
-            self._send_json({"error": f"Unexpected server error: {exc}"}, status=500)
+            logger.error("Unexpected %s while handling %s", type(exc).__name__, self.path)
+            self._send_json({"error": "Unexpected server error."}, status=500)
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"{self.address_string()} - {format % args}")
@@ -65,8 +100,7 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
         if not content_type.startswith("multipart/form-data"):
             raise ValueError("Request must be multipart/form-data.")
 
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length)
+        body = self._read_request_body(limit=MULTIPART_BODY_LIMIT_BYTES, limit_label="25 MiB")
         return _parse_multipart(body, content_type)
 
     def _image_and_settings(self, form: dict[str, bytes]) -> tuple[bytes, TemplateSettings]:
@@ -131,13 +165,51 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
         content_type = self.headers.get("Content-Type", "")
         if "application/json" not in content_type:
             raise ValueError("Color match request must be application/json.")
-        length = int(self.headers.get("Content-Length", "0"))
         try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            payload = json.loads(self._read_request_body(limit=JSON_BODY_LIMIT_BYTES, limit_label="64 KiB").decode("utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError("Color match request must be valid JSON.") from exc
         hex_value = str(payload.get("hex", ""))
         self._send_json({"matches": match_paint_hex(hex_value)})
+
+    def _require_allowed_origin(self, *, require_origin: bool = False) -> str | None:
+        origin = self.headers.get("Origin")
+        if not origin:
+            if require_origin:
+                raise RequestError(400, "Origin header is required.")
+            return None
+        if origin not in ALLOWED_BROWSER_ORIGINS:
+            raise RequestError(403, "Origin is not allowed.")
+        return origin
+
+    def _read_request_body(self, *, limit: int, limit_label: str) -> bytes:
+        length = self._require_content_length()
+        if length > limit:
+            raise RequestError(413, f"Request body exceeds the {limit_label} limit.")
+        return self._read_exactly(length)
+
+    def _require_content_length(self) -> int:
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            raise RequestError(400, "Content-Length header is required.")
+        try:
+            length = int(raw_length)
+        except ValueError as exc:
+            raise RequestError(400, "Content-Length header must be a non-negative integer.") from exc
+        if length < 0:
+            raise RequestError(400, "Content-Length header must be a non-negative integer.")
+        return length
+
+    def _read_exactly(self, length: int) -> bytes:
+        chunks: list[bytes] = []
+        remaining = length
+        while remaining > 0:
+            chunk = self.rfile.read(remaining)
+            if not chunk:
+                raise RequestError(400, "Request body length did not match Content-Length.")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
 
     def _send_empty(self, status: int) -> None:
         self.send_response(status)
@@ -165,7 +237,11 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_common_headers(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin")
+        if origin:
+            self.send_header("Vary", "Origin")
+        if origin in ALLOWED_BROWSER_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
