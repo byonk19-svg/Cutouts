@@ -6,10 +6,8 @@ import {
   transitionProjectSession,
   type ProjectPreparationToken,
   type ProjectSessionAiProposalResult,
-  type ProjectSessionAiProposalToken,
   type ProjectSessionEffect,
   type ProjectSessionPaintMatchState,
-  type ProjectSessionPaintMatchToken,
   type ProjectSessionProject
 } from "../src/projectSession.ts";
 import type { CutoutProjectAnalysis } from "../src/cutoutProject.ts";
@@ -59,13 +57,6 @@ function autosaveEffect(effects: readonly ProjectSessionEffect[]) {
     throw new Error("expected a request-autosave effect");
   }
   return effect;
-}
-
-function aiProposalToken(outcome: unknown) {
-  if (!outcome || typeof outcome !== "object" || !("token" in outcome) || !outcome.token) {
-    throw new Error("expected AI proposal token");
-  }
-  return outcome.token as ProjectSessionAiProposalToken;
 }
 
 function preparationToken(outcome: unknown) {
@@ -1732,10 +1723,14 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   const originalMatchName = reviewed.project.projectPalette[0].matches[0].colorName;
   try {
     (reviewed.project.projectPalette[0] as { label: string }).label = "Mutated directly";
-  } catch {}
+  } catch {
+    // Frozen objects may throw on direct mutation attempts.
+  }
   try {
     (reviewed.project.projectPalette[0].matches[0] as { colorName: string }).colorName = "Mutated match";
-  } catch {}
+  } catch {
+    // Frozen objects may throw on direct mutation attempts.
+  }
   assertEqual(reviewed.project.projectPalette[0].label, originalLabel, "direct in-place palette mutation should not alter durable session color labels");
   assertEqual(reviewed.project.projectPalette[0].matches[0].colorName, originalMatchName, "direct in-place match mutation should not alter durable session match suggestions");
   assertEqual(reviewed.revision, 0, "direct palette mutation outside a transition should not create a Project Revision");

@@ -38,15 +38,6 @@ validateSvgMarkup(`
 
 console.log("svg fast path tests passed");
 
-function assertThrows(action: () => void, message: string) {
-  try {
-    action();
-  } catch {
-    return;
-  }
-  throw new Error(message);
-}
-
 function assertThrowsWithMessage(action: () => void, expectedMessage: string, message: string) {
   try {
     action();

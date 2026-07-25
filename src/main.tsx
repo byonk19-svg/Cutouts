@@ -1138,8 +1138,9 @@ function App() {
   function clearPaintHexDraft(id: string) {
     setPaintHexDrafts((current) => {
       if (!(id in current)) return current;
-      const { [id]: _removed, ...rest } = current;
-      return rest;
+      const next = { ...current };
+      delete next[id];
+      return next;
     });
   }
 
@@ -3471,10 +3472,6 @@ function traceActionLabel({ image, analysis, busy, traceMode }: { image: File | 
 
 function defaultEditorToolForTraceMode(mode: TraceMode): EditorTool {
   return mode === "manual" ? "draw" : "remove";
-}
-
-function canvasHasVisibleInk(canvas: HTMLCanvasElement) {
-  return canvasContentBounds(canvas) !== null;
 }
 
 function canvasContentBounds(canvas: HTMLCanvasElement): TraceBounds | null {

@@ -35,8 +35,8 @@ function createCommandStub(responses: Record<string, CommandResult | string>) {
 
 test("verify release writes one success summary after running the required checks", async () => {
   const runner = createCommandStub({
-    "pnpm verify": { code: 0, stdout: "verify ok\n" },
-    "pnpm exec playwright test --config tests/e2e/playwright.config.ts --workers=1": {
+    "pnpm verify:ci": { code: 0, stdout: "verify ok\n" },
+    "pnpm test:e2e -- --workers=1": {
       code: 0,
       stdout: "playwright ok\n"
     },
@@ -70,11 +70,11 @@ test("verify release writes one success summary after running the required check
     "C:\\repo\\Cutouts\\.scratch\\workflow-hygiene\\evidence\\verify-release-20260723-141516.md"
   );
   assert.match(writes[0]?.content ?? "", /Commit: `abc1234def5678`/);
-  assert.match(writes[0]?.content ?? "", /pnpm verify/);
-  assert.match(writes[0]?.content ?? "", /playwright test --config tests\/e2e\/playwright.config.ts --workers=1/);
+  assert.match(writes[0]?.content ?? "", /pnpm verify:ci/);
+  assert.match(writes[0]?.content ?? "", /pnpm test:e2e -- --workers=1/);
   assert.deepEqual(runner.calls, [
-    "pnpm verify",
-    "pnpm exec playwright test --config tests/e2e/playwright.config.ts --workers=1",
+    "pnpm verify:ci",
+    "pnpm test:e2e -- --workers=1",
     "git diff --check",
     "git rev-parse HEAD",
     "git status --short --branch"
@@ -114,8 +114,8 @@ test("verify release stops on invalid doctor state and still records one failure
 
 test("verify release returns nonzero on doctor warnings but still records all required checks", async () => {
   const runner = createCommandStub({
-    "pnpm verify": { code: 0, stdout: "verify ok\n" },
-    "pnpm exec playwright test --config tests/e2e/playwright.config.ts --workers=1": {
+    "pnpm verify:ci": { code: 0, stdout: "verify ok\n" },
+    "pnpm test:e2e -- --workers=1": {
       code: 0,
       stdout: "playwright ok\n"
     },
@@ -144,22 +144,22 @@ test("verify release returns nonzero on doctor warnings but still records all re
 
   assert.equal(result.exitCode, 1);
   assert.deepEqual(runner.calls, [
-    "pnpm verify",
-    "pnpm exec playwright test --config tests/e2e/playwright.config.ts --workers=1",
+    "pnpm verify:ci",
+    "pnpm test:e2e -- --workers=1",
     "git diff --check",
     "git rev-parse HEAD",
     "git status --short --branch"
   ]);
   assert.equal(writes.length, 1);
   assert.match(writes[0] ?? "", /Doctor status: `warning`/);
-  assert.match(writes[0] ?? "", /pnpm verify` \| `passed`/);
+  assert.match(writes[0] ?? "", /pnpm verify:ci` \| `passed`/);
   assert.match(writes[0] ?? "", /Release verification failed/);
 });
 
 test("verify release keeps collecting evidence when verify fails and exits nonzero", async () => {
   const runner = createCommandStub({
-    "pnpm verify": { code: 1, stdout: "", stderr: "verify failed\n" },
-    "pnpm exec playwright test --config tests/e2e/playwright.config.ts --workers=1": {
+    "pnpm verify:ci": { code: 1, stdout: "", stderr: "verify failed\n" },
+    "pnpm test:e2e -- --workers=1": {
       code: 0,
       stdout: "playwright ok\n"
     },
@@ -188,22 +188,22 @@ test("verify release keeps collecting evidence when verify fails and exits nonze
 
   assert.equal(result.exitCode, 1);
   assert.deepEqual(runner.calls, [
-    "pnpm verify",
-    "pnpm exec playwright test --config tests/e2e/playwright.config.ts --workers=1",
+    "pnpm verify:ci",
+    "pnpm test:e2e -- --workers=1",
     "git diff --check",
     "git rev-parse HEAD",
     "git status --short --branch"
   ]);
   assert.equal(writes.length, 1);
-  assert.match(writes[0] ?? "", /pnpm verify` \| `failed`/);
+  assert.match(writes[0] ?? "", /pnpm verify:ci` \| `failed`/);
   assert.match(writes[0] ?? "", /git diff --check` \| `failed`/);
   assert.match(writes[0] ?? "", /Final working tree state/);
 });
 
 test("verify release captures generatedAt once for both filename and summary body", async () => {
   const runner = createCommandStub({
-    "pnpm verify": { code: 0, stdout: "verify ok\n" },
-    "pnpm exec playwright test --config tests/e2e/playwright.config.ts --workers=1": {
+    "pnpm verify:ci": { code: 0, stdout: "verify ok\n" },
+    "pnpm test:e2e -- --workers=1": {
       code: 0,
       stdout: "playwright ok\n"
     },
@@ -249,14 +249,14 @@ test("verify release captures generatedAt once for both filename and summary bod
 });
 
 test("resolveCommandInvocation uses explicit cmd.exe for Windows pnpm without shell mode", () => {
-  const invocation = resolveCommandInvocation("pnpm", ["exec", "playwright", "test"], {
+  const invocation = resolveCommandInvocation("pnpm", ["test:e2e", "--", "--workers=1"], {
     cwd: "C:\\repo\\Cutouts",
     env: { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
     platform: "win32"
   });
 
   assert.equal(invocation.command, "C:\\Windows\\System32\\cmd.exe");
-  assert.deepEqual(invocation.args, ["/d", "/s", "/c", "pnpm exec playwright test"]);
+  assert.deepEqual(invocation.args, ["/d", "/s", "/c", "pnpm test:e2e -- --workers=1"]);
   assert.equal(invocation.options.shell, false);
   assert.equal(invocation.options.cwd, "C:\\repo\\Cutouts");
   assert.equal(invocation.options.windowsHide, true);

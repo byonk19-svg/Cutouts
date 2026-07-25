@@ -110,12 +110,12 @@ export async function runVerifyRelease(options = {}) {
 
   if (doctor.exitCode < 2) {
     checks.push({
-      label: "pnpm verify",
-      ...(await runCommand("pnpm", ["verify"], { cwd }))
+      label: "pnpm verify:ci",
+      ...(await runCommand("pnpm", ["verify:ci"], { cwd }))
     });
     checks.push({
-      label: "pnpm exec playwright test --config tests/e2e/playwright.config.ts --workers=1",
-      ...(await runCommand("pnpm", ["exec", "playwright", "test", "--config", "tests/e2e/playwright.config.ts", "--workers=1"], { cwd }))
+      label: "pnpm test:e2e -- --workers=1",
+      ...(await runCommand("pnpm", ["test:e2e", "--", "--workers=1"], { cwd }))
     });
     checks.push({
       label: "git diff --check",

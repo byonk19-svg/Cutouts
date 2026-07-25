@@ -49,6 +49,8 @@ Open the Vite URL shown in the terminal, usually `http://127.0.0.1:5173`.
 ## Verify
 
 ```powershell
+pnpm lint
+pnpm verify:ci
 pnpm verify
 ```
 
@@ -69,7 +71,13 @@ pnpm verify:release
 
 `pnpm workflow:doctor` is read-only. It reports the current worktree, branch or detached state, dirty and untracked files, the recorded canonical worktree and active ticket, the base and head relationship, duplicate or unexplained feature worktrees, ports `5173` and `8787`, and cleanup candidates without modifying tracker files.
 
-`pnpm verify:release` writes one Markdown evidence summary under `.scratch/workflow-hygiene/evidence/`, runs `pnpm workflow:doctor`, `pnpm verify`, serial Playwright, and `git diff --check`, then records the commit SHA and final working-tree state. Any nonzero doctor result makes the release verification fail, even though warning-state doctor runs still record the required checks. It never pushes, merges, deletes, or changes ticket status.
+`pnpm lint` covers `src`, `tests`, `scripts`, and the root JavaScript and TypeScript config files while excluding generated output directories such as `dist`, `output`, Playwright reports, and `node_modules`.
+
+`pnpm verify:ci` is the repository-owned quality gate for pull requests. It runs lint, app typecheck, test typecheck, backend and frontend tests, the production build, and `git diff --check`.
+
+`pnpm verify:release` writes one Markdown evidence summary under `.scratch/workflow-hygiene/evidence/`, runs `pnpm workflow:doctor`, `pnpm verify:ci`, serial Playwright via `pnpm test:e2e -- --workers=1`, and `git diff --check`, then records the commit SHA and final working-tree state. Any nonzero doctor result makes the release verification fail, even though warning-state doctor runs still record the required checks. It never pushes, merges, deletes, or changes ticket status.
+
+GitHub Actions runs the same repository commands in two read-only jobs named `quality` and `browser`. `quality` runs `pnpm verify:ci`; `browser` waits for `quality`, installs Chromium, and runs `pnpm test:e2e -- --workers=1`. No provider credential is configured in CI.
 
 See `docs/MVP_ACCEPTANCE_CHECKLIST.md` for the verified v0.1 software and physical acceptance record.
 
