@@ -191,6 +191,9 @@ async function createAnalyzedProject(page: Page, fileName: string) {
   await expect(page.getByLabel("Clean Lines workspace")).toBeVisible();
   await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
   await expect(page.getByLabel("Colors workspace")).toBeVisible();
+  await expect.poll(async () => (await autosave(page))?.sourceImage?.name).toBe(fileName);
+  await expect.poll(async () => (await autosave(page))?.workflowProgress?.activeStep).toBe("colors");
+  await expect.poll(async () => (await autosave(page))?.projectPalette?.length ?? 0).toBeGreaterThan(0);
 }
 
 async function openEditColorDetails(page: Page) {
