@@ -6,17 +6,21 @@
     "decision": "The owner printed the corrected packet, reported that it looked good, and continued to the Grinch source."
   },
   "source": {
-    "path": "C:\\Users\\byonk\\Downloads\\coraline-jones-wybie-lovat-youtube-other-mother-png-favpng-KtJE4LMVAEBZCVcR067bzMXqu.jpg",
+    "filename": "coraline-jones-wybie-lovat-youtube-other-mother-png-favpng-KtJE4LMVAEBZCVcR067bzMXqu.jpg",
+    "sourceId": "coraline-source-jpeg-sha256-0242226d",
     "widthPx": 820,
     "heightPx": 960,
+    "bytes": 88479,
     "sha256": "0242226d8b59a9591073d649f55dd98a725c10a406633dc0220881e7832f8124",
-    "committed": false
+    "tracked": false,
+    "disposition": "Local owner-supplied source; not tracked because redistribution rights are not recorded."
   },
   "settings": {
     "finishedHeightIn": 36,
     "templateStyle": "clean",
     "detailCleanup": 88,
     "threshold": 42,
+    "providerRequests": 0,
     "paidAiRequestMade": false,
     "cleanupSegmentDeletes": 3,
     "cleanupFeatureLineAdds": 0,
@@ -42,7 +46,10 @@
     {"area": "Face and hands", "decision": "Craft Smart Acrylic Vanilla"}
   ],
   "pdf": {
-    "path": "output/pdf/coraline-maker-ready-jigsaw-template.pdf",
+    "filename": "coraline-maker-ready-jigsaw-template.pdf",
+    "repoRelativeRegenerationLocation": "output/pdf/coraline-maker-ready-jigsaw-template.pdf",
+    "tracked": false,
+    "disposition": "Source-derived binary; regenerate from the identified source and recorded settings.",
     "bytes": 1174567,
     "pages": 10,
     "pageSize": "US Letter",

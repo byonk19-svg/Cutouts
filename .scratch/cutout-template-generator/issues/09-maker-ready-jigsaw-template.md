@@ -27,7 +27,10 @@ pipeline against another processed outline fixture.
 
 ### Source received — 2026-07-21
 
-- Local path: `C:\Users\byonk\Downloads\coraline-jones-wybie-lovat-youtube-other-mother-png-favpng-KtJE4LMVAEBZCVcR067bzMXqu.jpg`
+- Source filename: `coraline-jones-wybie-lovat-youtube-other-mother-png-favpng-KtJE4LMVAEBZCVcR067bzMXqu.jpg`
+- Source ID: `coraline-source-jpeg-sha256-0242226d`
+- Repository disposition: local owner-supplied source, not tracked because
+  redistribution rights are not recorded
 - Dimensions: `820x960` pixels
 - Format: 24-bit RGB JPEG with no alpha channel
 - Bytes: `88479`
@@ -131,9 +134,11 @@ machine-ready export.
 - Rejected baseline PDF:
   `output/pdf/coraline-maker-ready-baseline-rejected.pdf`, 10 US-letter pages,
   SHA-256 `df85ddcea6ae184a58dfcd78f40f566529006cf3cf394f97a4e01b1dff5f1570`.
-  Local browser/debug evidence is under
-  `output/playwright/maker-ready-reproduction/`; the manifest records that this
-  packet is mechanically valid and maker-ready rejected.
+  The PDF and local browser/debug captures are source-derived binaries and are
+  not tracked. Their regeneration locations remain
+  `output/pdf/coraline-maker-ready-baseline-rejected.pdf` and
+  `output/playwright/maker-ready-reproduction/`; the manifest retains hashes,
+  byte sizes, dimensions, settings, and the maker-ready rejection decision.
 - 2026-07-21 corrected candidate: the checkerboard warning now fires for the
   real source, perceptually near palette bins are consolidated, rendered
   Feature Lines use a scale-aware Cut Line clearance, and print-scale detail
@@ -149,9 +154,11 @@ machine-ready export.
   `1174567` bytes, SHA-256
   `318921bfc3d3a6264c026a0f4972abca6f5b80d0e3197376b73bbc1cc269c08b`.
   It contains a cover, labeled Color Guide, and eight `2x4` trace tiles for a
-  `14.87 x 36.00in` result. Rendered pages are under
-  `tmp/pdfs/maker-ready-accepted/` and browser evidence is under
-  `output/playwright/maker-ready-reproduction/`.
+  `14.87 x 36.00in` result. The source-derived PDF, rendered pages, and browser
+  captures are not tracked; regenerate them at
+  `tmp/pdfs/maker-ready-accepted/` and
+  `output/playwright/maker-ready-reproduction/` from the recorded source ID and
+  settings.
 - Screen review is complete, but the issue is `ready-for-human`: print at 100%,
   measure the 1-inch square, tape all eight tiles, and decide whether every
   retained line is worth transferring before checking the three remaining

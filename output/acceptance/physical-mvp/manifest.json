@@ -7,11 +7,58 @@
   "sourceFixture": "backend/tests/fixtures/coraline/coraline-best-clean-outline.png",
   "productBaseline": "c1144b6",
   "branchHead": "8ad948eaee55b1e57a1127e191cc4b927d86376f",
-  "printablePdf": "output/pdf/coraline-physical-mvp-template-packet.pdf",
+  "providerRequests": 0,
+  "evidenceDisposition": {
+    "tracked": false,
+    "reason": "Source-derived binary evidence is intentionally not tracked. Regenerate it from the source fixture and recorded product baseline when visual inspection is required."
+  },
+  "printablePdf": {
+    "filename": "coraline-physical-mvp-template-packet.pdf",
+    "repoRelativeRegenerationLocation": "output/pdf/coraline-physical-mvp-template-packet.pdf",
+    "tracked": false,
+    "bytes": 411573,
+    "sha256": "6a7050fafeac0b53f831d985aa8027db51933e46ef56faefb46988581129f1c2"
+  },
   "renderedPages": [
-    "output/acceptance/physical-mvp/page-01-cover.png",
-    "output/acceptance/physical-mvp/page-02-paint-guide.png",
-    "output/acceptance/physical-mvp/page-03-first-tile.png",
-    "output/acceptance/physical-mvp/page-04-adjacent-tile.png"
-  ]
+    {
+      "filename": "page-01-cover.png",
+      "tracked": false,
+      "bytes": 186788,
+      "sha256": "bfb22811cd4c21570ff0fea029b8343fea9599e4c9a82638fe1136b414e87adc",
+      "widthPx": 1275,
+      "heightPx": 1650
+    },
+    {
+      "filename": "page-02-paint-guide.png",
+      "tracked": false,
+      "bytes": 76638,
+      "sha256": "eb6568cd266055360b84e9516cf44289586a18647ef51346ce00ae1da9d5ecb8",
+      "widthPx": 1275,
+      "heightPx": 1650
+    },
+    {
+      "filename": "page-03-first-tile.png",
+      "tracked": false,
+      "bytes": 229540,
+      "sha256": "4eef9b280a86623e938eaadcb5e13cc311e9265639c0dd6808f4f5553694e5d4",
+      "widthPx": 1275,
+      "heightPx": 1650
+    },
+    {
+      "filename": "page-04-adjacent-tile.png",
+      "tracked": false,
+      "bytes": 114186,
+      "sha256": "164b37b246a3a9d315018650c3727900de35e497d0d8b282f22b1173ce9db02f",
+      "widthPx": 1275,
+      "heightPx": 1650
+    }
+  ],
+  "workspaceCapture": {
+    "filename": "export-workspace.png",
+    "tracked": false,
+    "bytes": 46113,
+    "sha256": "211078305647129eba849cc657ba172761977636d86689cf54a1cc169721de1b",
+    "widthPx": 960,
+    "heightPx": 638
+  }
 }
