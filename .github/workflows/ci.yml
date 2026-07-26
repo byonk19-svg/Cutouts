@@ -80,6 +80,9 @@ jobs:
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install PDF rendering dependency
+        run: sudo apt-get update && sudo apt-get install --yes poppler-utils
+
       - name: Install Playwright Chromium
         run: pnpm test:e2e:install
 
