@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { join, resolve } from "node:path";
 
 import { resolveCommandInvocation, runVerifyRelease } from "../scripts/verify-release.mjs";
+
+const TEST_REPO_ROOT = resolve("test-fixtures", "Cutouts");
 
 type CommandResult = {
   code?: number;
@@ -47,7 +50,7 @@ test("verify release writes one success summary after running the required check
   const writes: Array<{ target: string; content: string }> = [];
 
   const result = await runVerifyRelease({
-    cwd: "C:\\repo\\Cutouts",
+    cwd: TEST_REPO_ROOT,
     runDoctor: async () => ({
       status: "healthy",
       exitCode: 0,
@@ -67,7 +70,7 @@ test("verify release writes one success summary after running the required check
   assert.equal(writes.length, 1);
   assert.equal(
     writes[0]?.target,
-    "C:\\repo\\Cutouts\\.scratch\\workflow-hygiene\\evidence\\verify-release-20260723-141516.md"
+    join(TEST_REPO_ROOT, ".scratch", "workflow-hygiene", "evidence", "verify-release-20260723-141516.md")
   );
   assert.match(writes[0]?.content ?? "", /Commit: `abc1234def5678`/);
   assert.match(writes[0]?.content ?? "", /pnpm verify:ci/);
@@ -89,7 +92,7 @@ test("verify release stops on invalid doctor state and still records one failure
   const writes: string[] = [];
 
   const result = await runVerifyRelease({
-    cwd: "C:\\repo\\Cutouts",
+    cwd: TEST_REPO_ROOT,
     runDoctor: async () => ({
       status: "invalid",
       exitCode: 2,
@@ -126,7 +129,7 @@ test("verify release returns nonzero on doctor warnings but still records all re
   const writes: string[] = [];
 
   const result = await runVerifyRelease({
-    cwd: "C:\\repo\\Cutouts",
+    cwd: TEST_REPO_ROOT,
     runDoctor: async () => ({
       status: "warning",
       exitCode: 1,
@@ -170,7 +173,7 @@ test("verify release keeps collecting evidence when verify fails and exits nonze
   const writes: string[] = [];
 
   const result = await runVerifyRelease({
-    cwd: "C:\\repo\\Cutouts",
+    cwd: TEST_REPO_ROOT,
     runDoctor: async () => ({
       status: "healthy",
       exitCode: 0,
@@ -219,7 +222,7 @@ test("verify release captures generatedAt once for both filename and summary bod
   let nowCalls = 0;
 
   const result = await runVerifyRelease({
-    cwd: "C:\\repo\\Cutouts",
+    cwd: TEST_REPO_ROOT,
     runDoctor: async () => ({
       status: "healthy",
       exitCode: 0,
@@ -243,7 +246,7 @@ test("verify release captures generatedAt once for both filename and summary bod
   assert.equal(nowCalls, 1);
   assert.equal(
     writes[0]?.target,
-    "C:\\repo\\Cutouts\\.scratch\\workflow-hygiene\\evidence\\verify-release-20260723-235959.md"
+    join(TEST_REPO_ROOT, ".scratch", "workflow-hygiene", "evidence", "verify-release-20260723-235959.md")
   );
   assert.match(writes[0]?.content ?? "", /Generated: 2026-07-23T23:59:59.999Z/);
 });
