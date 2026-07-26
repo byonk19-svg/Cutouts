@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { join, resolve } from "node:path";
 
 import { runWorkflowDoctor } from "../scripts/workflow-doctor.mjs";
 
@@ -33,10 +34,10 @@ function createExecStub(responses: Record<string, ExecResult | string>) {
   };
 }
 
-const repoRoot = "C:\\repo\\Cutouts";
-const featureDir = `${repoRoot}\\.scratch\\workflow-hygiene`;
-const statusFile = `${featureDir}\\STATUS.md`;
-const issueFile = `${featureDir}\\issues\\01-status-contract-and-workflow-commands.md`;
+const repoRoot = resolve("test-fixtures", "Cutouts");
+const featureDir = join(repoRoot, ".scratch", "workflow-hygiene");
+const statusFile = join(featureDir, "STATUS.md");
+const issueFile = join(featureDir, "issues", "01-status-contract-and-workflow-commands.md");
 
 function createStatusFile(overrides: Partial<Record<string, string>> = {}) {
   const lines = {
@@ -111,9 +112,9 @@ branch refs/heads/main
 
   assert.equal(result.status, "healthy");
   assert.equal(result.exitCode, 0);
-  assert.match(result.markdown, /Current worktree: `C:\\repo\\Cutouts`/);
+  assert.ok(result.markdown.includes(`Current worktree: \`${repoRoot}\``));
   assert.match(result.markdown, /Branch: `codex\/workflow-hygiene` at `abc1234`/);
-  assert.match(result.markdown, /Recorded canonical worktree: `C:\\repo\\Cutouts`/);
+  assert.ok(result.markdown.includes(`Recorded canonical worktree: \`${repoRoot}\``));
   assert.match(result.markdown, /Active ticket: `issues\/01-status-contract-and-workflow-commands.md`/);
   assert.match(result.markdown, /Ports: `5173` available, `8787` available/);
   assert.ok(exec.calls.includes("git worktree list --porcelain"));
@@ -231,8 +232,8 @@ branch refs/heads/codex/workflow-hygiene
     readFile: async (target: string) => {
       if (target === statusFile) {
         return createStatusFile({
-          canonical: "C:\\repo\\Elsewhere",
-          currentTicket: "issues\\02-missing.md"
+          canonical: resolve("test-fixtures", "Elsewhere"),
+          currentTicket: "issues/02-missing.md"
         });
       }
       throw new Error(`Unexpected read: ${target}`);
@@ -389,7 +390,7 @@ branch refs/heads/codex/workflow-hygiene
     readFile: async (target: string) => {
       if (target === statusFile) {
         return createStatusFile({
-          currentTicket: "..\\PRD.md"
+          currentTicket: "../PRD.md"
         });
       }
       attemptedRead = true;
@@ -436,7 +437,7 @@ branch refs/heads/codex/workflow-hygiene
     readFile: async (target: string) => {
       if (target === statusFile) {
         return createStatusFile({
-          currentTicket: "C:\\temp\\ticket.md"
+          currentTicket: resolve("test-fixtures", "outside", "ticket.md")
         });
       }
       attemptedRead = true;
