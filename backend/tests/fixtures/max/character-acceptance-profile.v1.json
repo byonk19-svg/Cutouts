@@ -1,0 +1,218 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "max-from-the-grinch",
+  "label": "Max 24-inch template packet",
+  "source": {
+    "path": "Max-from-the-Grinch-movie.webp",
+    "filename": "Max-from-the-Grinch-movie.webp",
+    "widthPx": 700,
+    "heightPx": 1500,
+    "bytes": 123278,
+    "sha256": "3E2FFFB275DC538D572BBADE8136F0F1BDF425490D63B65A1472EA3DE1A07846",
+    "committable": true
+  },
+  "requestedOutput": {
+    "finishedHeightIn": 24,
+    "minimumTileCols": 2,
+    "minimumTileRows": 4,
+    "templateStyle": "clean",
+    "colorGuide": "separate-page"
+  },
+  "features": [
+    {
+      "id": "upper-antlers",
+      "label": "Upper antler detail",
+      "kind": "featureLine",
+      "locator": { "type": "rect", "x": 0.1814, "y": 0.0103, "width": 0.5991, "height": 0.2897 }
+    },
+    {
+      "id": "left-face",
+      "label": "Left face detail",
+      "kind": "featureLine",
+      "locator": { "type": "rect", "x": 0.1148, "y": 0.3622, "width": 0.2441, "height": 0.1552 }
+    },
+    {
+      "id": "right-face",
+      "label": "Right face detail",
+      "kind": "featureLine",
+      "locator": { "type": "rect", "x": 0.6362, "y": 0.3622, "width": 0.2330, "height": 0.1552 }
+    },
+    {
+      "id": "eye-band",
+      "label": "Closed eye whites and pupils",
+      "kind": "paintRegion",
+      "locator": { "type": "rect", "x": 0.3700, "y": 0.3725, "width": 0.2552, "height": 0.0828 }
+    },
+    {
+      "id": "face-boundary",
+      "label": "Continuous face boundary",
+      "kind": "featureLine",
+      "locator": { "type": "rect", "x": 0.3034, "y": 0.4449, "width": 0.3994, "height": 0.0931 }
+    },
+    {
+      "id": "antler-tip",
+      "label": "Closed antler tip region",
+      "kind": "paintRegion",
+      "locator": { "type": "rect", "x": 0.7361, "y": 0.1966, "width": 0.0555, "height": 0.0517 }
+    },
+    {
+      "id": "forbidden-bridge-upper",
+      "label": "No extra upper bridge",
+      "kind": "forbiddenRegion",
+      "locator": { "type": "rect", "x": 0.2590, "y": 0.2897, "width": 0.4659, "height": 0.0673 }
+    },
+    {
+      "id": "forbidden-bridge-lower",
+      "label": "No extra lower bridge",
+      "kind": "forbiddenRegion",
+      "locator": { "type": "rect", "x": 0.2590, "y": 0.4656, "width": 0.4659, "height": 0.1242 }
+    },
+    {
+      "id": "lower-left-leg",
+      "label": "Lower-left leg detail",
+      "kind": "featureLine",
+      "locator": { "type": "rect", "x": 0.1370, "y": 0.6415, "width": 0.1886, "height": 0.1862 }
+    },
+    {
+      "id": "body-center",
+      "label": "Body center detail",
+      "kind": "featureLine",
+      "locator": { "type": "rect", "x": 0.3367, "y": 0.7140, "width": 0.3328, "height": 0.2587 }
+    },
+    {
+      "id": "left-paw",
+      "label": "Left paw detail",
+      "kind": "featureLine",
+      "locator": { "type": "rect", "x": 0.0371, "y": 0.9261, "width": 0.2773, "height": 0.0673 }
+    },
+    {
+      "id": "right-paw",
+      "label": "Right paw detail",
+      "kind": "featureLine",
+      "locator": { "type": "rect", "x": 0.6917, "y": 0.9261, "width": 0.2685, "height": 0.0673 }
+    }
+  ],
+  "assertions": [
+    {
+      "id": "upper-antlers-present",
+      "label": "Upper antler details stay present",
+      "type": "minimumInk",
+      "artifact": "acceptedDetail",
+      "featureId": "upper-antlers",
+      "minimumDarkPixels": 850
+    },
+    {
+      "id": "left-face-present",
+      "label": "Left face details stay present",
+      "type": "minimumInk",
+      "artifact": "acceptedDetail",
+      "featureId": "left-face",
+      "minimumDarkPixels": 1400
+    },
+    {
+      "id": "right-face-present",
+      "label": "Right face details stay present",
+      "type": "minimumInk",
+      "artifact": "acceptedDetail",
+      "featureId": "right-face",
+      "minimumDarkPixels": 1400
+    },
+    {
+      "id": "eye-band-keeps-four-closed-regions",
+      "label": "Eye band keeps four practical closed regions",
+      "type": "enclosedRegionCount",
+      "artifact": "acceptedDetail",
+      "featureId": "eye-band",
+      "minimumCount": 4,
+      "maximumCount": 4,
+      "minimumAreaPixels": 120,
+      "maximumAreaPixels": 4500
+    },
+    {
+      "id": "face-boundary-present",
+      "label": "Continuous face boundary remains printable",
+      "type": "minimumInk",
+      "artifact": "acceptedDetail",
+      "featureId": "face-boundary",
+      "minimumDarkPixels": 450
+    },
+    {
+      "id": "antler-tip-closed",
+      "label": "Antler tip shade remains a single closed region",
+      "type": "enclosedRegionCount",
+      "artifact": "acceptedDetail",
+      "featureId": "antler-tip",
+      "minimumCount": 1,
+      "maximumCount": 1,
+      "minimumAreaPixels": 150,
+      "maximumAreaPixels": 1200
+    },
+    {
+      "id": "no-upper-bridge",
+      "label": "Upper bridge region stays empty",
+      "type": "enclosedRegionCount",
+      "artifact": "acceptedDetail",
+      "featureId": "forbidden-bridge-upper",
+      "minimumCount": 0,
+      "maximumCount": 0,
+      "minimumAreaPixels": 50,
+      "maximumAreaPixels": 8000
+    },
+    {
+      "id": "no-lower-bridge",
+      "label": "Lower bridge region stays empty",
+      "type": "enclosedRegionCount",
+      "artifact": "acceptedDetail",
+      "featureId": "forbidden-bridge-lower",
+      "minimumCount": 0,
+      "maximumCount": 0,
+      "minimumAreaPixels": 50,
+      "maximumAreaPixels": 8000
+    },
+    {
+      "id": "lower-left-leg-present",
+      "label": "Lower-left leg details stay present",
+      "type": "minimumInk",
+      "artifact": "acceptedDetail",
+      "featureId": "lower-left-leg",
+      "minimumDarkPixels": 500
+    },
+    {
+      "id": "body-center-present",
+      "label": "Body center details stay present",
+      "type": "minimumInk",
+      "artifact": "acceptedDetail",
+      "featureId": "body-center",
+      "minimumDarkPixels": 1600
+    },
+    {
+      "id": "left-paw-present",
+      "label": "Left paw details stay present",
+      "type": "minimumInk",
+      "artifact": "acceptedDetail",
+      "featureId": "left-paw",
+      "minimumDarkPixels": 500
+    },
+    {
+      "id": "right-paw-present",
+      "label": "Right paw details stay present",
+      "type": "minimumInk",
+      "artifact": "acceptedDetail",
+      "featureId": "right-paw",
+      "minimumDarkPixels": 500
+    }
+  ],
+  "workflowBudgets": {
+    "maxProviderRequests": 0,
+    "maxCleanupActions": 15,
+    "requiredCompletedSteps": ["Upload", "Clean Lines", "Colors", "Export"]
+  },
+  "humanChecklist": [
+    "Print at 100% or Actual Size with printer scaling disabled.",
+    "Measure the one-inch calibration square.",
+    "Tape at least two adjacent pages and inspect Cut Line continuity.",
+    "Judge practical line weight.",
+    "Transfer one outer Cut Line and one interior Detail Line.",
+    "Confirm the Color Guide is useful while painting."
+  ]
+}
