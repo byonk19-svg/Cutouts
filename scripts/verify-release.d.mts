@@ -12,6 +12,10 @@ type CommandResult = {
   stderr?: string;
 };
 
+type VerifyCheck = CommandResult & {
+  label: string;
+};
+
 export function resolveCommandInvocation(
   command: string,
   args: readonly string[],
@@ -37,4 +41,12 @@ export function runVerifyRelease(options: {
   ensureDir: (target: string) => Promise<void>;
   writeFile: (target: string, content: string) => Promise<void>;
   now: () => Date;
-}): Promise<{ exitCode: number }>;
+}): Promise<{
+  exitCode: number;
+  evidencePath: string;
+  markdown: string;
+  doctor: DoctorResult;
+  checks: VerifyCheck[];
+  commit: string;
+  finalTreeState: string;
+}>;

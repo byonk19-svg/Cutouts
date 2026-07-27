@@ -32,15 +32,21 @@ test("discoverTypeScriptTests keeps only immediate tests/*.test.ts files in sort
       [
         fileEntry("traceWorkflow.test.ts"),
         directoryEntry("e2e"),
+        fileEntry("Zulu.test.ts"),
+        fileEntry("éclair.test.ts"),
         fileEntry("guidedWorkflow.test.ts"),
+        fileEntry("alpha.test.ts"),
         fileEntry("README.md"),
         fileEntry("projectSession.spec.ts")
       ] as never
   });
 
   assert.deepEqual(discovered, [
+    "tests/Zulu.test.ts",
+    "tests/alpha.test.ts",
     "tests/guidedWorkflow.test.ts",
-    "tests/traceWorkflow.test.ts"
+    "tests/traceWorkflow.test.ts",
+    "tests/éclair.test.ts"
   ]);
 });
 

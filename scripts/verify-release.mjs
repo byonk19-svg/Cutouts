@@ -124,54 +124,60 @@ export async function runVerifyRelease(options = {}) {
   }
 
   const headResult = await runCommand("git", ["rev-parse", "HEAD"], { cwd });
-  const statusResult = await runCommand("git", ["status", "--short", "--branch"], { cwd });
   const commit = trimOutput(headResult.stdout);
-  const finalTreeState = trimOutput(statusResult.stdout) || "clean";
   const timestamp = formatTimestamp(generatedAt);
   const evidenceDir = path.join(cwd, ".scratch", "workflow-hygiene", "evidence");
   const evidencePath = path.join(evidenceDir, `verify-release-${timestamp}.md`);
 
   const failingChecks = checks.filter((check) => check.code !== 0);
   const exitCode = doctor.exitCode !== 0 ? doctor.exitCode : failingChecks.length ? 1 : 0;
-  const summaryLines = [
-    "# Release Verification Evidence",
-    "",
-    `Generated: ${generatedAt.toISOString()}`,
-    `Commit: \`${commit}\``,
-    `Doctor status: \`${doctor.status}\``,
-    "",
-    "## Workflow Doctor",
-    "",
-    doctor.markdown.trim(),
-    "",
-    "## Required Checks",
-    ""
-  ];
-
-  if (checks.length === 0) {
-    summaryLines.push(
-      "- Required release checks were not run because the workflow doctor found invalid state.",
+  const createSummary = (finalTreeState) => {
+    const summaryLines = [
+      "# Release Verification Evidence",
+      "",
+      `Generated: ${generatedAt.toISOString()}`,
+      `Commit: \`${commit}\``,
+      `Doctor status: \`${doctor.status}\``,
+      "",
+      "## Workflow Doctor",
+      "",
+      doctor.markdown.trim(),
+      "",
+      "## Required Checks",
       ""
-    );
-  } else {
-    summaryLines.push(...checks.flatMap((check) => [...formatCommandStatus(check)]), "");
-  }
+    ];
 
-  summaryLines.push("## Final working tree state", "", "```text", finalTreeState, "```", "");
+    if (checks.length === 0) {
+      summaryLines.push(
+        "- Required release checks were not run because the workflow doctor found invalid state.",
+        ""
+      );
+    } else {
+      summaryLines.push(...checks.flatMap((check) => [...formatCommandStatus(check)]), "");
+    }
 
-  if (exitCode !== 0) {
-    summaryLines.push("## Result", "", "- Release verification failed.", "");
-  } else {
-    summaryLines.push("## Result", "", "- Release verification passed.", "");
-  }
+    summaryLines.push("## Final working tree state", "", "```text", finalTreeState, "```", "");
+
+    if (exitCode !== 0) {
+      summaryLines.push("## Result", "", "- Release verification failed.", "");
+    } else {
+      summaryLines.push("## Result", "", "- Release verification passed.", "");
+    }
+
+    return summaryLines.join("\n").trimEnd() + "\n";
+  };
 
   await ensureDir(evidenceDir);
-  await writeFile(evidencePath, summaryLines.join("\n").trimEnd() + "\n");
+  await writeFile(evidencePath, createSummary("Evidence file created; final status pending."));
+  const statusResult = await runCommand("git", ["status", "--short", "--branch"], { cwd });
+  const finalTreeState = trimOutput(statusResult.stdout) || "clean";
+  const markdown = createSummary(finalTreeState);
+  await writeFile(evidencePath, markdown);
 
   return {
     exitCode,
     evidencePath,
-    markdown: summaryLines.join("\n").trimEnd() + "\n",
+    markdown,
     doctor,
     checks,
     commit,

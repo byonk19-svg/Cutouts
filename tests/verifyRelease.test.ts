@@ -67,14 +67,14 @@ test("verify release writes one success summary after running the required check
   });
 
   assert.equal(result.exitCode, 0);
-  assert.equal(writes.length, 1);
+  assert.equal(writes.length, 2);
   assert.equal(
-    writes[0]?.target,
+    writes.at(-1)?.target,
     join(TEST_REPO_ROOT, ".scratch", "workflow-hygiene", "evidence", "verify-release-20260723-141516.md")
   );
-  assert.match(writes[0]?.content ?? "", /Commit: `abc1234def5678`/);
-  assert.match(writes[0]?.content ?? "", /pnpm verify:ci/);
-  assert.match(writes[0]?.content ?? "", /pnpm test:e2e -- --workers=1/);
+  assert.match(writes.at(-1)?.content ?? "", /Commit: `abc1234def5678`/);
+  assert.match(writes.at(-1)?.content ?? "", /pnpm verify:ci/);
+  assert.match(writes.at(-1)?.content ?? "", /pnpm test:e2e -- --workers=1/);
   assert.deepEqual(runner.calls, [
     "pnpm verify:ci",
     "pnpm test:e2e -- --workers=1",
@@ -82,6 +82,53 @@ test("verify release writes one success summary after running the required check
     "git rev-parse HEAD",
     "git status --short --branch"
   ]);
+});
+
+test("verify release reports the working tree after its evidence file exists", async () => {
+  const calls: string[] = [];
+  const writes: Array<{ target: string; content: string }> = [];
+  let evidenceWritten = false;
+
+  const result = await runVerifyRelease({
+    cwd: TEST_REPO_ROOT,
+    runDoctor: async () => ({
+      status: "healthy",
+      exitCode: 0,
+      markdown: "# Workflow Doctor\nHealthy\n",
+      warnings: [],
+      errors: []
+    }),
+    runCommand: async (command: string, args: string[]) => {
+      const key = [command, ...args].join(" ");
+      calls.push(key);
+      if (key === "git rev-parse HEAD") {
+        return { code: 0, stdout: "abc1234def5678\n", stderr: "" };
+      }
+      if (key === "git status --short --branch") {
+        const evidenceState = evidenceWritten
+          ? "?? .scratch/workflow-hygiene/evidence/verify-release-20260723-141516.md\n"
+          : "";
+        return {
+          code: 0,
+          stdout: `## codex/workflow-hygiene\n${evidenceState}`,
+          stderr: ""
+        };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    },
+    ensureDir: async () => undefined,
+    writeFile: async (target: string, content: string) => {
+      evidenceWritten = true;
+      writes.push({ target, content });
+    },
+    now: () => new Date("2026-07-23T14:15:16.000Z")
+  });
+
+  assert.equal(writes.length, 2);
+  assert.equal(writes[0]?.target, writes[1]?.target);
+  assert.match(result.finalTreeState, /\?\? \.scratch\/workflow-hygiene\/evidence\//);
+  assert.match(writes[1]?.content ?? "", /\?\? \.scratch\/workflow-hygiene\/evidence\//);
+  assert.equal(calls.at(-1), "git status --short --branch");
 });
 
 test("verify release stops on invalid doctor state and still records one failure summary", async () => {
@@ -110,9 +157,9 @@ test("verify release stops on invalid doctor state and still records one failure
 
   assert.equal(result.exitCode, 2);
   assert.deepEqual(runner.calls, ["git rev-parse HEAD", "git status --short --branch"]);
-  assert.equal(writes.length, 1);
-  assert.match(writes[0] ?? "", /Doctor status: `invalid`/);
-  assert.match(writes[0] ?? "", /Required release checks were not run because the workflow doctor found invalid state/i);
+  assert.equal(writes.length, 2);
+  assert.match(writes.at(-1) ?? "", /Doctor status: `invalid`/);
+  assert.match(writes.at(-1) ?? "", /Required release checks were not run because the workflow doctor found invalid state/i);
 });
 
 test("verify release returns nonzero on doctor warnings but still records all required checks", async () => {
@@ -153,10 +200,10 @@ test("verify release returns nonzero on doctor warnings but still records all re
     "git rev-parse HEAD",
     "git status --short --branch"
   ]);
-  assert.equal(writes.length, 1);
-  assert.match(writes[0] ?? "", /Doctor status: `warning`/);
-  assert.match(writes[0] ?? "", /pnpm verify:ci` \| `passed`/);
-  assert.match(writes[0] ?? "", /Release verification failed/);
+  assert.equal(writes.length, 2);
+  assert.match(writes.at(-1) ?? "", /Doctor status: `warning`/);
+  assert.match(writes.at(-1) ?? "", /pnpm verify:ci` \| `passed`/);
+  assert.match(writes.at(-1) ?? "", /Release verification failed/);
 });
 
 test("verify release keeps collecting evidence when verify fails and exits nonzero", async () => {
@@ -197,10 +244,10 @@ test("verify release keeps collecting evidence when verify fails and exits nonze
     "git rev-parse HEAD",
     "git status --short --branch"
   ]);
-  assert.equal(writes.length, 1);
-  assert.match(writes[0] ?? "", /pnpm verify:ci` \| `failed`/);
-  assert.match(writes[0] ?? "", /git diff --check` \| `failed`/);
-  assert.match(writes[0] ?? "", /Final working tree state/);
+  assert.equal(writes.length, 2);
+  assert.match(writes.at(-1) ?? "", /pnpm verify:ci` \| `failed`/);
+  assert.match(writes.at(-1) ?? "", /git diff --check` \| `failed`/);
+  assert.match(writes.at(-1) ?? "", /Final working tree state/);
 });
 
 test("verify release captures generatedAt once for both filename and summary body", async () => {
@@ -245,10 +292,10 @@ test("verify release captures generatedAt once for both filename and summary bod
   assert.equal(result.exitCode, 0);
   assert.equal(nowCalls, 1);
   assert.equal(
-    writes[0]?.target,
+    writes.at(-1)?.target,
     join(TEST_REPO_ROOT, ".scratch", "workflow-hygiene", "evidence", "verify-release-20260723-235959.md")
   );
-  assert.match(writes[0]?.content ?? "", /Generated: 2026-07-23T23:59:59.999Z/);
+  assert.match(writes.at(-1)?.content ?? "", /Generated: 2026-07-23T23:59:59.999Z/);
 });
 
 test("resolveCommandInvocation uses explicit cmd.exe for Windows pnpm without shell mode", () => {

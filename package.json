@@ -17,7 +17,7 @@
     "test:e2e:install": "playwright install chromium",
     "test:workflow": "node --test --experimental-strip-types tests/workflowDoctor.test.ts tests/verifyRelease.test.ts",
     "test": "pnpm test:backend && pnpm test:frontend && pnpm typecheck:tests",
-    "verify:ci": "pnpm lint && pnpm typecheck && pnpm typecheck:tests && pnpm test && pnpm build && git diff --check",
+    "verify:ci": "pnpm lint && pnpm typecheck && pnpm typecheck:tests && pnpm test && pnpm build && git diff --check origin/main...HEAD",
     "verify": "pnpm typecheck && pnpm test && pnpm build",
     "workflow:doctor": "node scripts/workflow-doctor.mjs",
     "verify:release": "node scripts/verify-release.mjs"

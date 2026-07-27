@@ -20,7 +20,7 @@ export async function discoverTypeScriptTests({
   return entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(TEST_SUFFIX))
     .map((entry) => `${TEST_DIRECTORY}/${entry.name}`)
-    .sort((left, right) => left.localeCompare(right));
+    .sort();
 }
 
 export function logDiscoveredTypeScriptTests(testFiles, { log = console.log } = {}) {
