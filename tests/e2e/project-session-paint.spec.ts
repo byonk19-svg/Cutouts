@@ -104,6 +104,7 @@ test("invalid partial hex stays presentation-only until a valid blur commits one
   const firstRow = page.locator(".palette-row").first();
   await openPaletteRow(firstRow);
 
+  await expect.poll(async () => (await autosave(page))?.workflowProgress?.activeStep).toBe("colors");
   const beforeRaw = await autosaveRaw(page);
   const durableBefore = await autosave(page);
   const hexInput = firstRow.getByLabel("Hex");

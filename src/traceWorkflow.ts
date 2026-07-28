@@ -15,6 +15,8 @@ export type Settings = {
   paletteSize: number;
   includeInstructionCoverPage: boolean;
   includePaintGuidePage: boolean;
+  minimumTileCols?: number;
+  minimumTileRows?: number;
 };
 
 export function detailPresetSettings(preset: DetailPreset, current: Settings): Settings {

@@ -7,7 +7,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import cv2
 import numpy as np
@@ -72,6 +72,8 @@ class TemplateSettings:
     palette_size: int = 6
     include_instruction_cover_page: bool = True
     include_paint_guide_page: bool = True
+    minimum_tile_cols: int = 0
+    minimum_tile_rows: int = 0
     paint_guide_entries_only: bool = False
     project_name: str = "Cutout Studio Template Pack"
     paint_guide_entries: tuple[PaintGuideEntry, ...] = field(default_factory=tuple)
@@ -100,6 +102,8 @@ class TemplateSettings:
             palette_size=_bounded_int(data.get("paletteSize"), 2, 12, cls.palette_size),
             include_instruction_cover_page=_bounded_bool(data.get("includeInstructionCoverPage"), cls.include_instruction_cover_page),
             include_paint_guide_page=_bounded_bool(data.get("includePaintGuidePage"), cls.include_paint_guide_page),
+            minimum_tile_cols=_bounded_int(data.get("minimumTileCols"), 0, 8, cls.minimum_tile_cols),
+            minimum_tile_rows=_bounded_int(data.get("minimumTileRows"), 0, 8, cls.minimum_tile_rows),
             paint_guide_entries_only=_bounded_bool(data.get("paintGuideEntriesOnly"), cls.paint_guide_entries_only),
             project_name=_safe_project_name(data.get("projectName", cls.project_name)),
             paint_guide_entries=_paint_guide_entries_from_mapping(data.get("paintGuideEntries")),
@@ -221,7 +225,12 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
     cropped_source = source.crop(bounds)
     cropped_mask = mask.crop(bounds)
     finished_width = settings.finished_height_in * (cropped_source.width / cropped_source.height)
-    tile_cols, tile_rows = tile_grid(finished_width, settings.finished_height_in)
+    tile_cols, tile_rows = tile_grid(
+        finished_width,
+        settings.finished_height_in,
+        settings.minimum_tile_cols,
+        settings.minimum_tile_rows,
+    )
     preview, outer_line, detail_line, paint_guide = _make_preview_layers(cropped_source, cropped_mask, settings)
     preview_mask = _preview_mask(cropped_source, cropped_mask)
     outer_cut_path = _mask_to_svg_path(preview_mask, simplify_px=max(1.2, settings.smoothing))
@@ -265,7 +274,12 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_de
     cropped_source = source.crop(bounds)
     cropped_mask = mask.crop(bounds)
     finished_width = settings.finished_height_in * (cropped_source.width / cropped_source.height)
-    tile_cols, tile_rows = tile_grid(finished_width, settings.finished_height_in)
+    tile_cols, tile_rows = tile_grid(
+        finished_width,
+        settings.finished_height_in,
+        settings.minimum_tile_cols,
+        settings.minimum_tile_rows,
+    )
     edited_detail_for_trace = edited_detail_png
     trace = _make_trace_image(cropped_source, cropped_mask, settings, finished_width, settings.finished_height_in, edited_detail_for_trace)
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
@@ -295,13 +309,18 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_de
     return out.getvalue()
 
 
-def tile_grid(width_in: float, height_in: float) -> tuple[int, int]:
+def tile_grid(
+    width_in: float,
+    height_in: float,
+    minimum_cols: int = 0,
+    minimum_rows: int = 0,
+) -> tuple[int, int]:
     tile_w = LETTER_WIDTH_IN - 2 * PDF_MARGIN_IN
     tile_h = LETTER_HEIGHT_IN - 2 * PDF_MARGIN_IN - TILE_HEADER_IN
     step_w = tile_w - OVERLAP_IN
     step_h = tile_h - OVERLAP_IN
-    cols = max(1, math.ceil(max(0.01, width_in - OVERLAP_IN) / step_w))
-    rows = max(1, math.ceil(max(0.01, height_in - OVERLAP_IN) / step_h))
+    cols = max(1, minimum_cols, math.ceil(max(0.01, width_in - OVERLAP_IN) / step_w))
+    rows = max(1, minimum_rows, math.ceil(max(0.01, height_in - OVERLAP_IN) / step_h))
     return cols, rows
 
 
@@ -968,11 +987,19 @@ def _edited_detail_layer(edited_detail_png: bytes, target_size: tuple[int, int])
         layer = Image.open(io.BytesIO(edited_detail_png)).convert("RGBA")
     except Exception as exc:
         raise ValueError("Edited detail layer must be a readable PNG image.") from exc
-    if layer.size != target_size:
-        layer = layer.resize(target_size, Image.Resampling.LANCZOS)
+    source_size = layer.size
     alpha = layer.getchannel("A")
     dark = layer.convert("L").point(lambda px: 255 if px < 230 else 0)
     mask = Image.fromarray(np.minimum(np.asarray(alpha), np.asarray(dark)).astype(np.uint8), mode="L")
+    upscale = max(target_size[0] / source_size[0], target_size[1] / source_size[1])
+    if upscale > 1.5:
+        source_ink = np.where(np.asarray(mask, dtype=np.uint8) > 40, 255, 0).astype(np.uint8)
+        round_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        source_ink = cv2.morphologyEx(source_ink, cv2.MORPH_CLOSE, round_kernel)
+        softened = cv2.GaussianBlur(source_ink, (0, 0), sigmaX=0.65, sigmaY=0.65)
+        mask = Image.fromarray(softened, mode="L").resize(target_size, Image.Resampling.LANCZOS)
+    elif mask.size != target_size:
+        mask = mask.resize(target_size, Image.Resampling.LANCZOS)
     return _transparent_line_layer(mask)
 
 
@@ -1013,13 +1040,27 @@ def _detail_line_mask(
         if template_style == "detailed":
             return faithful
         level = "simple" if template_style == "marker" else "balanced"
-        return _simplify_existing_line_art_detail_mask(faithful, mask, level)
+        protected_closed_regions = (
+            _source_supported_closed_paint_region_boundaries(image, mask, faithful)
+            if level == "balanced"
+            and _marker_texture_with_thin_ink(_flat_line_art_metrics(image, mask))
+            else None
+        )
+        simplified = _simplify_existing_line_art_detail_mask(
+            faithful,
+            mask,
+            level,
+            protected_closed_regions=protected_closed_regions,
+        )
+        return simplified
     if template_style == "marker":
         cleanup = max(cleanup, 90)
-        return _marker_template_line_mask(image, mask, cleanup, print_scale)
+        detail = _marker_template_line_mask(image, mask, cleanup, print_scale)
+        return _suppress_exterior_detail_band(detail, mask, print_scale)
     if template_style == "clean":
         cleanup = max(cleanup, 76)
-        return _clean_feature_line_mask(image, mask, cleanup, print_scale)
+        detail = _clean_feature_line_mask(image, mask, cleanup, print_scale)
+        return _suppress_exterior_detail_band(detail, mask, print_scale)
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
     cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
@@ -1061,6 +1102,18 @@ def _detail_line_mask(
     return detail
 
 
+def _suppress_exterior_detail_band(detail: Image.Image, mask: Image.Image, print_scale: bool) -> Image.Image:
+    detail_l = detail.convert("L")
+    mask_l = mask.resize(detail_l.size, Image.Resampling.NEAREST).convert("L")
+    radius = max(3, round(min(detail_l.size) * 0.024))
+    if print_scale:
+        radius = max(radius, round(PRINT_DPI * 0.06))
+    interior = _erode_mask(mask_l, radius * 2 + 1)
+    detail_arr = np.asarray(detail_l, dtype=np.uint8)
+    interior_arr = np.asarray(interior, dtype=np.uint8)
+    return Image.fromarray(np.where(interior_arr > 0, detail_arr, 0).astype(np.uint8), mode="L")
+
+
 def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     blur_radius, edge_threshold, min_area = _clean_feature_line_tuning(cleanup, print_scale)
@@ -1098,7 +1151,14 @@ def _existing_line_art_detail_mask(image: Image.Image, mask: Image.Image, cleanu
     neutral_dark_ink = (lightness < 115) & (chroma < 24)
     local_lightness = cv2.GaussianBlur(lightness.astype(np.float32), (0, 0), sigmaX=2.2, sigmaY=2.2)
     locally_dark_stroke = ((local_lightness - lightness) > 22) & (lightness < 150)
-    detail_arr = (neutral_dark_ink | locally_dark_stroke) & interior_arr
+    marker_texture = _marker_texture_with_thin_ink(_flat_line_art_metrics(work_image, work_mask))
+    deliberate_marker_ink = (lightness < 145) & (chroma < 35)
+    lower_transfer_zone = np.arange(lightness.shape[0])[:, None] >= lightness.shape[0] * 0.58
+    detail_arr = (
+        (deliberate_marker_ink | (locally_dark_stroke & lower_transfer_zone))
+        if marker_texture
+        else (neutral_dark_ink | locally_dark_stroke)
+    ) & interior_arr
     detail = Image.fromarray((detail_arr.astype(np.uint8) * 255), mode="L")
     min_area = 8 + round((cleanup / 100) * (28 if print_scale else 12))
     detail = _remove_small_components(detail, min_area)
@@ -1107,7 +1167,12 @@ def _existing_line_art_detail_mask(image: Image.Image, mask: Image.Image, cleanu
     return detail
 
 
-def _simplify_existing_line_art_detail_mask(detail: Image.Image, mask: Image.Image, level: str) -> Image.Image:
+def _simplify_existing_line_art_detail_mask(
+    detail: Image.Image,
+    mask: Image.Image,
+    level: str,
+    protected_closed_regions: Image.Image | None = None,
+) -> Image.Image:
     ink = (np.asarray(detail.convert("L")) > 127).astype(np.uint8) * 255
     if not np.any(ink):
         return Image.new("L", detail.size, 0)
@@ -1132,6 +1197,11 @@ def _simplify_existing_line_art_detail_mask(detail: Image.Image, mask: Image.Ima
     scale = max(1.0, min(subject_width, subject_height) / 220)
     upper_limit = subject_y + subject_height * 0.42
     protected_head_features = _protected_head_feature_skeleton(ink, subject_box, upper_limit)
+    protected_lower_features = (
+        _protected_lower_transfer_feature_skeleton(ink, subject_box)
+        if level == "balanced"
+        else np.zeros_like(ink)
+    )
     if level == "simple":
         body_min_length = round(40 * scale)
         head_min_length = round(8 * scale)
@@ -1155,10 +1225,176 @@ def _simplify_existing_line_art_detail_mask(detail: Image.Image, mask: Image.Ima
             retained[labels == label] = 255
 
     retained = cv2.bitwise_or(retained, protected_head_features)
+    retained = cv2.bitwise_or(retained, protected_lower_features)
     retained = cv2.bitwise_or(retained, protected_region_boundaries)
+    if protected_closed_regions is not None:
+        closed_regions = np.asarray(
+            protected_closed_regions.resize(detail.size, Image.Resampling.NEAREST).convert("L"),
+            dtype=np.uint8,
+        )
+        closed_region_ink = np.where(closed_regions > 127, 255, 0).astype(np.uint8)
+        replacement_area = np.zeros_like(closed_region_ink)
+        replacement_contours, _hierarchy = cv2.findContours(
+            closed_region_ink,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        cv2.drawContours(replacement_area, replacement_contours, -1, 255, cv2.FILLED)
+        replacement_area = cv2.dilate(
+            replacement_area,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+            iterations=1,
+        )
+        retained = np.where(replacement_area > 0, 0, retained).astype(np.uint8)
+        retained = cv2.bitwise_or(retained, closed_region_ink)
     if level == "balanced":
         retained = cv2.dilate(retained, np.ones((3, 3), dtype=np.uint8), iterations=1)
+        retained = np.asarray(_remove_small_components(Image.fromarray(retained, mode="L"), 50), dtype=np.uint8)
     return Image.fromarray(retained, mode="L")
+
+
+def _source_supported_closed_paint_region_boundaries(
+    image: Image.Image,
+    mask: Image.Image,
+    authored_ink: Image.Image,
+) -> Image.Image:
+    work_image, work_mask, original_size = _detail_work_image(image, mask)
+    ink = np.asarray(
+        authored_ink.resize(work_image.size, Image.Resampling.NEAREST).convert("L"),
+        dtype=np.uint8,
+    )
+    subject = np.asarray(work_mask.convert("L")) > 0
+    subject_area = max(1, int(np.count_nonzero(subject)))
+    flattened = _flatten_detail_work_image(work_image, 88, "clean")
+    color_labels = _cluster_subject_colors(np.asarray(flattened.convert("RGB"), dtype=np.uint8), subject, 6)
+    proximity_radius = max(2, round(min(work_image.size) * 0.01))
+    near_authored_ink = cv2.dilate(
+        np.where(ink > 127, 255, 0).astype(np.uint8),
+        cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (proximity_radius * 2 + 1, proximity_radius * 2 + 1),
+        ),
+    )
+    minimum_area = max(20, round(subject_area * 0.0008))
+    maximum_area = round(subject_area * 0.04)
+    candidates_by_color: list[list[tuple[int, np.ndarray, np.ndarray, float]]] = []
+
+    for color_label in range(6):
+        count, component_labels, stats, centroids = cv2.connectedComponentsWithStats(
+            ((color_labels == color_label) & subject).astype(np.uint8),
+            connectivity=4,
+        )
+        candidates: list[tuple[int, np.ndarray, np.ndarray, float]] = []
+        for component_label in range(1, count):
+            area = int(stats[component_label, cv2.CC_STAT_AREA])
+            if area < minimum_area or area > maximum_area:
+                continue
+            component = np.where(component_labels == component_label, 255, 0).astype(np.uint8)
+            adjacent = cv2.dilate(component, np.ones((3, 3), dtype=np.uint8), iterations=1)
+            if np.any(adjacent[~subject]):
+                continue
+            contours, _hierarchy = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            if not contours:
+                continue
+            contour = max(contours, key=cv2.contourArea)
+            hull_area = max(1.0, cv2.contourArea(cv2.convexHull(contour)))
+            solidity = area / hull_area
+            contour_mask = np.zeros_like(component)
+            cv2.drawContours(contour_mask, [contour], -1, 255, 1)
+            ink_overlap = np.count_nonzero((contour_mask > 0) & (near_authored_ink > 0))
+            overlap_ratio = ink_overlap / max(1, np.count_nonzero(contour_mask))
+            if solidity < 0.5 or overlap_ratio < 0.4 or overlap_ratio > 0.85:
+                continue
+            centroid = centroids[component_label]
+            if centroid[1] >= work_image.height * 0.6:
+                continue
+            candidates.append((area, centroid, component, overlap_ratio))
+        candidates_by_color.append(candidates)
+
+    boundaries = np.zeros_like(ink)
+    subject_x, _subject_y, subject_width, _subject_height = cv2.boundingRect(subject.astype(np.uint8))
+    subject_center_x = subject_x + subject_width / 2
+    used_components: set[tuple[int, int]] = set()
+    for color_label, candidates in enumerate(candidates_by_color):
+        for left_index, left in enumerate(candidates):
+            if (color_label, left_index) in used_components:
+                continue
+            for right_index in range(left_index + 1, len(candidates)):
+                if (color_label, right_index) in used_components:
+                    continue
+                right = candidates[right_index]
+                if max(left[0], right[0]) > subject_area * 0.01:
+                    continue
+                area_ratio = max(left[0], right[0]) / max(1, min(left[0], right[0]))
+                same_row = abs(left[1][1] - right[1][1]) <= work_image.height * 0.03
+                separated = abs(left[1][0] - right[1][0]) >= work_image.width * 0.08
+                pair_center = (left[1][0] + right[1][0]) / 2
+                straddles_center = min(left[1][0], right[1][0]) < subject_center_x < max(left[1][0], right[1][0])
+                mirror_offset = abs(
+                    (subject_center_x - min(left[1][0], right[1][0]))
+                    - (max(left[1][0], right[1][0]) - subject_center_x)
+                )
+                if (
+                    area_ratio > 1.5
+                    or not same_row
+                    or not separated
+                    or not straddles_center
+                    or abs(pair_center - subject_center_x) > subject_width * 0.08
+                    or mirror_offset > subject_width * 0.12
+                ):
+                    continue
+                for _area, _centroid, component, _overlap_ratio in (left, right):
+                    softened = cv2.GaussianBlur(component, (0, 0), sigmaX=1.2, sigmaY=1.2)
+                    normalized = np.where(softened > 127, 255, 0).astype(np.uint8)
+                    contours, _hierarchy = cv2.findContours(
+                        normalized,
+                        cv2.RETR_EXTERNAL,
+                        cv2.CHAIN_APPROX_NONE,
+                    )
+                    if not contours:
+                        continue
+                    contour = max(contours, key=cv2.contourArea)
+                    epsilon = max(1.2, cv2.arcLength(contour, True) * 0.006)
+                    simplified = cv2.approxPolyDP(contour, epsilon, True)
+                    cv2.drawContours(boundaries, [simplified], -1, 255, 1)
+                used_components.add((color_label, left_index))
+                used_components.add((color_label, right_index))
+                break
+
+    for color_label, candidates in enumerate(candidates_by_color):
+        for candidate_index, candidate in enumerate(candidates):
+            if (color_label, candidate_index) in used_components:
+                continue
+            area, centroid, component, _overlap_ratio = candidate
+            contours, _hierarchy = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            if not contours:
+                continue
+            contour = max(contours, key=cv2.contourArea)
+            hull_area = max(1.0, cv2.contourArea(cv2.convexHull(contour)))
+            solidity = area / hull_area
+            upper_singleton = centroid[1] < work_image.height * 0.3
+            lateral_singleton = abs(centroid[0] - subject_center_x) > subject_width * 0.2
+            practical_singleton = subject_area * 0.003 <= area <= subject_area * 0.01
+            if not upper_singleton or not lateral_singleton or not practical_singleton or solidity < 0.85:
+                continue
+            softened = cv2.GaussianBlur(component, (0, 0), sigmaX=1.2, sigmaY=1.2)
+            normalized = np.where(softened > 127, 255, 0).astype(np.uint8)
+            smoothed_contours, _hierarchy = cv2.findContours(
+                normalized,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_NONE,
+            )
+            if not smoothed_contours:
+                continue
+            smoothed = max(smoothed_contours, key=cv2.contourArea)
+            epsilon = max(1.2, cv2.arcLength(smoothed, True) * 0.006)
+            simplified = cv2.approxPolyDP(smoothed, epsilon, True)
+            cv2.drawContours(boundaries, [simplified], -1, 255, 1)
+
+    result = Image.fromarray(boundaries, mode="L")
+    if result.size != original_size:
+        result = result.resize(original_size, Image.Resampling.NEAREST)
+    return result
 
 
 def _major_paint_region_boundary_skeleton(
@@ -1193,6 +1429,7 @@ def _protected_head_feature_skeleton(
     subject_x, subject_y, subject_width, subject_height = subject_box
     labels, stats = _connected_components(ink > 0)
     protected = np.zeros_like(ink)
+    spur_length = max(3, round(4 * max(1.0, min(subject_width, subject_height) / 220)))
     for label in range(1, len(stats)):
         left = stats[label, cv2.CC_STAT_LEFT]
         top = stats[label, cv2.CC_STAT_TOP]
@@ -1207,11 +1444,35 @@ def _protected_head_feature_skeleton(
             continue
         component = np.where(labels == label, 255, 0).astype(np.uint8)
         feature = _morphological_skeleton(component)
+        feature = _prune_short_skeleton_spurs(feature, spur_length, upper_limit)
         if cv2.countNonZero(feature) < 6:
-            center_x = left + width // 2
-            center_y = top + height // 2
-            cv2.circle(feature, (center_x, center_y), 3, 255, -1)
+            continue
         protected = cv2.bitwise_or(protected, feature)
+    return protected
+
+
+def _protected_lower_transfer_feature_skeleton(
+    ink: np.ndarray,
+    subject_box: tuple[int, int, int, int],
+) -> np.ndarray:
+    subject_x, subject_y, subject_width, subject_height = subject_box
+    labels, stats = _connected_components(ink > 0)
+    protected = np.zeros_like(ink)
+    lower_feature_top = subject_y + subject_height * 0.86
+    for label in range(1, len(stats)):
+        left = stats[label, cv2.CC_STAT_LEFT]
+        top = stats[label, cv2.CC_STAT_TOP]
+        width = stats[label, cv2.CC_STAT_WIDTH]
+        height = stats[label, cv2.CC_STAT_HEIGHT]
+        area = stats[label, cv2.CC_STAT_AREA]
+        if top + height / 2 < lower_feature_top or area < 8:
+            continue
+        if width > subject_width * 0.2 or height > subject_height * 0.1:
+            continue
+        if left < subject_x - 1 or left + width > subject_x + subject_width + 1:
+            continue
+        component = np.where(labels == label, 255, 0).astype(np.uint8)
+        protected = cv2.bitwise_or(protected, _morphological_skeleton(component))
     return protected
 
 
@@ -1446,7 +1707,19 @@ def _looks_like_flat_line_art(image: Image.Image, mask: Image.Image) -> bool:
         and 0.06 <= metrics["darkInkCoverage"] <= 0.28
         and metrics["darkCoreRatio"] <= 0.45
         and metrics["populatedColorBins"] <= 32
-        and metrics["gradientDensity"] <= 0.04
+        and (
+            metrics["gradientDensity"] <= 0.04
+            or _marker_texture_with_thin_ink(metrics)
+        )
+    )
+
+
+def _marker_texture_with_thin_ink(metrics: Mapping[str, float]) -> bool:
+    return (
+        metrics["backgroundWhiteCoverage"] >= 0.95
+        and 0.10 <= metrics["darkInkCoverage"] <= 0.22
+        and metrics["darkCoreRatio"] <= 0.05
+        and metrics["populatedColorBins"] <= 32
     )
 
 
@@ -1711,16 +1984,23 @@ def _draw_tile_pages(
     header_pt = TILE_HEADER_IN * 72
     tile_w_in = LETTER_WIDTH_IN - 2 * PDF_MARGIN_IN
     tile_h_in = LETTER_HEIGHT_IN - 2 * PDF_MARGIN_IN - TILE_HEADER_IN
-    step_w_in = tile_w_in - OVERLAP_IN
-    step_h_in = tile_h_in - OVERLAP_IN
+    automatic_cols, automatic_rows = tile_grid(width_in, height_in)
+    distributed_w_in = (width_in + (tile_cols - 1) * OVERLAP_IN) / tile_cols
+    distributed_h_in = (height_in + (tile_rows - 1) * OVERLAP_IN) / tile_rows
+    crop_tile_w_in = min(tile_w_in, distributed_w_in) if tile_cols > automatic_cols else tile_w_in
+    crop_tile_h_in = min(tile_h_in, distributed_h_in) if tile_rows > automatic_rows else tile_h_in
+    step_w_in = crop_tile_w_in - OVERLAP_IN
+    step_h_in = crop_tile_h_in - OVERLAP_IN
 
     for row in range(tile_rows):
         for col in range(tile_cols):
             page_num = row * tile_cols + col + 1
             crop_left_in = col * step_w_in
             crop_top_in = row * step_h_in
-            crop_w_in = min(tile_w_in, max(0.01, width_in - crop_left_in))
-            crop_h_in = min(tile_h_in, max(0.01, height_in - crop_top_in))
+            crop_w_in = min(crop_tile_w_in, max(0.01, width_in - crop_left_in))
+            crop_h_in = min(crop_tile_h_in, max(0.01, height_in - crop_top_in))
+            frame_w_in = crop_w_in if tile_cols > automatic_cols else tile_w_in
+            frame_h_in = crop_h_in if tile_rows > automatic_rows else tile_h_in
             crop_box = (
                 round(crop_left_in * PRINT_DPI),
                 round(crop_top_in * PRINT_DPI),
@@ -1753,21 +2033,34 @@ def _draw_tile_pages(
                 finished_height_in=height_in,
                 crop_left_in=crop_left_in,
                 crop_top_in=crop_top_in,
-                tile_w_in=tile_w_in,
-                tile_h_in=tile_h_in,
+                tile_w_in=frame_w_in,
+                tile_h_in=frame_h_in,
                 margin_pt=margin_pt,
                 content_top_pt=height_pt - margin_pt - header_pt,
             )
             pdf.setStrokeColor(colors.lightgrey)
-            pdf.rect(margin_pt, height_pt - margin_pt - header_pt - tile_h_in * 72, tile_w_in * 72, tile_h_in * 72, stroke=1, fill=0)
-            _draw_crop_marks(pdf, margin_pt, height_pt - margin_pt - header_pt, tile_w_in * 72, tile_h_in * 72)
+            pdf.rect(
+                margin_pt,
+                height_pt - margin_pt - header_pt - frame_h_in * 72,
+                frame_w_in * 72,
+                frame_h_in * 72,
+                stroke=1,
+                fill=0,
+            )
+            _draw_crop_marks(
+                pdf,
+                margin_pt,
+                height_pt - margin_pt - header_pt,
+                frame_w_in * 72,
+                frame_h_in * 72,
+            )
             pdf.setDash(3, 3)
             if col < tile_cols - 1:
-                x = margin_pt + (tile_w_in - OVERLAP_IN) * 72
-                pdf.line(x, height_pt - margin_pt - header_pt, x, height_pt - margin_pt - header_pt - tile_h_in * 72)
+                x = margin_pt + (crop_w_in - OVERLAP_IN) * 72
+                pdf.line(x, height_pt - margin_pt - header_pt, x, height_pt - margin_pt - header_pt - frame_h_in * 72)
             if row < tile_rows - 1:
-                y = height_pt - margin_pt - header_pt - (tile_h_in - OVERLAP_IN) * 72
-                pdf.line(margin_pt, y, margin_pt + tile_w_in * 72, y)
+                y = height_pt - margin_pt - header_pt - (crop_h_in - OVERLAP_IN) * 72
+                pdf.line(margin_pt, y, margin_pt + frame_w_in * 72, y)
             pdf.setDash()
             pdf.setStrokeColor(colors.black)
             pdf.showPage()
@@ -1945,7 +2238,7 @@ def _paint_guide_rows(
     entries_only: bool = False,
 ) -> list[dict[str, Any]]:
     if entries_only:
-        return [
+        rows = [
             {
                 "index": index,
                 "hex": entry.hex,
@@ -1958,6 +2251,7 @@ def _paint_guide_rows(
             }
             for index, entry in enumerate(paint_guide_entries, start=1)
         ]
+        return _collapse_paint_guide_rows_by_label(rows)
     edits_by_hex = {entry.hex.lower(): entry for entry in paint_guide_entries}
     used_edit_hexes: set[str] = set()
     rows: list[dict[str, Any]] = []
@@ -1994,6 +2288,30 @@ def _paint_guide_rows(
             "manual_override": edit.manual_override,
         })
     return rows
+
+
+def _collapse_paint_guide_rows_by_label(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    collapsed: list[dict[str, Any]] = []
+    by_label: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = " ".join(str(row["label"]).casefold().split())
+        existing = by_label.get(key)
+        if existing is None:
+            existing = dict(row)
+            by_label[key] = existing
+            collapsed.append(existing)
+            continue
+        existing["coverage"] = min(1.0, float(existing["coverage"]) + float(row["coverage"]))
+        existing["included"] = bool(existing["included"] or row["included"])
+        if not existing["note"] and row["note"]:
+            existing["note"] = row["note"]
+        if existing["selected_match"] is None and row["selected_match"] is not None:
+            existing["selected_match"] = row["selected_match"]
+        if not existing["manual_override"] and row["manual_override"]:
+            existing["manual_override"] = row["manual_override"]
+    for index, row in enumerate(collapsed, start=1):
+        row["index"] = index
+    return collapsed
 
 
 def _resolve_selected_paint(selected_match_id: str | None, matches: tuple[PaintMatch, ...]) -> PaintMatch | None:

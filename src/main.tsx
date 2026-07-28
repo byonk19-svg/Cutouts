@@ -168,7 +168,9 @@ const defaultSettings: Settings = {
   detailExtractionMode: "auto",
   paletteSize: 6,
   includeInstructionCoverPage: true,
-  includePaintGuidePage: true
+  includePaintGuidePage: true,
+  minimumTileCols: 0,
+  minimumTileRows: 0
 };
 
 function cutoutProjectFromPersistenceSnapshot(
@@ -786,7 +788,7 @@ function App() {
         projectName,
         analysis,
         manualStrokes,
-        acceptedDetailPngDataUrl: editedDetailDataUrl === null ? null : currentDetailDataUrl(),
+        acceptedDetailPngDataUrl: editedDetailDataUrl === null ? analysis.detailLinePngDataUrl : currentDetailDataUrl(),
         includeCutline: true,
         includeSuggestions: showSuggestions,
         includeWhiteBackground: true,
@@ -1919,11 +1921,11 @@ function App() {
             <section className="upload-step" aria-label="Upload step" ref={setupSectionRef}>
               <label className="upload-box">
                 <FileImage size={28} />
-                <span>{sourceCandidate?.file.name ?? image?.name ?? "Choose a complete PNG, JPG, or SVG"}</span>
+                <span>{sourceCandidate?.file.name ?? image?.name ?? "Choose a complete PNG, JPG, WebP, or SVG"}</span>
                 <input
                   aria-label="Source image"
                   type="file"
-                  accept="image/png,image/jpeg,image/svg+xml"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
                   onChange={(event) => {
                     const file = event.target.files?.[0] ?? null;
                     void handleImageUpload(file);
@@ -1942,6 +1944,21 @@ function App() {
                 value={settings.finishedHeightIn}
                 onChange={(value) => updateSetting("finishedHeightIn", value)}
               />
+              <label className="project-name-field">
+                <span>Trace page layout</span>
+                <select
+                  aria-label="Trace page layout"
+                  value={(settings.minimumTileCols ?? 0) >= 2 && (settings.minimumTileRows ?? 0) >= 4 ? "reference-2x4" : "automatic"}
+                  onChange={(event) => updateProjectSettings({
+                    ...settings,
+                    minimumTileCols: event.target.value === "reference-2x4" ? 2 : 0,
+                    minimumTileRows: event.target.value === "reference-2x4" ? 4 : 0
+                  })}
+                >
+                  <option value="automatic">Automatic - fewest pages</option>
+                  <option value="reference-2x4">Reference style - 2 columns x 4 rows</option>
+                </select>
+              </label>
               <label className="project-name-field">
                 <span>Project name <small>optional</small></span>
                 <input

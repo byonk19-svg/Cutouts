@@ -1015,13 +1015,16 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
           finishedHeightIn: action.finishedHeightIn
         },
         analysis: session.project.analysis
-          ? resizeAnalysisForFinishedHeight(session.project.analysis, action.finishedHeightIn)
+          ? resizeAnalysisForFinishedHeight(
+              session.project.analysis,
+              action.finishedHeightIn,
+              session.project.settings.minimumTileCols ?? 0,
+              session.project.settings.minimumTileRows ?? 0
+            )
           : null
         } as TProject
       : {
-          ...session.project,
-          settings: nonSizeSettings(session.project.settings, action.settings),
-          traceMode: action.settings.templateStyle
+          ...projectWithNonSizeSettings(session.project, action.settings)
         } as TProject;
   return applyProjectTransition(session, project, {
     proposalChange: action.type === "change-finished-size" ? "invalidate" : "preserve"
@@ -1530,6 +1533,28 @@ function nonSizeSettings(current: Settings, next: Settings): Settings {
     ...next,
     finishedHeightIn: current.finishedHeightIn,
     includePaintGuidePage: current.includePaintGuidePage
+  };
+}
+
+function projectWithNonSizeSettings<TProject extends ProjectSessionProject>(
+  project: TProject,
+  next: Settings
+): TProject {
+  const settings = nonSizeSettings(project.settings, next);
+  const layoutChanged = (settings.minimumTileCols ?? 0) !== (project.settings.minimumTileCols ?? 0)
+    || (settings.minimumTileRows ?? 0) !== (project.settings.minimumTileRows ?? 0);
+  return {
+    ...project,
+    settings,
+    traceMode: settings.templateStyle,
+    analysis: project.analysis && layoutChanged
+      ? resizeAnalysisForFinishedHeight(
+          project.analysis,
+          project.analysis.finishedHeightIn,
+          settings.minimumTileCols ?? 0,
+          settings.minimumTileRows ?? 0
+        )
+      : project.analysis
   };
 }
 

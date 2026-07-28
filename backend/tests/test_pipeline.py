@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 import fitz
 import numpy as np
-from PIL import Image, ImageChops, ImageDraw
+import cv2
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 from pypdf import PdfReader
 
 import backend.cutout_studio.pipeline as pipeline
@@ -20,6 +21,8 @@ from backend.cutout_studio.pipeline import (
     analyze_template,
     build_template_pdf,
     CALIBRATION_SQUARE_PT,
+    OVERLAP_IN,
+    PRINT_DPI,
     extract_palette,
     load_paint_catalog,
     match_paint_hex,
@@ -39,6 +42,7 @@ from backend.cutout_studio.debug_trace_layers import export_trace_debug_layers
 
 
 CORALINE_FIXTURE_DIR = Path(__file__).with_name("fixtures") / "coraline"
+MAX_FIXTURE_DIR = Path(__file__).with_name("fixtures") / "max"
 
 
 def protected_pdf_geometry_digest(reader: PdfReader) -> str:
@@ -445,6 +449,15 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertEqual(TemplateSettings.from_mapping({"detailExtractionMode": "lineArt"}).detail_extraction_mode, "lineArt")
         self.assertEqual(TemplateSettings.from_mapping({"detailExtractionMode": "rendered"}).detail_extraction_mode, "rendered")
         self.assertEqual(TemplateSettings.from_mapping({"detailExtractionMode": "unknown"}).detail_extraction_mode, "auto")
+
+    def test_minimum_tile_grid_is_optional_and_bounded(self) -> None:
+        automatic = TemplateSettings.from_mapping({})
+        reference_layout = TemplateSettings.from_mapping({"minimumTileCols": 2, "minimumTileRows": 4})
+        bounded = TemplateSettings.from_mapping({"minimumTileCols": 99, "minimumTileRows": -4})
+
+        self.assertEqual((automatic.minimum_tile_cols, automatic.minimum_tile_rows), (0, 0))
+        self.assertEqual((reference_layout.minimum_tile_cols, reference_layout.minimum_tile_rows), (2, 4))
+        self.assertEqual((bounded.minimum_tile_cols, bounded.minimum_tile_rows), (8, 0))
 
     def test_analysis_reports_automatic_existing_line_art_detection(self) -> None:
         image, _ = flat_outlined_cartoon_fixture()
@@ -1359,6 +1372,258 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreater(self._count_mask_pixels(detail.getchannel("A")), 4_500)
         self.assertLess(self._count_mask_pixels(detail.getchannel("A")), 6_500)
 
+    def test_max_source_has_one_outer_cutline_without_duplicate_exterior_detail(self) -> None:
+        source_bytes = (MAX_FIXTURE_DIR / "Max-from-the-Grinch-movie.webp").read_bytes()
+
+        analysis = analyze_template(
+            source_bytes,
+            TemplateSettings(
+                finished_height_in=24,
+                smoothing=4,
+                minimum_tile_cols=2,
+                minimum_tile_rows=4,
+            ),
+        )
+
+        self.assertEqual((analysis.source_width_px, analysis.source_height_px), (700, 1500))
+        self.assertNotEqual(analysis.subject_bounds_px, (0, 0, 700, 1500))
+        self.assertGreater(analysis.subject_bounds_px[0], 0)
+        self.assertLess(analysis.subject_bounds_px[2], analysis.source_width_px)
+        self.assertLess(analysis.subject_bounds_px[3], analysis.source_height_px)
+        self.assertEqual(analysis.finished_height_in, 24)
+        self.assertEqual((analysis.tile_cols, analysis.tile_rows), (2, 4))
+        self.assertTrue(analysis.outer_cut_path.strip())
+        self.assertEqual(analysis.trace_quality["detailExtractionModeUsed"], "lineArt")
+
+        outer_alpha = Image.open(io.BytesIO(analysis.outer_line_png)).convert("RGBA").getchannel("A")
+        detail_alpha = Image.open(io.BytesIO(analysis.detail_line_png)).convert("RGBA").getchannel("A")
+        exterior_band = outer_alpha.filter(ImageFilter.MaxFilter(15))
+        detail_arr = np.asarray(detail_alpha) > 0
+        exterior_arr = np.asarray(exterior_band) > 0
+        component_count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+            detail_arr.astype(np.uint8),
+            connectivity=8,
+        )
+        outer_pixel_count = max(1, int(np.count_nonzero(np.asarray(outer_alpha) > 0)))
+        largest_exterior_tracking_ratio = max(
+            (
+                np.count_nonzero((labels == label) & exterior_arr) / outer_pixel_count
+                for label in range(1, component_count)
+            ),
+            default=0,
+        )
+
+        self.assertLess(largest_exterior_tracking_ratio, 0.12)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (65, 10, 335, 290)), 850)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (35, 350, 145, 500)), 1_400)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (270, 350, 375, 500)), 1_400)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (150, 360, 265, 440)), 850)
+        face_boundary = (np.asarray(detail_alpha)[430:520, 120:300] > 0).astype(np.uint8)
+        _count, _labels, face_stats, _centroids = cv2.connectedComponentsWithStats(face_boundary, connectivity=8)
+        self.assertGreater(face_stats[1:, cv2.CC_STAT_AREA].max(), 450)
+        pupil_region = (np.asarray(detail_alpha)[350:450, 160:250] > 0).astype(np.uint8)
+        _count, _labels, pupil_stats, _centroids = cv2.connectedComponentsWithStats(pupil_region, connectivity=8)
+        self.assertTrue(all(area >= 50 for area in pupil_stats[1:, cv2.CC_STAT_AREA]))
+        combined_lines = np.maximum(np.asarray(outer_alpha), np.asarray(detail_alpha))
+        open_regions = (combined_lines < 128).astype(np.uint8)
+        region_count, _region_labels, region_stats, region_centroids = cv2.connectedComponentsWithStats(
+            open_regions,
+            connectivity=4,
+        )
+        eye_regions = [
+            label
+            for label in range(1, region_count)
+            if 120 <= region_centroids[label][0] <= 285
+            and 340 <= region_centroids[label][1] <= 450
+            and 50 <= region_stats[label, cv2.CC_STAT_AREA] <= 8_000
+            and region_stats[label, cv2.CC_STAT_LEFT] > 0
+            and region_stats[label, cv2.CC_STAT_TOP] > 0
+            and region_stats[label, cv2.CC_STAT_LEFT] + region_stats[label, cv2.CC_STAT_WIDTH] < combined_lines.shape[1]
+            and region_stats[label, cv2.CC_STAT_TOP] + region_stats[label, cv2.CC_STAT_HEIGHT] < combined_lines.shape[0]
+        ]
+        self.assertEqual(len(eye_regions), 4)
+        left_pupils = [
+            label
+            for label in eye_regions
+            if 160 <= region_centroids[label][0] <= 190
+            and 375 <= region_centroids[label][1] <= 425
+            and 250 <= region_stats[label, cv2.CC_STAT_AREA] <= 800
+        ]
+        right_pupils = [
+            label
+            for label in eye_regions
+            if 220 <= region_centroids[label][0] <= 250
+            and 375 <= region_centroids[label][1] <= 425
+            and 250 <= region_stats[label, cv2.CC_STAT_AREA] <= 800
+        ]
+        self.assertEqual(len(left_pupils), 1)
+        self.assertEqual(len(right_pupils), 1)
+        self.assertNotEqual(left_pupils[0], right_pupils[0])
+        left_eye_whites = [
+            label
+            for label in eye_regions
+            if 140 <= region_centroids[label][0] <= 175
+            and 380 <= region_centroids[label][1] <= 425
+            and region_stats[label, cv2.CC_STAT_AREA] >= 1_000
+        ]
+        right_eye_whites = [
+            label
+            for label in eye_regions
+            if 235 <= region_centroids[label][0] <= 270
+            and 380 <= region_centroids[label][1] <= 425
+            and region_stats[label, cv2.CC_STAT_AREA] >= 1_000
+        ]
+        self.assertEqual(len(left_eye_whites), 1)
+        self.assertEqual(len(right_eye_whites), 1)
+        practical_regions = [
+            label
+            for label in range(1, region_count)
+            if 50 <= region_stats[label, cv2.CC_STAT_AREA] <= 8_000
+            and region_stats[label, cv2.CC_STAT_LEFT] > 0
+            and region_stats[label, cv2.CC_STAT_TOP] > 0
+            and region_stats[label, cv2.CC_STAT_LEFT] + region_stats[label, cv2.CC_STAT_WIDTH] < combined_lines.shape[1]
+            and region_stats[label, cv2.CC_STAT_TOP] + region_stats[label, cv2.CC_STAT_HEIGHT] < combined_lines.shape[0]
+        ]
+        upper_antler_regions = [
+            label for label in practical_regions if region_centroids[label][1] < 280
+        ]
+        antler_tip_regions = [
+            label
+            for label in upper_antler_regions
+            if 315 <= region_centroids[label][0] <= 340
+            and 190 <= region_centroids[label][1] <= 240
+            and 300 <= region_stats[label, cv2.CC_STAT_AREA] <= 800
+        ]
+        self.assertEqual(len(upper_antler_regions), 3)
+        self.assertEqual(len(antler_tip_regions), 1)
+        self.assertFalse(
+            any(
+                100 <= region_centroids[label][0] <= 310
+                and 280 <= region_centroids[label][1] <= 345
+                for label in practical_regions
+            )
+        )
+        self.assertFalse(
+            any(
+                100 <= region_centroids[label][0] <= 310
+                and 450 <= region_centroids[label][1] <= 570
+                for label in practical_regions
+            )
+        )
+        self.assertFalse(
+            any(region_centroids[label][1] >= 880 for label in practical_regions)
+        )
+        self.assertGreater(self._count_region_pixels(detail_alpha, (45, 620, 130, 800)), 500)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (135, 690, 285, 940)), 2_000)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (0, 895, 125, 960)), 500)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (295, 895, 416, 960)), 500)
+
+    def test_closed_region_repair_preserves_complete_symmetric_source_art(self) -> None:
+        source = Image.new("RGBA", (400, 600), (255, 255, 255, 255))
+        mask = Image.new("L", source.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle((40, 20, 360, 580), radius=80, fill=255)
+        drawing = ImageDraw.Draw(source)
+        drawing.rounded_rectangle((40, 20, 360, 580), radius=80, fill="#d89445", outline="#202020", width=8)
+        for bounds in ((105, 170, 175, 250), (225, 170, 295, 250)):
+            drawing.ellipse(bounds, fill="#7b421f", outline="#202020", width=7)
+            drawing.line(
+                (
+                    (bounds[0] + bounds[2]) // 2,
+                    bounds[1] + 12,
+                    (bounds[0] + bounds[2]) // 2,
+                    bounds[3] - 12,
+                ),
+                fill="#202020",
+                width=5,
+            )
+        authored = pipeline._existing_line_art_detail_mask(source, mask, 40, False)
+
+        repaired = pipeline._source_supported_closed_paint_region_boundaries(source, mask, authored)
+
+        self.assertEqual(np.count_nonzero(np.asarray(repaired)), 0)
+
+    def test_max_packet_is_letter_sized_semantic_and_tile_continuous(self) -> None:
+        source_bytes = (MAX_FIXTURE_DIR / "Max-from-the-Grinch-movie.webp").read_bytes()
+        settings = TemplateSettings(
+            finished_height_in=24,
+            smoothing=4,
+            minimum_tile_cols=2,
+            minimum_tile_rows=4,
+            project_name="Max 24-inch Template",
+            paint_guide_entries_only=True,
+            paint_guide_entries=(
+                PaintGuideEntry("#cc843c", "Max fur", "Main body and face"),
+                PaintGuideEntry("#e49c54", "Max fur", "Main body and face"),
+                PaintGuideEntry(
+                    "#242424",
+                    "Black outlines and facial details",
+                    "Transferred marker lines",
+                    selected_match_id="apple-barrel-matte-black",
+                ),
+                PaintGuideEntry("#e49c3c", "Max fur", "Main body and face"),
+                PaintGuideEntry(
+                    "#b4b4b4",
+                    "Antler",
+                    "Antler and shaded antler areas",
+                    selected_match_id="folkart-outdoor-stone-gray",
+                ),
+                PaintGuideEntry("#cc9c3c", "Max fur", "Main body and face"),
+                PaintGuideEntry("#7b421f", "Ears and pupils", "Dark brown ear and eye areas"),
+                PaintGuideEntry("#ffffff", "Eyes", "Eye whites"),
+            ),
+        )
+
+        pdf_bytes = build_template_pdf(source_bytes, settings)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+
+        self.assertEqual(len(reader.pages), 10)
+        self.assertIn("Finished size: 10.36 in wide x 24.00 in tall", reader.pages[0].extract_text())
+        self.assertIn("Trace pages: 2 columns x 4 rows (8 pages)", reader.pages[0].extract_text())
+        paint_guide_text = reader.pages[1].extract_text()
+        for label in (
+            "Max fur",
+            "Black outlines and facial details",
+            "Antler",
+            "Ears and pupils",
+            "Eyes",
+        ):
+            self.assertIn(label, paint_guide_text)
+        self.assertEqual(paint_guide_text.count("1. Max fur"), 1)
+        self.assertNotIn("2. Max fur", paint_guide_text)
+        self.assertNotIn("4. Max fur", paint_guide_text)
+        self.assertNotIn("6. Max fur", paint_guide_text)
+        self.assertNotIn("Max fur highlights", paint_guide_text)
+        self.assertIn("FolkArt Outdoor Stone Gray", paint_guide_text)
+        self.assertNotRegex(paint_guide_text, r"\bColor \d+\b")
+
+        trace_images = []
+        for page_number, page in enumerate(reader.pages[2:], start=1):
+            self.assertEqual([float(value) for value in page.mediabox], [0.0, 0.0, 612.0, 792.0])
+            self.assertIn(f"Page {page_number} of 8", page.extract_text())
+            self.assertEqual(len(page.images), 1)
+            trace_image = page.images[0].image.convert("RGB")
+            self.assertTrue(all(red == green == blue for red, green, blue in trace_image.get_flattened_data()))
+            trace_images.append(trace_image)
+
+        overlap_px = round(OVERLAP_IN * PRINT_DPI)
+        for row in range(4):
+            left = trace_images[row * 2]
+            right = trace_images[row * 2 + 1]
+            common_height = min(left.height, right.height)
+            self.assertEqual(
+                left.crop((left.width - overlap_px, 0, left.width, common_height)).tobytes(),
+                right.crop((0, 0, overlap_px, common_height)).tobytes(),
+            )
+        for row in range(3):
+            for col in range(2):
+                upper = trace_images[row * 2 + col]
+                lower = trace_images[(row + 1) * 2 + col]
+                common_width = min(upper.width, lower.width)
+                self.assertEqual(
+                    upper.crop((0, upper.height - overlap_px, common_width, upper.height)).tobytes(),
+                    lower.crop((0, 0, common_width, overlap_px)).tobytes(),
+                )
+
     def test_printable_line_art_is_black_and_white_only(self) -> None:
         image, mask = broad_color_detail_fixture()
 
@@ -1397,6 +1662,52 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertGreaterEqual(len(accepted_detail_reader.pages), 3)
         self.assertEqual(baseline_dark_pixels, 0)
         self.assertGreater(accepted_detail_dark_pixels, 1_000)
+
+    def test_pdf_smooths_low_resolution_accepted_detail_for_full_size_printing(self) -> None:
+        settings = TemplateSettings(finished_height_in=18, threshold=40, palette_size=3, detail_lines=False)
+        edited = Image.new("RGBA", (120, 160), (255, 255, 255, 0))
+        ImageDraw.Draw(edited).line((20, 70, 100, 90), fill=(0, 0, 0, 255), width=6)
+        out = io.BytesIO()
+        edited.save(out, format="PNG")
+
+        baseline_reader = PdfReader(io.BytesIO(build_template_pdf(transparent_fixture(), settings)))
+        accepted_reader = PdfReader(
+            io.BytesIO(build_template_pdf(transparent_fixture(), settings, edited_detail_png=out.getvalue()))
+        )
+        first_tile_page = int(settings.include_instruction_cover_page) + int(settings.include_paint_guide_page)
+        baseline = np.asarray(baseline_reader.pages[first_tile_page].images[0].image.convert("L"), dtype=np.int16)
+        accepted = np.asarray(accepted_reader.pages[first_tile_page].images[0].image.convert("L"), dtype=np.int16)
+        added_ink = ((baseline - accepted) > 20).astype(np.uint8)
+        component_count, labels, stats, _centroids = cv2.connectedComponentsWithStats(added_ink, connectivity=8)
+        self.assertGreater(component_count, 1)
+        largest_label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        largest_component = (labels == largest_label).astype(np.uint8)
+        contours, _hierarchy = cv2.findContours(largest_component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        perimeter = sum(cv2.arcLength(contour, True) for contour in contours)
+
+        self.assertGreater(np.count_nonzero(largest_component), 70_000)
+        self.assertLess(perimeter, 2_150)
+
+    def test_max_pdf_refines_preview_sized_face_lines_without_hard_pixel_steps(self) -> None:
+        source_bytes = (MAX_FIXTURE_DIR / "Max-from-the-Grinch-movie.webp").read_bytes()
+        settings = TemplateSettings(
+            finished_height_in=24,
+            smoothing=4,
+            minimum_tile_cols=2,
+            minimum_tile_rows=4,
+        )
+        analysis = analyze_template(source_bytes, settings)
+
+        reader = PdfReader(
+            io.BytesIO(build_template_pdf(source_bytes, settings, edited_detail_png=analysis.detail_line_png))
+        )
+        face_tile = np.asarray(reader.pages[4].images[0].image.convert("L"), dtype=np.uint8)
+        face_region = face_tile[280:800, 400:1000]
+        printable_ink = face_region < 235
+        antialiased_edge = (face_region > 20) & printable_ink
+        antialiased_ratio = np.count_nonzero(antialiased_edge) / max(1, np.count_nonzero(printable_ink))
+
+        self.assertGreater(antialiased_ratio, 0.09)
 
     def test_pdf_combines_accepted_authored_detail_with_manual_feature_lines(self) -> None:
         base_settings = {

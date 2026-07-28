@@ -166,7 +166,8 @@ button {
   text-transform: uppercase;
 }
 
-.project-name-field input {
+.project-name-field input,
+.project-name-field select {
   width: 100%;
   min-width: 0;
   border: 1px solid #cbd8d2;

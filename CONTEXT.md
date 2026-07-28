@@ -83,6 +83,26 @@ A deliberate interior line that helps the maker transfer important character fea
 
 The primary Add Missing Line action creates a normal-width freehand Feature Line. Smoothing and thickness are optional modifiers exposed through More Tools rather than separate primary workflow modes.
 
+### Character Acceptance Profile
+
+A developer-owned, read-only validation contract for one clean Source Image that identifies the semantic relationships among silhouette features, Paint Regions, and Feature Lines that a maker-ready result must preserve. It separates automated acceptance from explicitly recorded human acceptance and is never an input to production generation or maker-authored Project Session or Project File data.
+
+### Acceptance Fixture
+
+A committable clean Source Image paired with its Character Acceptance Profile for permanent automated validation. A non-committable source may support local evaluation but is not an Acceptance Fixture and cannot independently justify permanent generation behavior.
+
+### Maker-Ready Baseline
+
+The universal acceptance requirements applied to every Acceptance Fixture, including one authoritative Cut Line, protected print geometry, clean black-and-white Trace Pages, accepted-layer export fidelity, and absence of source underlays or transient editor state. A Character Acceptance Profile may strengthen but never disable this baseline.
+
+### Character Acceptance Result
+
+The separate record of evaluating one Character Acceptance Profile against generated and accepted artifacts. It reports automated assertions as passed, failed, or errored and records human checks independently as pending, passed, or explicitly waived.
+
+### Maker Acceptance
+
+The maker's recorded approval after reviewing an actual-size printed Template Pack, including calibration, adjacent-page continuity, practical line weight, and representative Cut Line and Detail Line transfer. Automated acceptance may make an Acceptance Fixture ready for human review but cannot substitute for Maker Acceptance.
+
 ### Connected Line Segment
 
 The complete contiguous group of detail-line pixels affected by the Remove Line tool. Before deletion, the editor highlights the entire Connected Line Segment under the pointer so the maker can see the full removal scope. Removal is one click and remains reversible through Undo.

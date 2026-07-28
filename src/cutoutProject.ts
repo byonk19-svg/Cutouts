@@ -97,15 +97,17 @@ export type CutoutProjectSnapshotInput = Omit<CutoutProject, "schemaVersion" | "
 
 export function resizeAnalysisForFinishedHeight(
   analysis: CutoutProjectAnalysis,
-  finishedHeightIn: number
+  finishedHeightIn: number,
+  minimumTileCols = 0,
+  minimumTileRows = 0
 ): CutoutProjectAnalysis {
   const finishedWidthIn = Number((finishedHeightIn * (analysis.finishedWidthIn / analysis.finishedHeightIn)).toFixed(2));
   const tileWidthIn = 8.5 - (2 * 0.35);
   const tileHeightIn = 11 - (2 * 0.35) - 0.42;
   const tileStepWidthIn = tileWidthIn - 0.25;
   const tileStepHeightIn = tileHeightIn - 0.25;
-  const tileCols = Math.max(1, Math.ceil(Math.max(0.01, finishedWidthIn - 0.25) / tileStepWidthIn));
-  const tileRows = Math.max(1, Math.ceil(Math.max(0.01, finishedHeightIn - 0.25) / tileStepHeightIn));
+  const tileCols = Math.max(1, minimumTileCols, Math.ceil(Math.max(0.01, finishedWidthIn - 0.25) / tileStepWidthIn));
+  const tileRows = Math.max(1, minimumTileRows, Math.ceil(Math.max(0.01, finishedHeightIn - 0.25) / tileStepHeightIn));
 
   return {
     ...analysis,
@@ -274,6 +276,12 @@ function assertSettings(value: unknown): asserts value is Settings {
   }
   if (typeof value.includePaintGuidePage !== "boolean") {
     value.includePaintGuidePage = true;
+  }
+  for (const key of ["minimumTileCols", "minimumTileRows"] as const) {
+    if (value[key] === undefined) value[key] = 0;
+    if (typeof value[key] !== "number" || !Number.isInteger(value[key]) || value[key] < 0 || value[key] > 8) {
+      throw new Error(`Project settings.${key} is invalid.`);
+    }
   }
   if (!("detailExtractionMode" in value)) value.detailExtractionMode = "auto";
   if (value.detailExtractionMode !== "auto" && value.detailExtractionMode !== "lineArt" && value.detailExtractionMode !== "rendered") {

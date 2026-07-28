@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "synthetic-character-line-art",
+  "label": "Synthetic symmetric line-art fixture",
+  "source": {
+    "path": "synthetic-character-source.png",
+    "filename": "synthetic-character-source.png",
+    "widthPx": 240,
+    "heightPx": 320,
+    "bytes": 2211,
+    "sha256": "D1413D9E3ABC3A63DC6292A080E760CB4D71F4C506C59D5607550C5880F08B87",
+    "committable": true
+  },
+  "requestedOutput": {
+    "finishedHeightIn": 18,
+    "minimumTileCols": 1,
+    "minimumTileRows": 1,
+    "templateStyle": "clean",
+    "colorGuide": "separate-page"
+  },
+  "features": [
+    {
+      "id": "left-eye",
+      "label": "Left eye closed region",
+      "kind": "paintRegion",
+      "locator": { "type": "rect", "x": 0.2300, "y": 0.2500, "width": 0.2200, "height": 0.1900 }
+    },
+    {
+      "id": "right-eye",
+      "label": "Right eye closed region",
+      "kind": "paintRegion",
+      "locator": { "type": "rect", "x": 0.5500, "y": 0.2500, "width": 0.2200, "height": 0.1900 }
+    },
+    {
+      "id": "smile",
+      "label": "Intentional smile line",
+      "kind": "featureLine",
+      "locator": { "type": "rect", "x": 0.3000, "y": 0.4700, "width": 0.4000, "height": 0.1700 }
+    },
+    {
+      "id": "lower-band",
+      "label": "Intentional lower interior line",
+      "kind": "featureLine",
+      "locator": { "type": "rect", "x": 0.2000, "y": 0.6600, "width": 0.6000, "height": 0.1200 }
+    },
+    {
+      "id": "upper-right-empty",
+      "label": "Upper-right empty region",
+      "kind": "forbiddenRegion",
+      "locator": { "type": "rect", "x": 0.7600, "y": 0.0600, "width": 0.1400, "height": 0.1400 }
+    }
+  ],
+  "assertions": [
+    {
+      "id": "generated-left-eye-stays-closed",
+      "label": "Generated left eye stays closed",
+      "type": "enclosedRegionCount",
+      "artifact": "generatedDetail",
+      "featureId": "left-eye",
+      "minimumCount": 1,
+      "maximumCount": 1,
+      "minimumAreaPixels": 150,
+      "maximumAreaPixels": 3000
+    },
+    {
+      "id": "generated-right-eye-stays-closed",
+      "label": "Generated right eye stays closed",
+      "type": "enclosedRegionCount",
+      "artifact": "generatedDetail",
+      "featureId": "right-eye",
+      "minimumCount": 1,
+      "maximumCount": 1,
+      "minimumAreaPixels": 150,
+      "maximumAreaPixels": 3000
+    },
+    {
+      "id": "accepted-smile-stays-present",
+      "label": "Accepted smile line stays present",
+      "type": "minimumInk",
+      "artifact": "acceptedDetail",
+      "featureId": "smile",
+      "minimumDarkPixels": 180
+    },
+    {
+      "id": "accepted-lower-band-stays-present",
+      "label": "Accepted lower interior line stays present",
+      "type": "minimumInk",
+      "artifact": "acceptedDetail",
+      "featureId": "lower-band",
+      "minimumDarkPixels": 400
+    },
+    {
+      "id": "generated-upper-right-stays-empty",
+      "label": "Generated upper-right region stays empty",
+      "type": "maximumInk",
+      "artifact": "generatedDetail",
+      "featureId": "upper-right-empty",
+      "maximumDarkPixels": 0
+    }
+  ],
+  "workflowBudgets": {
+    "maxProviderRequests": 0,
+    "maxCleanupActions": 2,
+    "requiredCompletedSteps": ["Upload", "Clean Lines", "Colors", "Export"]
+  },
+  "humanChecklist": [
+    "Print at 100% or Actual Size with printer scaling disabled.",
+    "Confirm the symmetric closed regions remain practical to transfer."
+  ]
+}

@@ -32,7 +32,9 @@ const settings: Settings = {
   detailExtractionMode: "lineArt",
   paletteSize: 6,
   includeInstructionCoverPage: true,
-  includePaintGuidePage: true
+  includePaintGuidePage: true,
+  minimumTileCols: 2,
+  minimumTileRows: 4
 };
 
 const analysis: CutoutProjectAnalysis = {
@@ -179,6 +181,8 @@ const analysis: CutoutProjectAnalysis = {
   assertEqual(restored.settings.includeInstructionCoverPage, true, "round trip should preserve instruction cover setting");
   assertEqual(restored.settings.includePaintGuidePage, true, "round trip should preserve paint guide setting");
   assertEqual(restored.settings.detailExtractionMode, "lineArt", "round trip should preserve the detail extraction override");
+  assertEqual(restored.settings.minimumTileCols, 2, "round trip should preserve the minimum tile columns");
+  assertEqual(restored.settings.minimumTileRows, 4, "round trip should preserve the minimum tile rows");
 }
 
 {
@@ -220,6 +224,8 @@ const analysis: CutoutProjectAnalysis = {
   delete (legacySettings as Partial<Settings>).includeInstructionCoverPage;
   delete (legacySettings as Partial<Settings>).includePaintGuidePage;
   delete (legacySettings as Partial<Settings>).detailExtractionMode;
+  delete (legacySettings as Partial<Settings>).minimumTileCols;
+  delete (legacySettings as Partial<Settings>).minimumTileRows;
   const restored = restoreCutoutProject({
     schemaVersion: CUTOUT_PROJECT_SCHEMA_VERSION,
     projectName: "Minimal",
@@ -245,6 +251,8 @@ const analysis: CutoutProjectAnalysis = {
   assertEqual(restored.settings.includeInstructionCoverPage, true, "legacy project import should default instruction cover on");
   assertEqual(restored.settings.includePaintGuidePage, true, "legacy project import should default paint guide on");
   assertEqual(restored.settings.detailExtractionMode, "auto", "legacy project import should default detail extraction to auto");
+  assertEqual(restored.settings.minimumTileCols, 0, "legacy project import should default minimum tile columns to automatic");
+  assertEqual(restored.settings.minimumTileRows, 0, "legacy project import should default minimum tile rows to automatic");
   assertEqual(restored.paintGuideEdits.length, 0, "legacy project import should default paint guide edits to empty");
   assertEqual(restored.projectPalette.length, 1, "legacy project import should seed project palette from detected colors");
   assertEqual(restored.editedDetailPngDataUrl, null, "legacy project import should default edited starter detail layer to null");
