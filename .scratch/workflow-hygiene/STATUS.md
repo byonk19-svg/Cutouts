@@ -1,25 +1,25 @@
 # Feature Status
 
-Updated: 2026-07-25
+Updated: 2026-07-28
 Feature: workflow-hygiene
-Phase: integration-ready
+Phase: closed
 
 ## Repository state
 
-Canonical worktree: C:\Users\byonk\.codex\worktrees\release-hygiene-integration\Cutouts
-Feature branch: codex/reconcile-release-hygiene
+Canonical worktree: none; the feature lane is merged
+Feature branch: merged from codex/reconcile-release-hygiene
 Base branch: main
 Base commit: c1144b656a2897a1444c82be3b4edb35a985431e
-Head commit: 441d50396c58a5aaca1dfc2b78ea02e81bee55b5
-Working tree: workflow-hygiene integration validated; this status update is the final follow-up
+Head commit: dcde25ae087decbd0da4752e05064d3eeb05b141
+Working tree: merged to origin/main through PR #6; no active workflow-hygiene implementation
 Known unrelated items: none
 
 ## Current work
 
-Current ticket: issues/03-authorized-worktree-cleanup.md
-Current owner: controller
-Completed tickets and commits: tickets 01, 02, and 03 complete; integration commits 7280331 and 441d503
-Blocked by: push and merge authorization
+Current ticket: none
+Current owner: none
+Completed tickets and commits: tickets 01, 02, and 03 complete; merged through PR #6
+Blocked by: none
 
 ## Safety and acceptance
 
@@ -31,13 +31,13 @@ Required evidence: command tests; evidence/verify-release-20260724-012243.md; WO
 
 ## Integration
 
-Pull request: none
-Push authorization: not granted
-Merge authorization: not granted
+Pull request: #6, merged
+Push authorization: consumed by the merged pull-request workflow
+Merge authorization: consumed; PR #6 merged to main
 Cleanup authorization: consumed and completed for the five exact Ticket 03 paths; no other cleanup authorized
 
 ## Next step
 
-Next action: review the committed reconciliation branch; push only when separately authorized
-Next owner: human
-Authorization required: push and merge remain separately unauthorized
+Next action: none for this closed feature; use docs/REAL_WORLD_FIELD_TEST.md for the active product-learning gate
+Next owner: maker
+Authorization required: any future cleanup, tag, release, or deployment remains separately authorized

@@ -73,6 +73,11 @@ The small set of representative colors extracted from a source image for paintin
 
 An optional interior line printed on the template to help trace paint boundaries or character details. Detail lines can be shown or hidden because too many extracted image edges can make a template harder to use.
 
+Accepted generated or imported Detail Lines are raster linework. In SVG export,
+they may be embedded as a PNG image, while the authoritative Cut Line and
+maker-drawn Feature Lines remain vector paths. The result is a correctly scaled
+hybrid print container, not a fully vectorized, all-path craft SVG.
+
 ### Clean Template Editor
 
 The manual cleanup step after automatic tracing. The editor locks the outer cut line and lets the maker erase or draw only the interior detail layer before exporting the tiled PDF. This exists because Etsy-style craft templates are cleaned-up line art, not raw automatic image traces.

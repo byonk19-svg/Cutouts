@@ -1,6 +1,10 @@
 # Cutout Studio Guided Workflow Redesign
 
-**Status:** ready-for-agent
+**Status:** needs-info
+
+The implementation is complete. The 10-source real-world field test is now the
+only active usability evaluation; no separate workflow expansion or acceptance
+lane resumes unless the field test identifies a repeated blocker.
 
 ## Problem Statement
 
@@ -98,7 +102,7 @@ Workflow Progress is saved with the project. Restored projects resume at their s
 - A pure workflow-state test seam verifies valid step derivation, locked-step navigation, milestone completion, line-edit invalidation, color skipping, color-review completion, Source Image replacement, and non-invalidating metadata/size changes.
 - Project round-trip tests verify active step and milestone persistence, autosave compatibility, invalid-step clamping, and legacy-project derivation.
 - Editor behavior tests verify Connected Line Segment hover preview, one-click removal, Undo, and line-edit milestone invalidation through observable behavior.
-- Existing backend, PDF geometry, SVG vector, trace pipeline, paint guide, viewport, TypeScript, and build suites remain regression gates.
+- Existing backend, PDF geometry, SVG geometry and layer, trace pipeline, paint guide, viewport, TypeScript, and build suites remain regression gates.
 - Coraline acceptance runs capture all four steps at 1440×900 and a common mobile viewport, and verify that the main workflow remains usable without More Tools.
 - Tests assert user-visible behavior and durable state contracts rather than component structure or private React state.
 

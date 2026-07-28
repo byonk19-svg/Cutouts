@@ -11,7 +11,9 @@ Use this checklist after `pnpm verify` and `pnpm test:e2e` pass. Automation prov
 - Save or export a `.cutout.json` project.
 - Reload or reopen the project and confirm manual strokes and paint edits return.
 - Review paint matches, set one manual override, mark one color as no match, and exclude one color from the shopping list.
-- Export SVG linework and confirm it contains clean black linework only.
+- Export SVG linework and confirm it contains clean black linework only. Confirm
+  the Cut Line and Feature Lines are vector paths; accepted Detail Lines may be
+  an embedded PNG image.
 - Export Template Packet PDF and confirm it opens as a PDF.
 
 ## Physical Print Check

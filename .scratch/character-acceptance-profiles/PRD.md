@@ -1,4 +1,7 @@
-Status: ready-for-agent
+Status: needs-info
+
+Parked until the 10-source real-world field test identifies a repeated blocker
+that requires more acceptance-framework work.
 
 # Character Acceptance Profiles
 

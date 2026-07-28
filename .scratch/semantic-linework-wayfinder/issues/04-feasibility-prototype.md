@@ -1,8 +1,11 @@
 # Prototype semantic boundary-selection feasibility
 
-**Status:** ready-for-agent
+**Status:** needs-info
 **Label:** wayfinder:prototype
 **Parent:** [Semantic boundary-selection wayfinder](../map.md)
+
+**Parked until:** The 10-source real-world field test identifies semantic
+boundary selection as the repeated blocker worth prototyping.
 
 ## Question
 

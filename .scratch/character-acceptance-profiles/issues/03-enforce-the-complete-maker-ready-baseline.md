@@ -4,7 +4,10 @@
 
 **Blocked by:** 02 — Complete the semantic assertion vocabulary.
 
-**Status:** ready-for-agent
+**Status:** needs-info
+
+**Parked until:** The 10-source real-world field test demonstrates a repeated
+baseline or export-protection gap not covered by current verification.
 
 - [ ] Every fixture automatically inherits the Maker-Ready Baseline and cannot disable or replace a baseline assertion.
 - [ ] Generated linework is evaluated separately from accepted Detail Lines so manual reconstruction cannot hide weak automatic output.

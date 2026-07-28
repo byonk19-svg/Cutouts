@@ -80,7 +80,8 @@ side-by-side reviews:
 
 1. source vs generated linework for semantic feature selection;
 2. generated linework vs original-off preview for layer/compositing fidelity;
-3. original-off preview vs SVG for editable vector fidelity;
+3. original-off preview vs SVG for hybrid export fidelity, including vector Cut
+   Line and Feature Lines plus any embedded raster Detail Lines;
 4. SVG vs rendered PDF pages for export, scale, alignment, and line-weight
    fidelity.
 

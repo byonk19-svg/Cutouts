@@ -4,7 +4,10 @@
 
 **Blocked by:** 03 — Enforce the complete Maker-Ready Baseline; 04 — Record cleanup effort and human acceptance honestly.
 
-**Status:** ready-for-agent
+**Status:** needs-info
+
+**Parked until:** The 10-source real-world field test is complete. Do not turn
+an ordinary field-test source into another Acceptance Fixture during the run.
 
 - [ ] The existing authored-line-art or Coraline workflow becomes a committable Acceptance Fixture with a strict Character Acceptance Profile.
 - [ ] Its profile is authored before any new pipeline tuning and records source identity, source-specific semantic expectations, requested output, workflow budgets, and human checks.
