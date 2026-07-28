@@ -1,7 +1,10 @@
 # Semantic boundary-selection wayfinder
 
-**Status:** ready-for-agent
+**Status:** needs-info
 **Label:** wayfinder:map
+
+**Parked until:** The 10-source real-world field test identifies semantic
+linework as a repeated blocker.
 
 ## Destination
 

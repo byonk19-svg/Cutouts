@@ -4,7 +4,10 @@
 
 **Blocked by:** 03 — Enforce the complete Maker-Ready Baseline.
 
-**Status:** ready-for-agent
+**Status:** needs-info
+
+**Parked until:** The 10-source field-test worksheet has real cleanup and
+physical-check observations that justify further acceptance-result tooling.
 
 - [ ] The profile declares machine-observable workflow budgets for provider requests, Connected Line Segment deletions, Feature Line additions, and major redraw requirements.
 - [ ] The automated result records observed workflow counts and fails exceeded required budgets.

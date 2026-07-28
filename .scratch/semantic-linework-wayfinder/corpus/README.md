@@ -44,7 +44,8 @@ Reviewers use [acceptance-comparisons.md](acceptance-comparisons.md) and compare
 
 1. source beside generated linework to judge semantic selection;
 2. generated linework beside original-off preview to catch compositing errors;
-3. original-off preview beside SVG to confirm editable vector fidelity;
+3. original-off preview beside SVG to confirm hybrid export fidelity, including
+   vector Cut Line and Feature Lines plus any embedded raster Detail Lines;
 4. SVG beside rendered PDF pages to catch print/export loss, scaling, or line
    weight changes.
 

@@ -1,13 +1,14 @@
 # Cutout Studio Forward Plan
 
 **Generated:** 2026-07-21
-**Current objective:** Close the physically accepted Maker-Ready work as the
-verified v0.1 baseline without expanding into layered, stencil, laser, or CNC
-work.
-**Current gate:** Complete. The real-color Coraline acceptance is recorded in
-[issue 09](../../../.scratch/cutout-template-generator/issues/09-maker-ready-jigsaw-template.md),
-and the accepted Grinch authored-SVG packet supplies a second character run.
-Release mechanics remain a separate, explicitly authorized decision.
+**Current objective:** Measure how reliably the verified v0.1 baseline handles
+10 previously unseen character sources without expanding the product between
+the first five runs.
+**Current gate:** Run and record the
+[real-world field test](../../REAL_WORLD_FIELD_TEST.md). The accepted Coraline
+and Grinch results prove the workflow can produce useful artifacts, but they do
+not establish reliability across unfamiliar sources. Release mechanics remain a
+separate, explicitly authorized decision.
 
 ## Why this plan exists
 
@@ -30,14 +31,15 @@ reproduced defect:
 - Project Session-owned durable lifecycle and stale-result protection;
 - reliable authored SVG line-art handling.
 
-Merged evidence is PRs #1 through #5. At plan creation, `origin/main` was
-`c1144b6`.
+Merged evidence is PRs #1 through #7. At this reconciliation, `origin/main` is
+`dcde25a`.
 
 ## Operating rules
 
 1. Keep exactly one active product lane.
-2. Do not start new research, dependencies, AI, geometry, editor, or
-   architecture work until physical validation is recorded.
+2. Do not start new product, acceptance-framework, research, dependency, AI,
+   geometry, editor, architecture, or workflow work until the field test
+   identifies a repeated blocker.
 3. Start work from a clean worktree at current `origin/main`; preserve the dirty
    primary checkout.
 4. Turn each observed defect into one bounded issue with reproduction,
@@ -147,7 +149,7 @@ implementation commits are recorded in `docs/MVP_ACCEPTANCE_CHECKLIST.md`.
 Tagging, pushing, deployment, packaging, and branch/worktree cleanup remain
 unauthorized.
 
-## Parked until after v0.1
+## Parked until field-test evidence
 
 - laser/stencil bridge behavior;
 - layered cutouts, offsets, kerf, or Clipper integration;
@@ -157,6 +159,12 @@ unauthorized.
 - additional paid AI experiments;
 - speculative editor or architecture work;
 - installer or hosting work beyond the developer-run local app.
+- expanded Character Acceptance Profile vocabulary or a second real Acceptance
+  Fixture;
+- further semantic-linework feasibility work;
+- new validation or workflow-orchestration layers.
 
-The next plan must come from repeated real-workflow friction or an explicit new
-product goal, not another unbounded repository search.
+After all 10 runs, group failures and address only the most frequent or
+completely blocking failure. The next implementation plan must come from that
+repeated real-workflow friction or an explicit new product goal, not another
+unbounded repository search.

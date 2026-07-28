@@ -69,7 +69,9 @@ The migration is incremental. Existing project serialization, Guided Workflow, A
 45. As a maker, I want project restoration to reject unsupported schemas without changing my active project, so that incompatible files fail safely.
 46. As a maker, I want existing compatible Project Files to open without migration prompts, so that this architecture change does not invalidate saved work.
 47. As a maker, I want Cut Line geometry preserved across this change, so that physical cutting output remains identical.
-48. As a maker, I want SVG geometry preserved across this change, so that vector linework remains identical.
+48. As a maker, I want SVG geometry preserved across this change, so that the
+    vector Cut Line and Feature Lines remain identical and embedded raster
+    Detail Lines remain intact.
 49. As a maker, I want PDF dimensions, tiling, overlap, calibration, and assembly preserved, so that printed templates remain physically accurate.
 50. As a maker, I want existing provider disclosure, exact-cost confirmation, one-request behavior, and no automatic retry preserved, so that AI assistance remains bounded and explicit.
 51. As a maker, I want the existing Guided Workflow screens and controls to behave the same, so that an architecture improvement does not force me to relearn the app.

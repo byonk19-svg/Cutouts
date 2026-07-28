@@ -4,12 +4,13 @@ Cutout Studio is a local developer-run web app for making personal wood cutout t
 
 ## What V1 Does
 
-- Upload one PNG or JPG source image with a simple removable background.
+- Upload one PNG, JPEG, WebP, or SVG source image with a simple removable background.
 - Generate an adjustable outer cut line with deterministic cleanup settings.
 - Use Trace Studio to manually draw, select, edit, duplicate, smooth, and delete vector feature lines over a faint source-image underlay.
 - Save and reopen editable `.cutout.json` projects so template work can resume across sessions.
 - Set finished cutout height in inches while preserving aspect ratio.
-- Export a linework-only SVG for crisp vector transfer art.
+- Export a correctly scaled linework SVG with a vector Cut Line and vector
+  Feature Lines.
 - Export a US-letter PDF template packet with:
   - instruction cover page
   - page map and linework legend
@@ -21,6 +22,11 @@ Cutout Studio is a local developer-run web app for making personal wood cutout t
   - 1 inch calibration square on the cover page
 
 The exported trace pages are black-and-white only: a thick locked outer cut line plus thinner black interior detail lines. The source underlay, selection handles, editor dimming, and UI overlays are never intended to print. Paint colors stay in the separate paint guide instead of driving the printable tracing lines.
+
+The SVG export is hybrid rather than fully vectorized. The Cut Line and manually
+drawn Feature Lines are SVG paths, while accepted generated or imported Detail
+Lines may be embedded as a PNG image. This is intended for exact-size printing
+and transfer; it is not a promise of an all-path, node-editable craft SVG.
 
 ## Setup
 
@@ -86,13 +92,16 @@ See `docs/MVP_ACCEPTANCE_CHECKLIST.md` for the verified v0.1 software and physic
 The current forward plan lives at
 [docs/superpowers/plans/2026-07-21-cutout-studio-forward-plan.md](docs/superpowers/plans/2026-07-21-cutout-studio-forward-plan.md).
 
-The v0.1 maker-readiness gate is complete. The accepted real-color Coraline
-packet is recorded in
+The v0.1 maker-readiness gate is complete, but reliability across unfamiliar
+sources is not yet established. The active product-learning gate is the
+[10-source real-world field test](docs/REAL_WORLD_FIELD_TEST.md). The accepted
+real-color Coraline packet is recorded in
 [issue 09](.scratch/cutout-template-generator/issues/09-maker-ready-jigsaw-template.md),
 and the Grinch authored-SVG packet provides a second accepted character run.
 Release tagging, publishing, packaging, and branch cleanup remain separate
-decisions that require explicit authorization. New product work should begin
-only from an explicit goal informed by real maker-workflow friction.
+decisions that require explicit authorization. Product, acceptance-framework,
+AI, editor, geometry, and workflow expansion remain parked until the field test
+identifies a repeated blocker.
 
 ## Notes
 

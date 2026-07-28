@@ -4,7 +4,10 @@
 
 **Blocked by:** 01 — Run a Character Acceptance Profile end to end.
 
-**Status:** ready-for-agent
+**Status:** needs-info
+
+**Parked until:** The 10-source real-world field test identifies a repeated
+semantic acceptance gap that this ticket is needed to diagnose.
 
 - [ ] The declarative vocabulary supports silhouette containment, closed Paint Regions, nested regions, open Feature Lines, required Detail Lines, forbidden Detail Lines, and exterior-echo rejection.
 - [ ] Feature identifiers and labels remain fixture-local; no universal body-part ontology is introduced.
