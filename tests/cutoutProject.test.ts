@@ -5,7 +5,8 @@ import {
   projectFileName,
   resizeAnalysisForFinishedHeight,
   restoreCutoutProject,
-  serializeCutoutProject
+  serializeCutoutProject,
+  type CutoutProjectAnalysis
 } from "../src/cutoutProject.ts";
 import { createTraceStroke } from "../src/traceStrokes.ts";
 import { DEFAULT_TRACE_VIEWPORT } from "../src/traceViewport.ts";
@@ -36,7 +37,7 @@ const settings: Settings = {
   minimumTileRows: 4
 };
 
-const analysis = {
+const analysis: CutoutProjectAnalysis = {
   finishedWidthIn: 14.25,
   finishedHeightIn: 36,
   tileCols: 2,

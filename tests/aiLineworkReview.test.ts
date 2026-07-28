@@ -12,6 +12,12 @@ function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message);
 }
 
+function latest<T>(items: readonly T[]): T {
+  const item = items.at(-1);
+  if (item === undefined) throw new Error("expected at least one item");
+  return item;
+}
+
 {
   const history = ["older-detail"];
   const manualFeatureLines = [{ id: "feature-eye" }];
@@ -25,7 +31,7 @@ function assert(condition: unknown, message: string) {
 
   assertEqual(applied.acceptedDetailDataUrl, "accepted-ai", "accept should replace only the editable detail raster");
   assertEqual(applied.history.length, history.length + 1, "accept should add exactly one undo entry");
-  assertEqual(applied.history.at(-1), "accepted-before", "the one undo entry should restore the prior accepted detail raster");
+  assertEqual(latest(applied.history), "accepted-before", "the one undo entry should restore the prior accepted detail raster");
   assertEqual(history.length, 1, "accept should not mutate the existing history array");
   assertEqual(manualFeatureLines[0].id, "feature-eye", "manual Feature Lines should remain outside the replaced detail raster");
   assertEqual(paintWork[0].hex, "#112233", "paint work should remain outside the replaced detail raster");

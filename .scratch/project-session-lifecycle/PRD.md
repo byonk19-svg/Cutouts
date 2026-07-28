@@ -1,6 +1,6 @@
 # Project Session Lifecycle
 
-**Status:** ready-for-agent
+**Status:** complete
 
 ## Problem Statement
 
@@ -151,3 +151,7 @@ The migration is incremental. Existing project serialization, Guided Workflow, A
 - The implementation should favor deletion of duplicated caller policy over layering a new session module on top of unchanged direct setters.
 - Ticketing should use blocker-first tracer bullets. The first ticket must establish the Project Session test seam and migrate one complete lifecycle path; later tickets should migrate independent lifecycle clusters without creating parallel authority.
 - The final ticket must remove remaining direct durable setters, run full browser coverage, and prove that the saved-project schema and protected print artifacts remain unchanged.
+
+## Closeout
+
+Completed via PR #4 (`249b3bb`) with `pnpm verify` green and isolated Playwright `26/26` green.

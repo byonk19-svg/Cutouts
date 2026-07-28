@@ -11,3 +11,7 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 | `wontfix` | `wontfix` | Will not be actioned |
 
 When a skill mentions a role, use the corresponding label string from this table.
+
+## Lifecycle Status
+
+`complete` is the terminal lifecycle status for finished tracker items. It is not a sixth triage role and does not replace the five canonical labels above.

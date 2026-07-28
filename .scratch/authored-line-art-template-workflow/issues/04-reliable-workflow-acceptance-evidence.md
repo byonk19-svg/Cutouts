@@ -48,6 +48,13 @@ regress.
 - Standards and Spec re-reviews passed with no remaining findings. No provider
   request was made, no ticket 02 or 03 implementation was reopened, and no
   protected geometry code was modified.
-- Physical print acceptance passed on 2026-07-21. The maker printed the saved
-  PDF at 100% / Actual Size and confirmed the calibration, tiled Cut Line
-  continuity, and recognizable interior transfer details were acceptable.
+- Narrow physical artifact evidence passed on 2026-07-21 for this ticket only.
+  The maker printed the saved authored-line-art PDF at 100% / Actual Size and
+  found the calibration, tiled Cut Line continuity, and recognizable interior
+  transfer details acceptable.
+- This does not close the repository-wide physical MVP gate in
+  `.scratch/cutout-template-generator/issues/04-physical-mvp-validation.md`
+  because that broader checklist still needs the exact calibration measurement,
+  the full explicit two-page tape procedure, one outer plus one interior
+  transfer check, the line-weight assessment, and the paint-guide/shopping-list
+  review for the canonical Coraline Template Packet.

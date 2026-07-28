@@ -140,8 +140,9 @@ type PreparedSourceCandidate = {
   projectName: string;
   file: File;
   dataUrl: string;
-  sourceInkDataUrl: string | null;
+  authoredSvgMarkup: string | null;
   lineworkDetected: boolean;
+  inputReadinessOverride: ProjectSessionInputReadiness | null;
 };
 const AI_PROPOSAL_ESTIMATE_USD = 0.10;
 type ProjectStatus = "No saved project" | "Unsaved changes" | "Auto-saved" | "Saved" | "Restored auto-save" | "Project opened" | "Project export failed" | "Project import failed" | "Auto-save failed";
@@ -324,7 +325,7 @@ function App() {
   const [detailLineHistory, setDetailLineHistory] = useState<EditorTransactionHistory<string>>(
     createEditorTransactionHistory
   );
-  const [svgSourceInkDataUrl, setSvgSourceInkDataUrl] = useState<string | null>(null);
+  const [svgAuthoredMarkup, setSvgAuthoredMarkup] = useState<string | null>(null);
   const [svgImportedDetailDataUrl, setSvgImportedDetailDataUrl] = useState<string | null>(null);
   const [svgLineworkDetected, setSvgLineworkDetected] = useState(false);
   const [aiProposalReviewView, setAiProposalReviewView] = useState<AiProposalReviewView>("ai-lines-only");
@@ -575,7 +576,7 @@ function App() {
     const candidate = sourceCandidate;
     const targetImage = candidate?.file ?? image;
     if (!targetImage) return;
-    const targetSvgSourceInk = candidate ? candidate.sourceInkDataUrl : svgSourceInkDataUrl;
+    const targetSvgAuthoredMarkup = candidate ? candidate.authoredSvgMarkup : svgAuthoredMarkup;
     const mode = candidate ? "replace-source" as const : "regenerate-analysis" as const;
     const nextSettings = settingsOverride ?? (preset ? detailPresetSettings(preset, settings) : settings);
     const preservedManualStrokes = mode === "regenerate-analysis" && traceStudioOpen ? manualStrokes : [];
@@ -596,12 +597,14 @@ function App() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to analyze image.");
       const openEditor = opensEditorWithReference(nextSettings.templateStyle);
-      const importedSvgDetail = targetSvgSourceInk
+      const importedSvgDetail = targetSvgAuthoredMarkup
         ? await svgInkForPreview({
-            sourceInkDataUrl: targetSvgSourceInk,
+            authoredSvgMarkup: targetSvgAuthoredMarkup,
             subjectBoundsPx: body.subjectBoundsPx,
             previewWidthPx: body.previewWidthPx,
             previewHeightPx: body.previewHeightPx,
+            finishedWidthIn: body.finishedWidthIn,
+            finishedHeightIn: body.finishedHeightIn,
             outerLinePngDataUrl: body.outerLinePngDataUrl
           })
         : null;
@@ -622,7 +625,8 @@ function App() {
           : {}),
         settings: nextSettings,
         analysis: body,
-        inputReadiness: inputReadinessForAnalysis(body, targetSvgSourceInk !== null),
+        inputReadiness: candidate?.inputReadinessOverride
+          ?? inputReadinessForAnalysis(body, targetSvgAuthoredMarkup !== null),
         initialDetailPngDataUrl: importedSvgDetail,
         initialProjectPalette,
         openEditorAfterCompletion: openEditor,
@@ -640,7 +644,7 @@ function App() {
       if (candidate) {
         setImage(candidate.file);
         setSourceImageDataUrl(candidate.dataUrl);
-        setSvgSourceInkDataUrl(candidate.sourceInkDataUrl);
+        setSvgAuthoredMarkup(candidate.authoredSvgMarkup);
         setSvgLineworkDetected(candidate.lineworkDetected);
         setSourceCandidate((current) => current?.generation === candidate.generation ? null : current);
       }
@@ -825,8 +829,9 @@ function App() {
           projectName: cleanedProjectNameFromFileName(file.name),
           file: prepared.sourceFile,
           dataUrl: prepared.sourceDataUrl,
-          sourceInkDataUrl: prepared.sourceInkDataUrl,
-          lineworkDetected: prepared.sourceInkDataUrl !== null
+          authoredSvgMarkup: prepared.authoredSvgMarkup,
+          lineworkDetected: prepared.authoredSvgMarkup !== null,
+          inputReadinessOverride: prepared.readinessEvidence
         };
       } else {
         candidate = {
@@ -834,8 +839,9 @@ function App() {
           projectName: cleanedProjectNameFromFileName(file.name),
           file,
           dataUrl: await readFileAsDataUrl(file),
-          sourceInkDataUrl: null,
-          lineworkDetected: false
+          authoredSvgMarkup: null,
+          lineworkDetected: false,
+          inputReadinessOverride: null
         };
       }
       const completed = applyProjectSessionAction({ type: "complete-project-preparation", token });
@@ -895,7 +901,7 @@ function App() {
     setSourceCandidate(null);
     setSourceReadPending(false);
     setImage(null);
-    setSvgSourceInkDataUrl(null);
+    setSvgAuthoredMarkup(null);
     setSvgImportedDetailDataUrl(null);
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(null);
@@ -973,7 +979,7 @@ function App() {
     resetAiProposalPresentation();
     setColorDetailsOpen(false);
     setImage(restoredFile);
-    setSvgSourceInkDataUrl(null);
+    setSvgAuthoredMarkup(null);
     setSvgImportedDetailDataUrl(project.editedDetailPngDataUrl);
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(project.sourceImage.dataUrl);
@@ -1134,8 +1140,9 @@ function App() {
   function clearPaintHexDraft(id: string) {
     setPaintHexDrafts((current) => {
       if (!(id in current)) return current;
-      const { [id]: _removed, ...rest } = current;
-      return rest;
+      const next = { ...current };
+      delete next[id];
+      return next;
     });
   }
 
@@ -3482,10 +3489,6 @@ function traceActionLabel({ image, analysis, busy, traceMode }: { image: File | 
 
 function defaultEditorToolForTraceMode(mode: TraceMode): EditorTool {
   return mode === "manual" ? "draw" : "remove";
-}
-
-function canvasHasVisibleInk(canvas: HTMLCanvasElement) {
-  return canvasContentBounds(canvas) !== null;
 }
 
 function canvasContentBounds(canvas: HTMLCanvasElement): TraceBounds | null {

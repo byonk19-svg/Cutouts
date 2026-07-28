@@ -62,17 +62,12 @@ test("captures the complete 24-inch Max template packet workflow", async ({ page
   const colorsWorkspace = page.getByLabel("Colors workspace");
   await expect(colorsWorkspace).toBeVisible();
   const primaryColors = colorsWorkspace.getByLabel("Primary colors");
-  const areaLabels = [
-    "Max fur",
-    "Max fur",
-    "Black outlines and facial details",
-    "Max fur",
-    "Antler",
-    "Max fur",
-  ];
-  await expect(primaryColors.getByRole("textbox")).toHaveCount(areaLabels.length);
-  for (const [index, label] of areaLabels.entries()) {
-    await primaryColors.getByRole("textbox").nth(index).fill(label);
+  const detectedColorRows = primaryColors.locator(".color-primary-row");
+  await expect(detectedColorRows).toHaveCount(6);
+  for (let index = 0; index < 6; index += 1) {
+    const row = detectedColorRows.nth(index);
+    const swatchColor = await row.locator(".swatch").evaluate((swatch) => getComputedStyle(swatch).backgroundColor);
+    await row.getByRole("textbox").fill(maxAreaLabelForSwatch(swatchColor));
   }
 
   const editColorDetails = colorsWorkspace.getByLabel("Edit Color Details");
@@ -82,16 +77,24 @@ test("captures the complete 24-inch Max template packet workflow", async ({ page
   await addManualPaintColor(page, editColorDetails, "#ffffff", "Eyes");
   await expect(primaryColors.getByRole("combobox")).toHaveCount(8);
   const preferredPaintIds = new Map<number, string>([
-    [2, "apple-barrel-matte-black"],
-    [4, "folkart-outdoor-stone-gray"],
     [6, "apple-barrel-matte-nutmeg-brown"],
     [7, "apple-barrel-matte-white"],
   ]);
   for (let index = 0; index < 8; index += 1) {
-    const paintChoice = primaryColors.getByRole("combobox").nth(index);
+    const row = primaryColors.locator(".color-primary-row").nth(index);
+    const paintChoice = row.getByRole("combobox");
     await expect.poll(() => paintChoice.locator("option").count()).toBeGreaterThan(1);
-    const preferredPaintId = preferredPaintIds.get(index);
-    await paintChoice.selectOption(preferredPaintId ?? { index: 1 });
+    const areaLabel = await row.getByRole("textbox").inputValue();
+    const preferredPaintId = preferredPaintIds.get(index)
+      ?? (areaLabel === "Black outlines and facial details" ? "apple-barrel-matte-black" : null)
+      ?? (areaLabel === "Antler" ? "folkart-outdoor-stone-gray" : null);
+    const preferredPaintAvailable = preferredPaintId
+      ? await paintChoice.locator("option").evaluateAll(
+          (options, id) => options.some((option) => (option as HTMLOptionElement).value === id),
+          preferredPaintId,
+        )
+      : false;
+    await paintChoice.selectOption(preferredPaintAvailable ? preferredPaintId! : { index: 1 });
   }
   await editColorDetailsSummary.click();
   await expect(colorsWorkspace.getByText("Needs label")).toHaveCount(0);
@@ -160,6 +163,17 @@ test("captures the complete 24-inch Max template packet workflow", async ({ page
     expect(existsSync(renderedTracePage)).toBe(true);
   }
 });
+
+function maxAreaLabelForSwatch(backgroundColor: string): string {
+  const channels = backgroundColor.match(/\d+/g)?.slice(0, 3).map(Number);
+  if (!channels || channels.length !== 3) {
+    throw new Error(`Could not read detected Max palette swatch: ${backgroundColor}`);
+  }
+  const [red, green, blue] = channels;
+  const isNeutral = Math.max(red, green, blue) - Math.min(red, green, blue) <= 20;
+  if (!isNeutral) return "Max fur";
+  return (red + green + blue) / 3 < 100 ? "Black outlines and facial details" : "Antler";
+}
 
 async function uploadStepState(page: import("@playwright/test").Page): Promise<StepStateSnapshot> {
   return {

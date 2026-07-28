@@ -1,0 +1,56 @@
+{
+  "status": "maker-ready-accepted",
+  "accepted": true,
+  "physicalReview": {
+    "acceptedBy": "owner",
+    "acceptedAt": "2026-07-22T20:24:11.5704821-05:00",
+    "note": "Owner accepted the printed Grinch template packet."
+  },
+  "source": {
+    "filename": "grinch decorating.svg",
+    "sourceId": "grinch-decorating-svg-sha256-3f62dea2",
+    "tracked": false,
+    "disposition": "Local owner-supplied source; not tracked because redistribution rights are not recorded.",
+    "bytes": 408467,
+    "sha256": "3f62dea260f715d5a0e8cc9d609213c29297cb5778e3510e81845667a92d1f82",
+    "pathCount": 13
+  },
+  "workflow": {
+    "route": "local-authored-svg-line-art",
+    "providerRequests": 0,
+    "finishedWidthIn": 20.66,
+    "finishedHeightIn": 36.0,
+    "detailWidthPx": 2975,
+    "detailHeightPx": 5184,
+    "tileColumns": 3,
+    "tileRows": 4,
+    "tracePages": 12,
+    "lineCleanupActions": 1,
+    "removedConnectedSegmentPixels": 1476,
+    "notes": [
+      "The SVG remains vector-backed until the authored detail layer is rendered at the backend's 144-DPI PDF target.",
+      "Duplicate authored exterior contours are suppressed around the protected Cut Line.",
+      "One isolated authored boot-shadow segment was removed manually.",
+      "Heavy face and sack details that remain are present in the source SVG and should be judged on the physical print."
+    ]
+  },
+  "pdf": {
+    "filename": "grinch-decorating-maker-ready.pdf",
+    "repoRelativeRegenerationLocation": "output/pdf/grinch-decorating-maker-ready.pdf",
+    "tracked": false,
+    "disposition": "Source-derived binary; regenerate from the identified source and recorded workflow settings.",
+    "bytes": 251873,
+    "sha256": "e2c2c6195e646855ace56c650603bbd9d5fd1fcb145bdc081f8fa567eb189e7e",
+    "pageCount": 14,
+    "pageSize": "US Letter",
+    "renderedEvidenceRegenerationLocation": "tmp/pdfs/grinch-maker-ready-final/"
+  },
+  "browserCapture": {
+    "filename": "clean-lines-after-one-removal.png",
+    "tracked": false,
+    "bytes": 97735,
+    "sha256": "c79fd860bbda2836d19f5c5ba05f245628e8498c71e81ab40e66e652120d6e91",
+    "widthPx": 1416,
+    "heightPx": 1302
+  }
+}

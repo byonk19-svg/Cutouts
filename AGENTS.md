@@ -158,6 +158,39 @@ pushing.
 
 Never create a tag unless an exact tag name is supplied or explicitly approved.
 
+## Feature orchestration
+
+For multi-ticket feature work that uses `.scratch/<feature-slug>/STATUS.md`:
+
+- The controller conversation is disposable. Durable workflow state lives in
+  repository files, not in chat memory.
+- Ownership stays separate:
+  - `AGENTS.md` holds permanent operating rules.
+  - `.scratch/<feature-slug>/PRD.md` holds product scope and ticket order.
+  - `.scratch/<feature-slug>/issues/<NN>-*.md` holds the active ticket contract
+    and ticket-local evidence.
+  - `.scratch/<feature-slug>/STATUS.md` holds the current operational state for
+    the canonical worktree and next authorized action, and its phase/transition
+    updates are controller-owned unless an issue explicitly delegates them.
+- Reuse one recorded canonical worktree and one feature branch for sequential
+  tickets unless the active issue explicitly authorizes another lane.
+- Exploration is read-only until an issue or explicit acceptance criteria
+  authorize implementation.
+- `go` authorizes exactly one recorded action. It does not implicitly authorize
+  paid provider requests, destructive cleanup, history rewriting, tags,
+  unspecified merges, releases, or any other unrecorded side effect.
+- Workers return structured receipts with touched files, commands run, results,
+  and any remaining human gates. Unless the controller or active issue
+  delegates broader ownership, workers stay inside ticket-owned files and do
+  not mutate `STATUS.md`.
+- Post-merge or post-ticket worktree audit stays read-only until a separately
+  recorded cleanup action authorizes mutation.
+- Closeout, audit, and cleanup decisions are state-driven from the tracker
+  files and runbook, not inferred from chat momentum.
+
+Use `docs/agents/feature-orchestration.md` for the detailed runbook, doctor and
+release-verification commands, and the closeout state machine.
+
 ## Final report
 
 Report:
