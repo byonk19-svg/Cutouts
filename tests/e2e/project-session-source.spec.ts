@@ -104,7 +104,7 @@ test("confirmed New Project clears the active Project Session and Autosave", asy
   await fileMenu.getByText("File", { exact: true }).click();
   await fileMenu.getByRole("button", { name: "New Project" }).click();
 
-  await expect(page.getByLabel("Upload step").getByText("Choose a complete PNG, JPG, or SVG")).toBeVisible();
+  await expect(page.getByLabel("Upload step").getByText("Choose a complete PNG, JPG, WebP, or SVG")).toBeVisible();
   await expect(page.getByLabel("Project name (optional)")).toHaveValue("Cutout Project");
   await expect.poll(() => autosave(page)).toBeNull();
 });

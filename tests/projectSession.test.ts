@@ -768,6 +768,23 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
 }
 
 {
+  const session = createProjectSession({
+    ...lifecycleProject,
+    settings: { ...settings, minimumTileCols: 0, minimumTileRows: 0 },
+    analysis: { ...analysis, tileCols: 2, tileRows: 3, tileCount: 6 }
+  });
+  const changed = transitionProjectSession(session, {
+    type: "update-non-size-settings",
+    settings: { ...settings, minimumTileCols: 2, minimumTileRows: 4 }
+  });
+  assertEqual(changed.session.project.analysis.tileCols, 2, "reference layout should preserve the required two columns");
+  assertEqual(changed.session.project.analysis.tileRows, 4, "reference layout should update the analysis to four rows");
+  assertEqual(changed.session.project.analysis.tileCount, 8, "reference layout should update the visible trace-page count");
+  assertEqual(changed.session.project.analysis.outerCutPath, analysis.outerCutPath, "layout changes should preserve the Cut Line");
+  assertEqual(changed.session.project.analysis.detailLinePngDataUrl, analysis.detailLinePngDataUrl, "layout changes should preserve accepted Detail Lines");
+}
+
+{
   const session = createProjectSession({ ...lifecycleProject, ...preservedProjectFields });
   const opacity = transitionProjectSession(session, { type: "set-reference-opacity", referenceOpacity: 67 });
   assertEqual(opacity.session.project.referenceOpacity, 67, "underlay opacity should cross a named Project Session action");
