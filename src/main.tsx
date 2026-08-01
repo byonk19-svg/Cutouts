@@ -143,6 +143,7 @@ type PreparedSourceCandidate = {
   authoredSvgMarkup: string | null;
   lineworkDetected: boolean;
   inputReadinessOverride: ProjectSessionInputReadiness | null;
+  detailExtractionModeOverride: Settings["detailExtractionMode"] | null;
 };
 const AI_PROPOSAL_ESTIMATE_USD = 0.10;
 type ProjectStatus = "No saved project" | "Unsaved changes" | "Auto-saved" | "Saved" | "Restored auto-save" | "Project opened" | "Project export failed" | "Project import failed" | "Auto-save failed";
@@ -578,7 +579,10 @@ function App() {
     if (!targetImage) return;
     const targetSvgAuthoredMarkup = candidate ? candidate.authoredSvgMarkup : svgAuthoredMarkup;
     const mode = candidate ? "replace-source" as const : "regenerate-analysis" as const;
-    const nextSettings = settingsOverride ?? (preset ? detailPresetSettings(preset, settings) : settings);
+    const requestedSettings = settingsOverride ?? (preset ? detailPresetSettings(preset, settings) : settings);
+    const nextSettings = candidate?.detailExtractionModeOverride
+      ? { ...requestedSettings, detailExtractionMode: candidate.detailExtractionModeOverride }
+      : requestedSettings;
     const preservedManualStrokes = mode === "regenerate-analysis" && traceStudioOpen ? manualStrokes : [];
     if (mode === "regenerate-analysis" && analysis && preservedManualStrokes.length > 0) {
       const shouldRegenerate = window.confirm("Regenerate the cutline? This may replace the cutline and starter lines. Your manual Trace Studio lines will be kept unless you reset details.");
@@ -831,7 +835,8 @@ function App() {
           dataUrl: prepared.sourceDataUrl,
           authoredSvgMarkup: prepared.authoredSvgMarkup,
           lineworkDetected: prepared.authoredSvgMarkup !== null,
-          inputReadinessOverride: prepared.readinessEvidence
+          inputReadinessOverride: prepared.readinessEvidence,
+          detailExtractionModeOverride: prepared.detailExtractionModeOverride
         };
       } else {
         candidate = {
@@ -841,7 +846,8 @@ function App() {
           dataUrl: await readFileAsDataUrl(file),
           authoredSvgMarkup: null,
           lineworkDetected: false,
-          inputReadinessOverride: null
+          inputReadinessOverride: null,
+          detailExtractionModeOverride: null
         };
       }
       const completed = applyProjectSessionAction({ type: "complete-project-preparation", token });

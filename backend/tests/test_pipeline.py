@@ -1404,6 +1404,13 @@ class PrintPipelineTest(unittest.TestCase):
             detail_arr.astype(np.uint8),
             connectivity=8,
         )
+        lower_orphan_components = [
+            label
+            for label in range(1, component_count)
+            if stats[label, cv2.CC_STAT_TOP] >= detail_arr.shape[0] * 0.9
+            and stats[label, cv2.CC_STAT_AREA] < 180
+        ]
+        self.assertEqual(lower_orphan_components, [])
         outer_pixel_count = max(1, int(np.count_nonzero(np.asarray(outer_alpha) > 0)))
         largest_exterior_tracking_ratio = max(
             (
@@ -1412,8 +1419,15 @@ class PrintPipelineTest(unittest.TestCase):
             ),
             default=0,
         )
+        exterior_detail_outside_protected_eyes = detail_arr & exterior_arr
+        exterior_detail_outside_protected_eyes[340:450, 140:275] = False
+        exterior_detail_outside_protected_eyes[175:260, 300:345] = False
+        total_exterior_tracking_ratio = (
+            np.count_nonzero(exterior_detail_outside_protected_eyes) / outer_pixel_count
+        )
 
         self.assertLess(largest_exterior_tracking_ratio, 0.12)
+        self.assertLess(total_exterior_tracking_ratio, 0.05)
         self.assertGreater(self._count_region_pixels(detail_alpha, (65, 10, 335, 290)), 850)
         self.assertGreater(self._count_region_pixels(detail_alpha, (35, 350, 145, 500)), 1_400)
         self.assertGreater(self._count_region_pixels(detail_alpha, (270, 350, 375, 500)), 1_400)
@@ -1515,8 +1529,8 @@ class PrintPipelineTest(unittest.TestCase):
         )
         self.assertGreater(self._count_region_pixels(detail_alpha, (45, 620, 130, 800)), 500)
         self.assertGreater(self._count_region_pixels(detail_alpha, (135, 690, 285, 940)), 2_000)
-        self.assertGreater(self._count_region_pixels(detail_alpha, (0, 895, 125, 960)), 500)
-        self.assertGreater(self._count_region_pixels(detail_alpha, (295, 895, 416, 960)), 500)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (0, 895, 125, 960)), 300)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (295, 895, 416, 960)), 300)
 
     def test_closed_region_repair_preserves_complete_symmetric_source_art(self) -> None:
         source = Image.new("RGBA", (400, 600), (255, 255, 255, 255))

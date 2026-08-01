@@ -583,6 +583,30 @@ test("filled-color SVG artwork does not masquerade as ready authored line art", 
   })).toBe(0);
 });
 
+test("full-color compound-path SVG uses rendered-art analysis", async ({ page }) => {
+  await page.goto("/");
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "full-color-compound-character.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
+        <rect width="400" height="600" fill="white"/>
+        <path d="M80 550 L75 220 Q200 40 325 220 L320 550 Z" fill="#e7b27c"/>
+        <path d="M85 390 H315 V535 H85 Z" fill="#d92f35"/>
+        <path d="M210 160 H300 V360 H210 Z" fill="#279bd4"/>
+        <path d="M75 220 H325 V223 H75 Z M75 547 H325 V550 H75 Z M75 220 H78 V550 H75 Z M322 220 H325 V550 H322 Z M130 280 H270 V283 H130 Z" fill="#111"/>
+      </svg>
+    `)
+  });
+
+  await expect(uploadStep.getByText("SVG linework detected")).toHaveCount(0);
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+  await expect(page.getByLabel("Input readiness")).toContainText("Needs simplification");
+  await expect(page.getByLabel("Input readiness")).not.toContainText("Ready line art");
+  await expect(page.getByLabel("Clean Lines status")).toContainText("Rendered image boundaries");
+});
+
 test("large solid SVG ink is explicit simplification evidence", async ({ page }) => {
   await page.goto("/");
   const uploadStep = page.getByLabel("Upload step");

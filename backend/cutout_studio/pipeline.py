@@ -1180,7 +1180,7 @@ def _simplify_existing_line_art_detail_mask(
     subject = np.asarray(mask.resize(detail.size, Image.Resampling.NEAREST).convert("L")) > 0
     subject_box = cv2.boundingRect(subject.astype(np.uint8))
     subject_x, subject_y, subject_width, subject_height = subject_box
-    perimeter_radius = max(3, round(min(subject_width, subject_height) * (0.024 if level == "simple" else 0.016)))
+    perimeter_radius = max(3, round(min(subject_width, subject_height) * (0.024 if level == "simple" else 0.020)))
     perimeter_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (perimeter_radius * 2 + 1, perimeter_radius * 2 + 1))
     interior = cv2.erode(subject.astype(np.uint8) * 255, perimeter_kernel) > 0
     protected_region_boundaries = (
@@ -1227,6 +1227,7 @@ def _simplify_existing_line_art_detail_mask(
     retained = cv2.bitwise_or(retained, protected_head_features)
     retained = cv2.bitwise_or(retained, protected_lower_features)
     retained = cv2.bitwise_or(retained, protected_region_boundaries)
+    closed_region_ink: np.ndarray | None = None
     if protected_closed_regions is not None:
         closed_regions = np.asarray(
             protected_closed_regions.resize(detail.size, Image.Resampling.NEAREST).convert("L"),
@@ -1250,6 +1251,24 @@ def _simplify_existing_line_art_detail_mask(
     if level == "balanced":
         retained = cv2.dilate(retained, np.ones((3, 3), dtype=np.uint8), iterations=1)
         retained = np.asarray(_remove_small_components(Image.fromarray(retained, mode="L"), 50), dtype=np.uint8)
+    final_interior = np.asarray(
+        _erode_mask(
+            Image.fromarray(subject.astype(np.uint8) * 255, mode="L"),
+            perimeter_radius * 2 + 1,
+        )
+    ) > 0
+    retained = np.where(final_interior, retained, 0).astype(np.uint8)
+    if closed_region_ink is not None:
+        retained = cv2.bitwise_or(retained, closed_region_ink)
+    # Tiny isolated marks at the very bottom read as floating artifacts once
+    # the authoritative cutline replaces the source silhouette.
+    labels, stats = _connected_components(retained > 0)
+    lower_detail_top = subject_y + subject_height * 0.95
+    for label in range(1, len(stats)):
+        top = stats[label, cv2.CC_STAT_TOP]
+        area = stats[label, cv2.CC_STAT_AREA]
+        if top >= lower_detail_top and area < 100:
+            retained[labels == label] = 0
     return Image.fromarray(retained, mode="L")
 
 
