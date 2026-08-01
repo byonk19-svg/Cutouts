@@ -3,15 +3,66 @@ export type SvgFastPathUpload = {
   sourceDataUrl: string;
   authoredSvgMarkup: string | null;
   readinessEvidence: "ready-line-art" | "needs-simplification" | null;
+  detailExtractionModeOverride: "rendered" | null;
 };
 
 const MIN_INK_PIXELS = 24;
 const MAX_INK_COVERAGE = 0.18;
 const SVG_PRINT_DPI = 144;
 const SVG_CLASSIFICATION_MAX_PX = 960;
+const MIN_CHROMATIC_COVERAGE = 0.04;
+const MIN_CHROMATIC_HUE_COVERAGE = 0.01;
+const MIN_CHROMATIC_ALPHA = 200;
+const MIN_CHROMA = 40;
+const MIN_CHROMATIC_BRIGHTNESS = 80;
+const MIN_WHITE_CHANNEL = 235;
+const CHROMATIC_HUE_BIN_COUNT = 12;
 
 export function isSvgFile(file: File) {
   return file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg");
+}
+
+export function hasSubstantialChromaticArtwork(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number
+) {
+  const pixelCount = width * height;
+  if (pixelCount < 1 || pixels.length < pixelCount * 4) return false;
+
+  const hueBins = new Uint32Array(CHROMATIC_HUE_BIN_COUNT);
+  let chromaticPixels = 0;
+  for (let index = 0; index < pixelCount * 4; index += 4) {
+    const red = pixels[index];
+    const green = pixels[index + 1];
+    const blue = pixels[index + 2];
+    const alpha = pixels[index + 3];
+    const maximum = Math.max(red, green, blue);
+    const minimum = Math.min(red, green, blue);
+    const chroma = maximum - minimum;
+    if (
+      alpha < MIN_CHROMATIC_ALPHA
+      || minimum >= MIN_WHITE_CHANNEL
+      || maximum <= MIN_CHROMATIC_BRIGHTNESS
+      || chroma < MIN_CHROMA
+    ) continue;
+
+    const hue = maximum === red
+      ? 60 * (((green - blue) / chroma) % 6)
+      : maximum === green
+        ? 60 * ((blue - red) / chroma + 2)
+        : 60 * ((red - green) / chroma + 4);
+    const normalizedHue = (hue + 360) % 360;
+    hueBins[Math.min(CHROMATIC_HUE_BIN_COUNT - 1, Math.floor(normalizedHue / 30))] += 1;
+    chromaticPixels += 1;
+  }
+
+  const substantialBinPixels = Math.ceil(pixelCount * MIN_CHROMATIC_HUE_COVERAGE);
+  let substantialHueBins = 0;
+  for (const count of hueBins) {
+    if (count >= substantialBinPixels) substantialHueBins += 1;
+  }
+  return chromaticPixels / pixelCount >= MIN_CHROMATIC_COVERAGE && substantialHueBins >= 2;
 }
 
 export async function prepareSvgFastPathUpload(file: File): Promise<SvgFastPathUpload> {
@@ -37,9 +88,22 @@ export async function prepareSvgFastPathUpload(file: File): Promise<SvgFastPathU
   classificationContext.fillStyle = "#ffffff";
   classificationContext.fillRect(0, 0, classificationCanvas.width, classificationCanvas.height);
   classificationContext.drawImage(image, 0, 0, classificationCanvas.width, classificationCanvas.height);
+  const classificationPixels = classificationContext.getImageData(
+    0,
+    0,
+    classificationCanvas.width,
+    classificationCanvas.height
+  ).data;
   const darkInkStats = measureDarkInk(classificationCanvas);
   const sourceInkDataUrl = darkInkDataUrl(classificationCanvas);
-  const useAuthoredInk = sourceInkDataUrl !== null && darkInkLooksLikeLinework(classificationCanvas);
+  const substantialChromaticArtwork = hasSubstantialChromaticArtwork(
+    classificationPixels,
+    classificationCanvas.width,
+    classificationCanvas.height
+  );
+  const useAuthoredInk = sourceInkDataUrl !== null
+    && darkInkLooksLikeLinework(classificationCanvas)
+    && !substantialChromaticArtwork;
   const sourceBlob = await dataUrlBlob(sourceDataUrl);
   const sourceFile = new File([sourceBlob], `${file.name.replace(/\.svg$/i, "") || "cutout"}.png`, { type: "image/png" });
   return {
@@ -50,7 +114,8 @@ export async function prepareSvgFastPathUpload(file: File): Promise<SvgFastPathU
       ? null
       : darkInkStats.coverage > MAX_INK_COVERAGE
         ? "needs-simplification"
-      : useAuthoredInk ? "ready-line-art" : "needs-simplification"
+      : useAuthoredInk ? "ready-line-art" : "needs-simplification",
+    detailExtractionModeOverride: substantialChromaticArtwork ? "rendered" : null
   };
 }
 
