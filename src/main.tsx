@@ -85,8 +85,8 @@ import {
   fitBoundsToViewport,
   fittedTraceSize,
   fullCanvasBounds,
-  mergeTraceBounds,
   panViewport,
+  prioritizedTraceBounds,
   screenToTracePoint,
   shouldAutoFitViewport,
   zoomViewport,
@@ -1863,8 +1863,12 @@ function App() {
   }
 
   traceContentBoundsRef.current = analysis
-    ? mergeTraceBounds([cutlineBounds, detailLineBounds, boundsFromTraceStrokes(manualStrokes)])
-      ?? fullCanvasBounds({ width: analysis.previewWidthPx, height: analysis.previewHeightPx })
+    ? prioritizedTraceBounds({
+      manualStrokes: boundsFromTraceStrokes(manualStrokes),
+      protectedCutLine: cutlineBounds,
+      subject: viewportSubjectBounds(analysis),
+      canvasSize: { width: analysis.previewWidthPx, height: analysis.previewHeightPx }
+    })
     : null;
 
   return (
@@ -3585,6 +3589,20 @@ function isDefaultTraceViewport(viewport: TraceViewport) {
   return viewport.zoom === DEFAULT_TRACE_VIEWPORT.zoom
     && viewport.panX === DEFAULT_TRACE_VIEWPORT.panX
     && viewport.panY === DEFAULT_TRACE_VIEWPORT.panY;
+}
+
+function viewportSubjectBounds(analysis: Analysis): TraceBounds | null {
+  const pathBounds = analysis.traceQuality?.pathBoundsPx;
+  if (pathBounds && pathBounds.length === 4 && pathBounds.every(Number.isFinite)) {
+    const [left, top, right, bottom] = pathBounds;
+    if (right > left && bottom > top) return { left, top, right, bottom };
+  }
+
+  const sourceBounds = analysis.subjectBoundsPx;
+  if (!sourceBounds || sourceBounds.length !== 4 || sourceBounds.some((value) => !Number.isFinite(value))) return null;
+  if (analysis.sourceWidthPx !== analysis.previewWidthPx || analysis.sourceHeightPx !== analysis.previewHeightPx) return null;
+  const [left, top, right, bottom] = sourceBounds;
+  return right > left && bottom > top ? { left, top, right, bottom } : null;
 }
 
 function pointHandleHitRadius(width: number) {

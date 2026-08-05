@@ -18,6 +18,13 @@ export type TraceFitOptions = {
   targetFill?: number;
 };
 
+export type TraceContentBoundsInput = {
+  manualStrokes: TraceBounds | null;
+  protectedCutLine: TraceBounds | null;
+  subject: TraceBounds | null;
+  canvasSize: { width: number; height: number };
+};
+
 export function shouldAutoFitViewport(state: { pending: boolean; userModified: boolean }) {
   return state.pending && !state.userModified;
 }
@@ -115,6 +122,17 @@ export function mergeTraceBounds(bounds: Array<TraceBounds | null | undefined>):
     right: Math.max(merged.right, item.right),
     bottom: Math.max(merged.bottom, item.bottom)
   }));
+}
+
+export function prioritizedTraceBounds({
+  manualStrokes,
+  protectedCutLine,
+  subject,
+  canvasSize
+}: TraceContentBoundsInput): TraceBounds {
+  return mergeTraceBounds([manualStrokes, protectedCutLine])
+    ?? subject
+    ?? fullCanvasBounds(canvasSize);
 }
 
 export function boundsFromTraceStrokes(strokes: TraceStroke[]): TraceBounds | null {
