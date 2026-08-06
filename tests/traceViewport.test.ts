@@ -6,6 +6,7 @@ import {
   fittedTraceSize,
   mergeTraceBounds,
   panViewport,
+  prioritizedTraceBounds,
   screenToTracePoint,
   shouldAutoFitViewport,
   zoomViewport
@@ -36,6 +37,53 @@ function occupiedHeightRatio(
     ratio: (screenBottom - screenTop) / viewportSize.height,
     centerY: (screenTop + screenBottom) / 2
   };
+}
+
+{
+  const selected = prioritizedTraceBounds({
+    manualStrokes: { left: 40, top: 180, right: 220, bottom: 420 },
+    protectedCutLine: { left: 200, top: 100, right: 800, bottom: 900 },
+    subject: { left: 0, top: 0, right: 1000, bottom: 1000 },
+    canvasSize: { width: 1000, height: 1000 }
+  });
+
+  assertEqual(selected.left, 40, "fit bounds should include manual strokes outside the cutline");
+  assertEqual(selected.top, 100, "fit bounds should include the protected cutline top");
+  assertEqual(selected.right, 800, "fit bounds should include the protected cutline right edge");
+  assertEqual(selected.bottom, 900, "fit bounds should include the protected cutline bottom");
+}
+
+{
+  const selected = prioritizedTraceBounds({
+    manualStrokes: null,
+    protectedCutLine: { left: 200, top: 100, right: 800, bottom: 900 },
+    subject: { left: 0, top: 0, right: 1000, bottom: 1000 },
+    canvasSize: { width: 1000, height: 1000 }
+  });
+
+  assertEqual(JSON.stringify(selected), JSON.stringify({ left: 200, top: 100, right: 800, bottom: 900 }), "fit should prefer the protected cutline over subject bounds");
+}
+
+{
+  const selected = prioritizedTraceBounds({
+    manualStrokes: null,
+    protectedCutLine: null,
+    subject: { left: 120, top: 80, right: 760, bottom: 680 },
+    canvasSize: { width: 1000, height: 900 }
+  });
+
+  assertEqual(JSON.stringify(selected), JSON.stringify({ left: 120, top: 80, right: 760, bottom: 680 }), "fit should use subject bounds when no editable linework exists");
+}
+
+{
+  const selected = prioritizedTraceBounds({
+    manualStrokes: null,
+    protectedCutLine: null,
+    subject: null,
+    canvasSize: { width: 1000, height: 900 }
+  });
+
+  assertEqual(JSON.stringify(selected), JSON.stringify({ left: 0, top: 0, right: 1000, bottom: 900 }), "fit should safely fall back to the full canvas");
 }
 
 {
