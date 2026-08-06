@@ -1304,8 +1304,9 @@ function App() {
     image.onload = () => {
       if (loadId !== detailCanvasLoadIdRef.current) return;
       clearRemovalPreview();
-      canvas.width = analysis.previewWidthPx;
-      canvas.height = analysis.previewHeightPx;
+      const normalizeToPreview = analysis.traceQuality?.detailExtractionModeUsed === "rendered";
+      canvas.width = normalizeToPreview ? analysis.previewWidthPx : image.naturalWidth;
+      canvas.height = normalizeToPreview ? analysis.previewHeightPx : image.naturalHeight;
       const context = canvas.getContext("2d");
       if (!context) return;
       context.clearRect(0, 0, canvas.width, canvas.height);
