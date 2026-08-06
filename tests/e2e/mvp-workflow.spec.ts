@@ -48,6 +48,59 @@ test("locked Guided Workflow requests stay rejected when disabled controls are b
   await expect(cleanButton).toHaveAttribute("aria-current", "step");
 });
 
+test("rendered starter detail is normalized into the preview coordinate space", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  let previewSize = { width: 0, height: 0 };
+  let previewSizeCaptured = false;
+  await page.route("**/api/analyze", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    previewSize = { width: body.previewWidthPx, height: body.previewHeightPx };
+    previewSizeCaptured = true;
+    const sourceWidth = body.previewWidthPx * 2;
+    const sourceHeight = body.previewHeightPx * 2;
+    const detailPixels = Buffer.alloc(sourceWidth * sourceHeight * 4);
+    fillRect(
+      detailPixels,
+      sourceWidth,
+      sourceHeight,
+      Math.round(sourceWidth * 0.44),
+      Math.round(sourceHeight * 0.38),
+      Math.max(8, Math.round(sourceWidth * 0.08)),
+      Math.max(8, Math.round(sourceHeight * 0.06)),
+      [0, 0, 0, 255]
+    );
+    body.detailLinePngDataUrl = `data:image/png;base64,${encodePng(sourceWidth, sourceHeight, detailPixels).toString("base64")}`;
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "rendered-registration.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  await expect.poll(() => previewSizeCaptured).toBe(true);
+  await expect(detailCanvas).toHaveAttribute("width", String(previewSize.width));
+  await expect(detailCanvas).toHaveAttribute("height", String(previewSize.height));
+  await expect.poll(() => detailCanvas.evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    const context = canvas.getContext("2d");
+    if (!context) return false;
+    const x = Math.round(canvas.width * 0.48);
+    const y = Math.round(canvas.height * 0.41);
+    const pixels = context.getImageData(x - 3, y - 3, 7, 7).data;
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index + 3] > 200 && pixels[index] < 40 && pixels[index + 1] < 40 && pixels[index + 2] < 40) return true;
+    }
+    return false;
+  })).toBe(true);
+});
+
 test("project persistence keeps one coherent revision and recovers from a visible Autosave failure", async ({ page }) => {
   await page.addInitScript(() => {
     if (sessionStorage.getItem("persistence-test-started")) return;

@@ -1297,19 +1297,19 @@ function App() {
   function loadDetailCanvas(src: string) {
     clearRemovalPreview();
     const canvas = detailCanvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !analysis) return;
     const loadId = ++detailCanvasLoadIdRef.current;
     setDetailLineBoundsResolved(false);
     const image = new Image();
     image.onload = () => {
       if (loadId !== detailCanvasLoadIdRef.current) return;
       clearRemovalPreview();
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
+      canvas.width = analysis.previewWidthPx;
+      canvas.height = analysis.previewHeightPx;
       const context = canvas.getContext("2d");
       if (!context) return;
       context.clearRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(image, 0, 0);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
       const bounds = canvasContentBounds(canvas);
       setEditableDetailLinesPresent(bounds !== null);
       setDetailLineBounds(bounds);
