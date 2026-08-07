@@ -152,13 +152,6 @@ test("accepted authored detail keeps its native resolution when analysis is rend
   await fileMenu.getByRole("button", { name: "Save Project" }).click();
   const saved = JSON.parse(await readDownloadText(await savePromise));
   expect(saved.editedDetailPngDataUrl).toBe(authoredDetail);
-  await page.locator("input.hidden-project-input").setInputFiles({
-    name: "authored-resolution-round-trip.cutout.json",
-    mimeType: "application/json",
-    buffer: Buffer.from(JSON.stringify(saved))
-  });
-  await expect(detailCanvas).toHaveAttribute("width", String(width));
-  await expect(detailCanvas).toHaveAttribute("height", String(height));
 
   const moreTools = page.getByLabel("More Tools");
   await moreTools.locator("summary").click();
@@ -166,6 +159,14 @@ test("accepted authored detail keeps its native resolution when analysis is rend
   await expect(detailCanvas).toHaveAttribute("width", String(generated.analysis.previewWidthPx));
   await expect(detailCanvas).toHaveAttribute("height", String(generated.analysis.previewHeightPx));
   await expect.poll(async () => (await savedProjectSnapshot(page))?.editedDetailPngDataUrl).toBeNull();
+
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "authored-resolution-round-trip.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(saved))
+  });
+  await expect(detailCanvas).toHaveAttribute("width", String(width));
+  await expect(detailCanvas).toHaveAttribute("height", String(height));
 
   await page.locator("input.hidden-project-input").setInputFiles({
     name: "authored-resolution-export.cutout.json",
