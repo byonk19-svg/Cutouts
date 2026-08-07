@@ -1623,7 +1623,7 @@ function App() {
   function detailSegmentOptions() {
     const scale = acceptedDetailScale();
     return {
-      hitRadiusPx: 10 * scale,
+      hitRadiusPx: Math.max(1, Math.round(10 * scale)),
       maxComponentPixels: Math.round(1800 * scale * scale),
       boundedRadiusPx: 54 * scale
     };
@@ -3492,7 +3492,7 @@ function detailCanvasScale(
 ) {
   if (!canvas || !previewWidthPx || !previewHeightPx || previewWidthPx <= 0 || previewHeightPx <= 0) return 1;
   const canvasToPreviewRatio = Math.max(canvas.width / previewWidthPx, canvas.height / previewHeightPx);
-  return Math.min(2, Math.max(1, canvasToPreviewRatio));
+  return Math.max(1, canvasToPreviewRatio);
 }
 
 function inputReadinessForAnalysis(
