@@ -3487,7 +3487,8 @@ function detailCanvasScale(
   previewHeightPx: number | undefined
 ) {
   if (!canvas || !previewWidthPx || !previewHeightPx || previewWidthPx <= 0 || previewHeightPx <= 0) return 1;
-  return Math.max(1, canvas.width / previewWidthPx, canvas.height / previewHeightPx);
+  const canvasToPreviewRatio = Math.max(canvas.width / previewWidthPx, canvas.height / previewHeightPx);
+  return Math.min(2, Math.max(1, canvasToPreviewRatio));
 }
 
 function inputReadinessForAnalysis(
