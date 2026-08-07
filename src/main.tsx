@@ -516,7 +516,10 @@ function App() {
 
   useEffect(() => {
     if (!analysis || !editorOpen) return;
-    loadDetailCanvas(editedDetailDataUrl ?? analysis.detailLinePngDataUrl);
+    loadDetailCanvas(
+      editedDetailDataUrl ?? analysis.detailLinePngDataUrl,
+      editedDetailDataUrl === null ? "analysis" : "accepted"
+    );
     renderManualTraceLayer(manualStrokes);
   }, [analysis, dimUnselectedStrokes, editorOpen, editedDetailDataUrl, manualStrokes, printPreview, selectedStrokeId, traceStudioOpen, workflowProgress.activeStep]);
 
@@ -1294,7 +1297,7 @@ function App() {
     }
   }
 
-  function loadDetailCanvas(src: string) {
+  function loadDetailCanvas(src: string, source: "analysis" | "accepted" = "accepted") {
     clearRemovalPreview();
     const canvas = detailCanvasRef.current;
     if (!canvas || !analysis) return;
@@ -1304,7 +1307,10 @@ function App() {
     image.onload = () => {
       if (loadId !== detailCanvasLoadIdRef.current) return;
       clearRemovalPreview();
-      const normalizeToPreview = analysis.traceQuality?.detailExtractionModeUsed === "rendered";
+      const normalizeToPreview = traceStudioOpen || (
+        source === "analysis"
+        && analysis.traceQuality?.detailExtractionModeUsed === "rendered"
+      );
       canvas.width = normalizeToPreview ? analysis.previewWidthPx : image.naturalWidth;
       canvas.height = normalizeToPreview ? analysis.previewHeightPx : image.naturalHeight;
       const context = canvas.getContext("2d");
@@ -1327,6 +1333,7 @@ function App() {
   function currentDetailDataUrl() {
     const canvas = detailCanvasRef.current;
     if (!canvas || !analysis) return editedDetailDataUrl;
+    if (traceStudioOpen) return editedDetailDataUrl ?? analysis.detailLinePngDataUrl;
     return canvas.toDataURL("image/png");
   }
 
@@ -1404,7 +1411,7 @@ function App() {
     const before = currentDetailDataUrl();
     const restoredDetail = svgImportedDetailDataUrl ?? analysis.detailLinePngDataUrl;
     if (before) commitDetailLineTransaction(before, restoredDetail);
-    loadDetailCanvas(restoredDetail);
+    loadDetailCanvas(restoredDetail, svgImportedDetailDataUrl ? "accepted" : "analysis");
   }
 
   function beginStroke(event: PointerEvent<HTMLCanvasElement>) {

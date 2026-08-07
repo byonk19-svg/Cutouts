@@ -1180,7 +1180,7 @@ def _simplify_existing_line_art_detail_mask(
     subject = np.asarray(mask.resize(detail.size, Image.Resampling.NEAREST).convert("L")) > 0
     subject_box = cv2.boundingRect(subject.astype(np.uint8))
     subject_x, subject_y, subject_width, subject_height = subject_box
-    perimeter_radius = max(3, round(min(subject_width, subject_height) * (0.024 if level == "simple" else 0.020)))
+    perimeter_radius = max(3, round(min(subject_width, subject_height) * (0.024 if level == "simple" else 0.016)))
     perimeter_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (perimeter_radius * 2 + 1, perimeter_radius * 2 + 1))
     interior = cv2.erode(subject.astype(np.uint8) * 255, perimeter_kernel) > 0
     protected_region_boundaries = (
@@ -1260,16 +1260,24 @@ def _simplify_existing_line_art_detail_mask(
     retained = np.where(final_interior, retained, 0).astype(np.uint8)
     if closed_region_ink is not None:
         retained = cv2.bitwise_or(retained, closed_region_ink)
-    # Tiny isolated marks at the very bottom read as floating artifacts once
-    # the authoritative cutline replaces the source silhouette.
+    return Image.fromarray(_remove_lower_artifact_components(retained, subject_box), mode="L")
+
+
+def _remove_lower_artifact_components(
+    retained: np.ndarray,
+    subject_box: tuple[int, int, int, int],
+) -> np.ndarray:
+    _subject_x, subject_y, subject_width, subject_height = subject_box
     labels, stats = _connected_components(retained > 0)
     lower_detail_top = subject_y + subject_height * 0.95
+    subject_scale = min(subject_width, subject_height) / 400
+    maximum_artifact_area = max(1, round(60 * subject_scale * subject_scale))
     for label in range(1, len(stats)):
         top = stats[label, cv2.CC_STAT_TOP]
         area = stats[label, cv2.CC_STAT_AREA]
-        if top >= lower_detail_top and area < 100:
+        if top >= lower_detail_top and area < maximum_artifact_area:
             retained[labels == label] = 0
-    return Image.fromarray(retained, mode="L")
+    return retained
 
 
 def _source_supported_closed_paint_region_boundaries(

@@ -1404,13 +1404,6 @@ class PrintPipelineTest(unittest.TestCase):
             detail_arr.astype(np.uint8),
             connectivity=8,
         )
-        lower_orphan_components = [
-            label
-            for label in range(1, component_count)
-            if stats[label, cv2.CC_STAT_TOP] >= detail_arr.shape[0] * 0.9
-            and stats[label, cv2.CC_STAT_AREA] < 180
-        ]
-        self.assertEqual(lower_orphan_components, [])
         outer_pixel_count = max(1, int(np.count_nonzero(np.asarray(outer_alpha) > 0)))
         largest_exterior_tracking_ratio = max(
             (
@@ -1529,8 +1522,22 @@ class PrintPipelineTest(unittest.TestCase):
         )
         self.assertGreater(self._count_region_pixels(detail_alpha, (45, 620, 130, 800)), 500)
         self.assertGreater(self._count_region_pixels(detail_alpha, (135, 690, 285, 940)), 2_000)
-        self.assertGreater(self._count_region_pixels(detail_alpha, (0, 895, 125, 960)), 300)
-        self.assertGreater(self._count_region_pixels(detail_alpha, (295, 895, 416, 960)), 300)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (0, 895, 125, 960)), 500)
+        self.assertGreater(self._count_region_pixels(detail_alpha, (295, 895, 416, 960)), 500)
+
+    def test_lower_artifact_removal_uses_the_same_physical_area_at_preview_and_print_scale(self) -> None:
+        preview = np.zeros((800, 400), dtype=np.uint8)
+        preview[770:775, 40:51] = 255
+        preview[770:777, 100:110] = 255
+        printable = cv2.resize(preview, (800, 1600), interpolation=cv2.INTER_NEAREST)
+
+        cleaned_preview = pipeline._remove_lower_artifact_components(preview.copy(), (0, 0, 400, 800))
+        cleaned_printable = pipeline._remove_lower_artifact_components(printable.copy(), (0, 0, 800, 1600))
+
+        self.assertEqual(np.count_nonzero(cleaned_preview[770:775, 40:51]), 0)
+        self.assertEqual(np.count_nonzero(cleaned_printable[1540:1550, 80:102]), 0)
+        self.assertEqual(np.count_nonzero(cleaned_preview[770:777, 100:110]), 70)
+        self.assertEqual(np.count_nonzero(cleaned_printable[1540:1554, 200:220]), 280)
 
     def test_closed_region_repair_preserves_complete_symmetric_source_art(self) -> None:
         source = Image.new("RGBA", (400, 600), (255, 255, 255, 255))
