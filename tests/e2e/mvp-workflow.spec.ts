@@ -177,7 +177,8 @@ test("accepted authored detail keeps its native resolution when analysis is rend
   await expect(detailCanvas).toHaveAttribute("height", String(height));
 
   if (!(await moreTools.getAttribute("open"))) await moreTools.locator("summary").click();
-  await page.getByLabel("Starter detail line guidance").getByRole("button", { name: "Use blank Trace Studio" }).click();
+  const useBlankTraceStudio = page.getByLabel("Starter detail line guidance").getByRole("button", { name: "Use blank Trace Studio" });
+  if (await useBlankTraceStudio.count()) await useBlankTraceStudio.click();
   await expect(detailCanvas).toHaveAttribute("width", String(generated.analysis.previewWidthPx));
   await expect(detailCanvas).toHaveAttribute("height", String(generated.analysis.previewHeightPx));
   await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Add Missing Line" }).click();
