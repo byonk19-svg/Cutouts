@@ -323,7 +323,7 @@ function App() {
   const [featureLineHistory, setFeatureLineHistory] = useState<EditorTransactionHistory<TraceStroke[]>>(
     createEditorTransactionHistory
   );
-  const [detailLineHistory, setDetailLineHistory] = useState<EditorTransactionHistory<string>>(
+  const [detailLineHistory, setDetailLineHistory] = useState<EditorTransactionHistory<string | null>>(
     createEditorTransactionHistory
   );
   const [svgAuthoredMarkup, setSvgAuthoredMarkup] = useState<string | null>(null);
@@ -1347,7 +1347,7 @@ function App() {
     });
   }
 
-  function commitDetailLineTransaction(before: string, after: string) {
+  function commitDetailLineTransaction(before: string | null, after: string | null) {
     if (before === after) return false;
     setDetailLineHistory((current) => recordEditorTransaction(current, { before, after }));
     applyEditorTransactionArtifacts(after, projectSessionRef.current.project.manualStrokes);
@@ -1366,6 +1366,14 @@ function App() {
     void generateTemplate(undefined, next);
   }
 
+  function replayDetailCanvas(artifact: string | null) {
+    if (!analysis) return;
+    loadDetailCanvas(
+      artifact ?? analysis.detailLinePngDataUrl,
+      artifact === null ? "analysis" : "accepted"
+    );
+  }
+
   function undoDetailEdit() {
     if (traceStudioOpen) {
       const replay = undoEditorTransaction(featureLineHistory);
@@ -1380,7 +1388,7 @@ function App() {
     if (!replay.changed) return;
     setDetailLineHistory(replay.history);
     applyEditorTransactionArtifacts(replay.artifact, manualStrokes);
-    loadDetailCanvas(replay.artifact);
+    replayDetailCanvas(replay.artifact);
   }
 
   function redoDetailEdit() {
@@ -1397,7 +1405,7 @@ function App() {
     if (!replay.changed) return;
     setDetailLineHistory(replay.history);
     applyEditorTransactionArtifacts(replay.artifact, manualStrokes);
-    loadDetailCanvas(replay.artifact);
+    replayDetailCanvas(replay.artifact);
   }
 
   function resetDetailLayer() {
@@ -1410,7 +1418,8 @@ function App() {
     }
     const before = currentDetailDataUrl();
     const restoredDetail = svgImportedDetailDataUrl ?? analysis.detailLinePngDataUrl;
-    if (before) commitDetailLineTransaction(before, restoredDetail);
+    const restoredArtifact = svgImportedDetailDataUrl ? restoredDetail : null;
+    if (before !== restoredArtifact) commitDetailLineTransaction(before, restoredArtifact);
     loadDetailCanvas(restoredDetail, svgImportedDetailDataUrl ? "accepted" : "analysis");
   }
 
@@ -1603,6 +1612,27 @@ function App() {
     );
   }
 
+  function detailBrushPixels(size: BrushSize) {
+    return brushPixels(size) * detailCanvasScale(
+      detailCanvasRef.current,
+      analysis?.previewWidthPx,
+      analysis?.previewHeightPx
+    );
+  }
+
+  function detailSegmentOptions() {
+    const scale = detailCanvasScale(
+      detailCanvasRef.current,
+      analysis?.previewWidthPx,
+      analysis?.previewHeightPx
+    );
+    return {
+      hitRadiusPx: 10 * scale,
+      maxComponentPixels: Math.round(1800 * scale * scale),
+      boundedRadiusPx: 54 * scale
+    };
+  }
+
   function drawStrokeSegment(from: TracePoint, to: TracePoint) {
     const canvas = detailCanvasRef.current;
     if (!canvas) return;
@@ -1611,7 +1641,7 @@ function App() {
     context.save();
     context.globalCompositeOperation = editorTool === "erase" ? "destination-out" : "source-over";
     context.strokeStyle = "#000000";
-    context.lineWidth = brushPixels(brushSize);
+    context.lineWidth = detailBrushPixels(brushSize);
     context.lineCap = "round";
     context.lineJoin = "round";
     context.beginPath();
@@ -1633,7 +1663,7 @@ function App() {
     context.save();
     context.globalCompositeOperation = "source-over";
     context.strokeStyle = "#000000";
-    context.lineWidth = brushPixels(brushSize);
+    context.lineWidth = detailBrushPixels(brushSize);
     context.lineCap = "round";
     context.lineJoin = "round";
     context.beginPath();
@@ -1649,7 +1679,7 @@ function App() {
     const context = canvas.getContext("2d");
     if (!context) return;
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const preview = previewDetailSegment(imageData.data, canvas.width, canvas.height, point);
+    const preview = previewDetailSegment(imageData.data, canvas.width, canvas.height, point, detailSegmentOptions());
     if (!preview) {
       clearRemovalPreview();
       return;
@@ -1671,7 +1701,7 @@ function App() {
     const context = canvas.getContext("2d");
     if (!context) return;
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const preview = previewDetailSegment(imageData.data, canvas.width, canvas.height, point);
+    const preview = previewDetailSegment(imageData.data, canvas.width, canvas.height, point, detailSegmentOptions());
     renderRemovalPreview(preview, canvas.width, canvas.height);
   }
 
@@ -1681,7 +1711,7 @@ function App() {
     const context = canvas.getContext("2d");
     if (!context) return;
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const preview = previewFirstDetailSegment(imageData.data, canvas.width, canvas.height);
+    const preview = previewFirstDetailSegment(imageData.data, canvas.width, canvas.height, detailSegmentOptions());
     renderRemovalPreview(preview, canvas.width, canvas.height);
   }
 
@@ -3448,6 +3478,15 @@ function brushPixels(size: BrushSize) {
   if (size === "thin") return 10;
   if (size === "bold") return 34;
   return 20;
+}
+
+function detailCanvasScale(
+  canvas: HTMLCanvasElement | null,
+  previewWidthPx: number | undefined,
+  previewHeightPx: number | undefined
+) {
+  if (!canvas || !previewWidthPx || !previewHeightPx || previewWidthPx <= 0 || previewHeightPx <= 0) return 1;
+  return Math.max(1, canvas.width / previewWidthPx, canvas.height / previewHeightPx);
 }
 
 function inputReadinessForAnalysis(

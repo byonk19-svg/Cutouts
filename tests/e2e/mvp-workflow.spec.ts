@@ -183,6 +183,12 @@ test("accepted authored detail keeps its native resolution when analysis is rend
   const svg = await readDownloadText(await downloadFrom(page, "Download SVG Linework"));
   const svgDetailDataUrl = svg.match(/id="accepted-detail-layer"[^>]+href="(data:image\/png;base64,[^"]+)"/)?.[1];
   expect(pngDimensionsFromDataUrl(svgDetailDataUrl)).toEqual({ width, height });
+
+  await page.getByLabel("More Tools").locator("summary").click();
+  await page.getByLabel("Starter detail line guidance").getByRole("button", { name: "Reset details" }).click();
+  await expect(detailCanvas).toHaveAttribute("width", String(generated.analysis.previewWidthPx));
+  await expect(detailCanvas).toHaveAttribute("height", String(generated.analysis.previewHeightPx));
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.editedDetailPngDataUrl).toBeNull();
 });
 
 test("project persistence keeps one coherent revision and recovers from a visible Autosave failure", async ({ page }) => {
