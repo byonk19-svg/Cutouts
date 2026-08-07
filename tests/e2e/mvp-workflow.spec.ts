@@ -160,7 +160,22 @@ test("accepted authored detail keeps its native resolution when analysis is rend
   await expect(detailCanvas).toHaveAttribute("width", String(width));
   await expect(detailCanvas).toHaveAttribute("height", String(height));
 
-  await page.getByLabel("More Tools").locator("summary").click();
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+  await moreTools.getByRole("button", { name: "Reset details" }).click();
+  await expect(detailCanvas).toHaveAttribute("width", String(generated.analysis.previewWidthPx));
+  await expect(detailCanvas).toHaveAttribute("height", String(generated.analysis.previewHeightPx));
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.editedDetailPngDataUrl).toBeNull();
+
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "authored-resolution-export.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(authoredProject))
+  });
+  await expect(detailCanvas).toHaveAttribute("width", String(width));
+  await expect(detailCanvas).toHaveAttribute("height", String(height));
+
+  if (!(await moreTools.getAttribute("open"))) await moreTools.locator("summary").click();
   await page.getByLabel("Starter detail line guidance").getByRole("button", { name: "Use blank Trace Studio" }).click();
   await expect(detailCanvas).toHaveAttribute("width", String(generated.analysis.previewWidthPx));
   await expect(detailCanvas).toHaveAttribute("height", String(generated.analysis.previewHeightPx));
@@ -184,13 +199,6 @@ test("accepted authored detail keeps its native resolution when analysis is rend
   const svgDetailDataUrl = svg.match(/id="accepted-detail-layer"[^>]+href="(data:image\/png;base64,[^"]+)"/)?.[1];
   expect(pngDimensionsFromDataUrl(svgDetailDataUrl)).toEqual({ width, height });
 
-  await page.getByRole("button", { name: "2 Clean Lines completed" }).click();
-  await expect(page.getByLabel("Clean Lines workspace")).toBeVisible();
-  await page.getByLabel("More Tools").locator("summary").click();
-  await page.getByLabel("Starter detail line guidance").getByRole("button", { name: "Reset details" }).click();
-  await expect(detailCanvas).toHaveAttribute("width", String(generated.analysis.previewWidthPx));
-  await expect(detailCanvas).toHaveAttribute("height", String(generated.analysis.previewHeightPx));
-  await expect.poll(async () => (await savedProjectSnapshot(page))?.editedDetailPngDataUrl).toBeNull();
 });
 
 test("project persistence keeps one coherent revision and recovers from a visible Autosave failure", async ({ page }) => {
