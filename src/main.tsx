@@ -989,7 +989,11 @@ function App() {
     setColorDetailsOpen(false);
     setImage(restoredFile);
     setSvgAuthoredMarkup(null);
-    setSvgImportedDetailDataUrl(project.editedDetailPngDataUrl);
+    // Restored projects retain their accepted artifact through editedDetailDataUrl.
+    // The runtime-only SVG provenance is not persisted, so a reset must return to
+    // the current analysis layer rather than treating every restored edit as a
+    // freshly imported SVG source.
+    setSvgImportedDetailDataUrl(null);
     setSvgLineworkDetected(false);
     setSourceImageDataUrl(project.sourceImage.dataUrl);
     setAutoStarterOpen(project.traceMode !== "manual");
