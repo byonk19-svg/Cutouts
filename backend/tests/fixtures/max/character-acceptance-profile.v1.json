@@ -191,7 +191,7 @@
       "type": "minimumInk",
       "artifact": "acceptedDetail",
       "featureId": "left-paw",
-      "minimumDarkPixels": 300
+      "minimumDarkPixels": 500
     },
     {
       "id": "right-paw-present",
@@ -199,7 +199,7 @@
       "type": "minimumInk",
       "artifact": "acceptedDetail",
       "featureId": "right-paw",
-      "minimumDarkPixels": 300
+      "minimumDarkPixels": 500
     }
   ],
   "workflowBudgets": {

@@ -101,6 +101,109 @@ test("rendered starter detail is normalized into the preview coordinate space", 
   })).toBe(true);
 });
 
+test("accepted authored detail keeps its native resolution when analysis is rendered", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  let pdfRequestBody: Buffer | null = null;
+  await page.route("**/api/export", async (route) => {
+    pdfRequestBody = route.request().postDataBuffer();
+    await route.fulfill({ status: 200, contentType: "application/pdf", body: Buffer.from("%PDF-1.4\n%%EOF") });
+  });
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "authored-resolution-source.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+  const generated = await expect.poll(() => savedProjectSnapshot(page)).not.toBeNull().then(() => savedProjectSnapshot(page));
+  if (!generated?.analysis) throw new Error("Generated project did not contain analysis.");
+
+  const width = generated.analysis.previewWidthPx * 2;
+  const height = generated.analysis.previewHeightPx * 2;
+  const pixels = Buffer.alloc(width * height * 4);
+  fillRect(pixels, width, height, Math.round(width * 0.3), Math.round(height * 0.35), 40, 30, [0, 0, 0, 255]);
+  const authoredDetail = `data:image/png;base64,${encodePng(width, height, pixels).toString("base64")}`;
+  const authoredProject = {
+    ...generated,
+    analysis: {
+      ...generated.analysis,
+      traceQuality: {
+        ...generated.analysis.traceQuality,
+        detailExtractionModeUsed: "rendered"
+      }
+    },
+    editedDetailPngDataUrl: authoredDetail
+  };
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "authored-resolution.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(authoredProject))
+  });
+
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  await expect(detailCanvas).toHaveAttribute("width", String(width));
+  await expect(detailCanvas).toHaveAttribute("height", String(height));
+
+  const fileMenu = page.getByLabel("File menu");
+  await fileMenu.getByText("File", { exact: true }).click();
+  const savePromise = page.waitForEvent("download");
+  await fileMenu.getByRole("button", { name: "Save Project" }).click();
+  const saved = JSON.parse(await readDownloadText(await savePromise));
+  expect(saved.editedDetailPngDataUrl).toBe(authoredDetail);
+
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+  await moreTools.getByRole("button", { name: "Reset details" }).click();
+  await expect(detailCanvas).toHaveAttribute("width", String(generated.analysis.previewWidthPx));
+  await expect(detailCanvas).toHaveAttribute("height", String(generated.analysis.previewHeightPx));
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.editedDetailPngDataUrl).toBeNull();
+
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "authored-resolution-round-trip.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(saved))
+  });
+  await expect(detailCanvas).toHaveAttribute("width", String(width));
+  await expect(detailCanvas).toHaveAttribute("height", String(height));
+
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "authored-resolution-export.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(authoredProject))
+  });
+  await expect(detailCanvas).toHaveAttribute("width", String(width));
+  await expect(detailCanvas).toHaveAttribute("height", String(height));
+
+  const moreToolsOpen = await moreTools.evaluate((element) => (element as HTMLDetailsElement).open);
+  if (!moreToolsOpen) await moreTools.locator("summary").click();
+  const useBlankTraceStudio = page.getByLabel("Starter detail line guidance").getByRole("button", { name: "Use blank Trace Studio" });
+  if (await useBlankTraceStudio.count()) await useBlankTraceStudio.click();
+  await expect(detailCanvas).toHaveAttribute("width", String(generated.analysis.previewWidthPx));
+  await expect(detailCanvas).toHaveAttribute("height", String(generated.analysis.previewHeightPx));
+  await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Add Missing Line" }).click();
+  await drawStroke(detailCanvas, [[0.35, 0.42], [0.5, 0.48], [0.65, 0.42]]);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
+  const manualStrokePoints = (await savedProjectSnapshot(page)).manualStrokes[0].points as Array<{ x: number; y: number }>;
+  expect(Math.max(...manualStrokePoints.map((point) => point.x))).toBeLessThanOrEqual(generated.analysis.previewWidthPx);
+  expect(Math.max(...manualStrokePoints.map((point) => point.y))).toBeLessThanOrEqual(generated.analysis.previewHeightPx);
+
+  await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await downloadFrom(page, "Download Printable PDF");
+  const requestText = pdfRequestBody ? new TextDecoder("latin1").decode(pdfRequestBody) : "";
+  const pdfDetailDataUrl = requestText.match(/name="editedDetail"[\s\S]*?(data:image\/png;base64,[A-Za-z0-9+/=]+)/)?.[1];
+  expect(pngDimensionsFromDataUrl(pdfDetailDataUrl)).toEqual({ width, height });
+
+  const moreExportOptions = page.getByLabel("Export workspace").getByLabel("More Export Options");
+  await moreExportOptions.locator("summary").click();
+  const svg = await readDownloadText(await downloadFrom(page, "Download SVG Linework"));
+  const svgDetailDataUrl = svg.match(/id="accepted-detail-layer"[^>]+href="(data:image\/png;base64,[^"]+)"/)?.[1];
+  expect(pngDimensionsFromDataUrl(svgDetailDataUrl)).toEqual({ width, height });
+
+});
+
 test("project persistence keeps one coherent revision and recovers from a visible Autosave failure", async ({ page }) => {
   await page.addInitScript(() => {
     if (sessionStorage.getItem("persistence-test-started")) return;
@@ -1524,6 +1627,13 @@ async function addProjectPaintColor(page: Page, hex: string, label: string) {
   await page.getByLabel("New paint hex").fill(hex);
   await page.getByLabel("New paint label").fill(label);
   await page.getByRole("button", { name: /Add color/ }).click();
+}
+
+function pngDimensionsFromDataUrl(dataUrl: string | undefined) {
+  if (!dataUrl) return null;
+  const png = Buffer.from(dataUrl.split(",", 2)[1] ?? "", "base64");
+  if (png.length < 24 || png.toString("ascii", 12, 16) !== "IHDR") return null;
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }
 
 function createSmokeCharacterPng() {
