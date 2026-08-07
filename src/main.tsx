@@ -1613,24 +1613,25 @@ function App() {
   }
 
   function detailBrushPixels(size: BrushSize) {
-    return brushPixels(size) * detailCanvasScale(
-      detailCanvasRef.current,
-      analysis?.previewWidthPx,
-      analysis?.previewHeightPx
-    );
+    return brushPixels(size) * acceptedDetailScale();
   }
 
   function detailSegmentOptions() {
-    const scale = detailCanvasScale(
-      detailCanvasRef.current,
-      analysis?.previewWidthPx,
-      analysis?.previewHeightPx
-    );
+    const scale = acceptedDetailScale();
     return {
       hitRadiusPx: 10 * scale,
       maxComponentPixels: Math.round(1800 * scale * scale),
       boundedRadiusPx: 54 * scale
     };
+  }
+
+  function acceptedDetailScale() {
+    if (editedDetailDataUrl === null) return 1;
+    return detailCanvasScale(
+      detailCanvasRef.current,
+      analysis?.previewWidthPx,
+      analysis?.previewHeightPx
+    );
   }
 
   function drawStrokeSegment(from: TracePoint, to: TracePoint) {
