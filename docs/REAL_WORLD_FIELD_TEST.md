@@ -13,9 +13,28 @@ The working product promise is:
 > interior transfer lines, and an optional paint reference, with only light
 > cleanup required.
 
-The field test begins from clean current `origin/main`. Record the exact commit
-before run 1. Do not change production code, tracing settings, fixtures,
-profiles, validators, or workflow tooling between runs 1 and 5.
+This protocol correction is based on the stabilized `main` commit
+`cf445db8a8e620aa24680b0f40fc59d30c5281ab`. Do not select sources or begin a
+run from that pre-correction baseline. After this docs-only PR merges, record
+its resulting merge SHA as the round's `Recorded commit`; that post-merge SHA,
+not `cf445db8`, is the only app commit used for all ten runs.
+
+Do not change production code, tracing settings, fixtures, profiles, validators,
+or workflow tooling during the round.
+
+## Outcome definitions
+
+- **Pass:** The packet meets the product promise with light cleanup: no more
+  than 5 minutes and no more than 5 deliberate delete/add actions, no major
+  region reconstruction, a usable Cut Line and important Detail Lines, and
+  correct PDF mechanics.
+- **Heavy cleanup:** The output is ultimately usable, but exceeds the light
+  cleanup promise in time, deliberate actions, or reconstruction effort.
+- **Fail:** The output is unusable, requires major reconstruction, or has a
+  scale, calibration, tiling, data-loss, or other blocking defect.
+
+Only **Pass** counts toward the required 8-of-10 reliability gate. Heavy
+cleanup does not count as a passing source.
 
 ## Source set
 
@@ -42,6 +61,11 @@ but do not replace a failed source with an easier one.
 
 ## Run protocol
 
+Before executing or evaluating any of the ten sources, record three distinct
+run numbers in the Physical checks table. Choose them before Run 1 and without
+seeing any results; do not defer this choice until printing. Keep those
+preselected numbers if the round must be restarted.
+
 For every source:
 
 1. Start from the same recorded app commit and use the ordinary Upload ->
@@ -55,10 +79,11 @@ For every source:
    page order, and adjacent overlap digitally.
 6. Record the result immediately in the worksheet. A failure stays in the set.
 
-Do not tune the algorithm or add source-specific logic during runs 1 through 5.
-After run 5, continue through run 10 on the same production behavior unless a
-scale, calibration, tiling, data-loss, or crash defect makes completion
-impossible. Record such a defect as a failure before any emergency correction.
+If any production-code correction becomes necessary during the round, stop the
+round immediately. Do not apply the correction and continue, and do not count
+the partial round. After the fix is merged, record the new `main` merge SHA as
+the `Recorded commit` and restart all ten sources from Run 1, using the same
+source set and preselected physical-test run numbers.
 
 For three deliberately varied runs, print the cover and two adjacent pages at
 Actual Size / 100%, measure the calibration square, assemble the pages, and
@@ -84,8 +109,9 @@ Use `Yes` or `No` where requested. `Overall result` must be `Pass`,
 
 ## Physical checks
 
-Select three runs before printing so the physical sample is not chosen only
-from the easiest results.
+The three run numbers must already be recorded before any source is executed or
+evaluated, as required by the Run protocol. This keeps the physical sample from
+being chosen only from the easiest results.
 
 | Run | Actual Size used | 1-inch calibration correct | Adjacent pages align | Outer Cut Line transfers | Detail Line transfers | Line weight practical | Color Guide useful | Notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -97,7 +123,8 @@ from the easiest results.
 
 Call the current workflow broadly reliable for this source range only if:
 
-- at least 8 of 10 sources produce usable packets;
+- at least 8 of 10 sources are classified **Pass**; **Heavy cleanup** does not
+  count toward this requirement;
 - there are zero Finished Size, calibration, or tiling failures;
 - median cleanup time is five minutes or less;
 - median cleanup actions (deletions plus additions) are five or fewer;
@@ -115,7 +142,7 @@ unless the recorded repeated blocker directly requires it.
 
 | Measure | Result |
 | --- | --- |
-| Recorded commit |  |
+| Recorded commit (post-protocol merge SHA) |  |
 | Usable packets |  / 10 |
 | Pass / Heavy cleanup / Fail |  /  /  |
 | Median cleanup minutes |  |
