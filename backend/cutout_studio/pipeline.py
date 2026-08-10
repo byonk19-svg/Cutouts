@@ -220,7 +220,11 @@ class TemplateAnalysis:
 def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> TemplateAnalysis:
     source = _load_image(image_bytes)
     initial_mask = _initial_subject_mask(source, settings)
-    mask = _clean_subject_mask(initial_mask, settings)
+    mask = _clean_subject_mask(
+        initial_mask,
+        settings,
+        preserve_sparse_alpha=_looks_like_sparse_alpha_subject(source, initial_mask),
+    )
     bounds = _mask_bounds(mask)
     cropped_source = source.crop(bounds)
     cropped_mask = mask.crop(bounds)
@@ -447,7 +451,12 @@ def _load_image(image_bytes: bytes) -> Image.Image:
 
 
 def _subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image:
-    return _clean_subject_mask(_initial_subject_mask(image, settings), settings)
+    initial_mask = _initial_subject_mask(image, settings)
+    return _clean_subject_mask(
+        initial_mask,
+        settings,
+        preserve_sparse_alpha=_looks_like_sparse_alpha_subject(image, initial_mask),
+    )
 
 
 def _initial_subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image:
@@ -461,6 +470,17 @@ def _initial_subject_mask(image: Image.Image, settings: TemplateSettings) -> Ima
         mask = Image.fromarray((foreground.astype(np.uint8) * 255), mode="L")
     elif _looks_like_line_art(rgb, alpha):
         mask = _filled_line_art_mask(rgb, alpha, settings)
+    elif (checkerboard_levels := _checkerboard_background_levels(image)) is not None:
+        gray = np.mean(rgb, axis=2)
+        saturation = np.max(rgb, axis=2) - np.min(rgb, axis=2)
+        tolerance = max(10, min(24, round(settings.threshold * 0.45)))
+        neutral = saturation <= max(12, settings.threshold // 2)
+        low_level, high_level = checkerboard_levels
+        checkerboard = neutral & (
+            (np.abs(gray - low_level) <= tolerance)
+            | (np.abs(gray - high_level) <= tolerance)
+        )
+        mask = Image.fromarray((~checkerboard).astype(np.uint8) * 255, mode="L")
     else:
         rgb_float = rgb.astype(np.float32)
         bg = _border_background_rgb(rgb)
@@ -471,7 +491,17 @@ def _initial_subject_mask(image: Image.Image, settings: TemplateSettings) -> Ima
     return mask
 
 
-def _clean_subject_mask(mask: Image.Image, settings: TemplateSettings) -> Image.Image:
+def _clean_subject_mask(
+    mask: Image.Image,
+    settings: TemplateSettings,
+    preserve_sparse_alpha: bool = False,
+) -> Image.Image:
+    if preserve_sparse_alpha:
+        mask = _clean_sparse_alpha_mask(mask, settings)
+        if not np.any(np.asarray(mask) > 0):
+            raise ValueError("No subject was detected. Try lowering the threshold or using a simpler background.")
+        return mask
+
     if settings.smoothing > 0:
         radius = max(1, settings.smoothing)
         mask = mask.filter(ImageFilter.GaussianBlur(radius=radius)).point(lambda px: 255 if px >= 128 else 0)
@@ -484,6 +514,73 @@ def _clean_subject_mask(mask: Image.Image, settings: TemplateSettings) -> Image.
     if not np.any(np.asarray(mask) > 0):
         raise ValueError("No subject was detected. Try lowering the threshold or using a simpler background.")
     return mask
+
+
+def _looks_like_sparse_alpha_subject(image: Image.Image, mask: Image.Image) -> bool:
+    rgba = np.asarray(image.convert("RGBA"), dtype=np.uint8)
+    if not np.any(rgba[:, :, 3] < 245):
+        return False
+
+    subject = np.asarray(mask.convert("L")) > 0
+    coverage = float(np.count_nonzero(subject)) / max(1, subject.size)
+    _labels, stats = _connected_components(subject)
+    component_count = max(0, len(stats) - 1)
+    return coverage < 0.08 and component_count >= 2
+
+
+def _clean_sparse_alpha_mask(mask: Image.Image, settings: TemplateSettings) -> Image.Image:
+    subject = np.asarray(mask.convert("L")) > 0
+    _labels, stats = _connected_components(subject)
+    if len(stats) <= 1:
+        return mask
+
+    largest_area = int(stats[1:, cv2.CC_STAT_AREA].max())
+    min_area = max(12, min(settings.speck_area, round(largest_area * 0.02)))
+    cleaned = _remove_small_components(mask, min_area)
+    if settings.hole_area > 0:
+        cleaned = _fill_small_holes(cleaned, settings.hole_area)
+
+    proximity = max(16, min(48, round(min(mask.size) * 0.16)))
+    return _keep_components_near_largest(cleaned, proximity)
+
+
+def _keep_components_near_largest(mask: Image.Image, proximity: int) -> Image.Image:
+    subject = np.asarray(mask.convert("L")) > 0
+    labels, stats = _connected_components(subject)
+    if len(stats) <= 1:
+        return mask
+
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    candidate_labels = {
+        index + 1
+        for index, area in enumerate(areas)
+        if int(area) > 0
+    }
+    selected = {int(np.argmax(areas) + 1)}
+
+    def gap_between(first: np.ndarray, second: np.ndarray) -> int:
+        first_left, first_top, first_width, first_height = first[:4]
+        second_left, second_top, second_width, second_height = second[:4]
+        first_right = first_left + first_width
+        first_bottom = first_top + first_height
+        second_right = second_left + second_width
+        second_bottom = second_top + second_height
+        horizontal_gap = max(second_left - first_right, first_left - second_right, 0)
+        vertical_gap = max(second_top - first_bottom, first_top - second_bottom, 0)
+        return max(horizontal_gap, vertical_gap)
+
+    while True:
+        nearby = {
+            label
+            for label in candidate_labels - selected
+            if any(gap_between(stats[label], stats[kept]) <= proximity for kept in selected)
+        }
+        if not nearby:
+            break
+        selected.update(nearby)
+
+    keep = np.isin(labels, tuple(selected))
+    return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 
 def _trace_quality_summary(
@@ -568,10 +665,13 @@ def _discarded_component_summary(initial_mask: Image.Image, final_mask: Image.Im
 
 
 def _looks_like_fake_checkerboard_background(image: Image.Image) -> bool:
+    return _checkerboard_background_levels(image) is not None
+
+
+def _checkerboard_background_levels(image: Image.Image) -> tuple[float, float] | None:
     rgba = np.asarray(image.convert("RGBA"), dtype=np.uint8)
-    alpha = rgba[:, :, 3]
-    if np.any(alpha < 245):
-        return False
+    if np.any(rgba[:, :, 3] < 245):
+        return None
 
     rgb = rgba[:, :, :3]
     edge = max(10, min(80, image.width // 5, image.height // 5))
@@ -586,17 +686,26 @@ def _looks_like_fake_checkerboard_background(image: Image.Image) -> bool:
     ).astype(np.float32)
     gray = np.mean(samples, axis=1)
     saturation = np.max(samples, axis=1) - np.min(samples, axis=1)
-    low = float(np.percentile(gray, 10))
-    high = float(np.percentile(gray, 90))
-    dark_ratio = float(np.mean(gray <= low + 6))
-    light_ratio = float(np.mean(gray >= high - 6))
+    neutral_gray = np.clip(np.rint(gray[saturation <= 18]), 0, 255).astype(np.uint8)
+    if len(neutral_gray) == 0:
+        return None
+    counts = np.bincount(neutral_gray, minlength=256)
+    first_level = int(np.argmax(counts))
+    minimum_count = len(neutral_gray) * 0.12
+    second_candidates = np.flatnonzero(
+        (counts >= minimum_count) & (np.abs(np.arange(256) - first_level) >= 16)
+    )
+    if len(second_candidates) == 0:
+        return None
+    second_level = int(second_candidates[np.argmax(counts[second_candidates])])
+    low_level, high_level = sorted((first_level, second_level))
+    midpoint = (low_level + high_level) / 2
     strips = [
         np.mean(rgb[:edge, :, :], axis=2),
         np.mean(rgb[-edge:, :, :], axis=2),
         np.mean(rgb[:, :edge, :], axis=2).T,
         np.mean(rgb[:, -edge:, :], axis=2).T,
     ]
-    midpoint = (low + high) / 2
     repeating_tiles = False
     max_lag = min(48, min(strip.shape[1] for strip in strips) // 3)
     for lag in range(6, max_lag + 1):
@@ -611,15 +720,9 @@ def _looks_like_fake_checkerboard_background(image: Image.Image) -> bool:
         if inverse_agreement < 0.58 and repeat_agreement > 0.78:
             repeating_tiles = True
             break
-    return (
-        high - low >= 14
-        and float(np.mean(saturation)) < 10
-        and 155 <= low <= 245
-        and high >= 220
-        and dark_ratio > 0.18
-        and light_ratio > 0.18
-        and repeating_tiles
-    )
+    if not repeating_tiles:
+        return None
+    return float(low_level), float(high_level)
 
 
 def _looks_like_finished_tile_page(image: Image.Image, initial_mask: Image.Image, subject_coverage: float) -> bool:
