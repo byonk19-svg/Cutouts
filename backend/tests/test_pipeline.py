@@ -176,6 +176,41 @@ def subtle_gradient_background_fixture() -> bytes:
     return out.getvalue()
 
 
+def baked_checkerboard_subject_fixture() -> bytes:
+    image = Image.new("RGB", (240, 320), "white")
+    pixels = image.load()
+    colors = [(170, 170, 170), (238, 238, 238)]
+    for y in range(image.height):
+        for x in range(image.width):
+            pixels[x, y] = colors[((x // 12) + (y // 12)) % 2]
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((54, 22, 186, 298), radius=28, fill=(228, 72, 82), outline=(8, 8, 8), width=6)
+    draw.ellipse((82, 74, 98, 94), fill=(8, 8, 8))
+    draw.ellipse((142, 74, 158, 94), fill=(8, 8, 8))
+    draw.arc((86, 116, 154, 164), start=20, end=160, fill=(8, 8, 8), width=5)
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+def sparse_alpha_subject_fixture() -> bytes:
+    image = Image.new("RGBA", (180, 360), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(image)
+    ink = (8, 8, 8, 255)
+    draw.ellipse((48, 18, 132, 126), outline=ink, width=3)
+    draw.ellipse((70, 58, 76, 64), fill=ink)
+    draw.ellipse((104, 58, 110, 64), fill=ink)
+    draw.arc((74, 76, 106, 106), start=15, end=165, fill=ink, width=3)
+    draw.line((90, 150, 90, 266), fill=ink, width=3)
+    draw.line((90, 178, 48, 220), fill=ink, width=3)
+    draw.line((90, 178, 132, 220), fill=ink, width=3)
+    draw.line((90, 266, 50, 342), fill=ink, width=3)
+    draw.line((90, 266, 136, 342), fill=ink, width=3)
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
 def ten_color_fixture() -> bytes:
     image = Image.new("RGBA", (300, 300), (255, 255, 255, 0))
     draw = ImageDraw.Draw(image)
@@ -645,6 +680,60 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertLess(top, 55)
         self.assertGreater(right, 200)
         self.assertGreater(bottom, 165)
+
+    def test_baked_checkerboard_background_is_excluded_from_subject_mask_and_palette(self) -> None:
+        settings = TemplateSettings(
+            finished_height_in=36,
+            threshold=42,
+            smoothing=4,
+            speck_area=60,
+            hole_area=220,
+            detail_lines=False,
+            palette_size=4,
+        )
+
+        source = Image.open(io.BytesIO(baked_checkerboard_subject_fixture())).convert("RGBA")
+        mask = _subject_mask(source, settings)
+        left, top, right, bottom = mask.getbbox()
+        analysis = analyze_template(baked_checkerboard_subject_fixture(), settings)
+
+        self.assertEqual(mask.getpixel((8, 8)), 0)
+        self.assertEqual(mask.getpixel((20, 8)), 0)
+        self.assertGreater(left, 20)
+        self.assertGreater(top, 10)
+        self.assertLess(right, source.width - 20)
+        self.assertLess(bottom, source.height - 10)
+        self.assertTrue(analysis.outer_cut_path.startswith("M "))
+        self.assertFalse(any(
+            entry.coverage > 0.25 and red == green == blue and 140 <= red <= 245
+            for entry in analysis.palette
+            for red, green, blue in [entry.rgb]
+        ))
+
+    def test_sparse_transparent_subject_survives_frontend_default_cleanup(self) -> None:
+        settings = TemplateSettings(
+            finished_height_in=36,
+            threshold=42,
+            smoothing=4,
+            speck_area=60,
+            hole_area=220,
+            detail_lines=False,
+            template_style="clean",
+        )
+
+        source = Image.open(io.BytesIO(sparse_alpha_subject_fixture())).convert("RGBA")
+        mask = _subject_mask(source, settings)
+        analysis = analyze_template(sparse_alpha_subject_fixture(), settings)
+        left, top, right, bottom = analysis.subject_bounds_px
+        mask_array = np.asarray(mask) > 0
+
+        self.assertGreater(right - left, 70)
+        self.assertGreater(bottom - top, 280)
+        self.assertGreater(right - left, 0)
+        self.assertGreater(bottom - top, 0)
+        self.assertGreater(np.count_nonzero(mask_array[10:135, 35:145]), 250)
+        self.assertGreater(np.count_nonzero(mask_array[250:355, 35:145]), 250)
+        self.assertGreater(len(analysis.outer_cut_path), 20)
 
     def test_line_art_input_fills_subject_silhouette_and_drops_page_marks(self) -> None:
         settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)
