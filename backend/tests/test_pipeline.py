@@ -1252,6 +1252,48 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIn("1 J", content)
         self.assertIn("1 j", content)
 
+    def test_pdf_manual_stroke_widths_ignore_preview_dimensions_and_finished_size(self) -> None:
+        for preview_width, preview_height, finished_height in (
+            (120, 160, 24),
+            (720, 1440, 48),
+        ):
+            with self.subTest(
+                preview_width=preview_width,
+                preview_height=preview_height,
+                finished_height=finished_height,
+            ):
+                settings = TemplateSettings.from_mapping({
+                    "templateStyle": "manual",
+                    "detailLines": False,
+                    "finishedHeightIn": finished_height,
+                    "manualStrokes": [
+                        {
+                            "id": f"stroke-{width}",
+                            "width": width,
+                            "color": "#000000",
+                            "tool": "draw",
+                            "points": [
+                                {"x": preview_width * 0.25, "y": preview_height * y},
+                                {"x": preview_width * 0.75, "y": preview_height * y},
+                            ],
+                        }
+                        for width, y in ((10, 0.3), (20, 0.5), (34, 0.7))
+                    ],
+                    "manualStrokeSourceWidthPx": preview_width,
+                    "manualStrokeSourceHeightPx": preview_height,
+                })
+
+                pdf_bytes = build_template_pdf(transparent_fixture(), settings)
+                reader = PdfReader(io.BytesIO(pdf_bytes))
+                content = "\n".join(
+                    page.get_contents().get_data().decode("latin-1", errors="ignore")
+                    for page in reader.pages
+                )
+
+                self.assertIn("2.5 w", content)
+                self.assertIn("4 w", content)
+                self.assertIn("6 w", content)
+
     def test_manual_trace_mode_returns_cutline_with_blank_detail_layer(self) -> None:
         settings = TemplateSettings.from_mapping({"templateStyle": "manual", "detailLines": False})
 

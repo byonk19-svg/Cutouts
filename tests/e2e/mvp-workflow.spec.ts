@@ -439,13 +439,14 @@ test("Editor Transactions keep Undo and Redo artifact-only while preserving pain
     [0.54, 0.35],
     [0.64, 0.31]
   ]);
-  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(rasterBefore);
-  const rasterAfter = await detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterBefore);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
   await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
   await expect.poll(async () => (await savedProjectSnapshot(page))?.projectPalette.some((color: { label: string }) => color.label === "Lifecycle paint")).toBe(true);
 
   await cleanControls.getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterBefore);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(0);
   await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
 
   const moreTools = page.getByLabel("More Tools");
@@ -453,7 +454,26 @@ test("Editor Transactions keep Undo and Redo artifact-only while preserving pain
     await moreTools.locator("summary").click();
   }
   await page.getByLabel("Template editor tools").getByRole("button", { name: "Redo" }).click();
-  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterAfter);
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterBefore);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
+
+  await cleanControls.getByRole("button", { name: "Remove Line" }).click();
+  const removalPoint = await waitForCanvasInkPoint(detailCanvas);
+  await detailCanvas.click({ position: await canvasLocalPoint(detailCanvas, removalPoint.x, removalPoint.y) });
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(rasterBefore);
+  const rasterAfterRemoval = await detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
+
+  await cleanControls.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterBefore);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
+  await cleanControls.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(0);
+  await page.getByLabel("Template editor tools").getByRole("button", { name: "Redo" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
+  await page.getByLabel("Template editor tools").getByRole("button", { name: "Redo" }).click();
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterAfterRemoval);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
 
   await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
   await page.getByRole("button", { name: "Continue to Export" }).click();
@@ -479,6 +499,63 @@ test("Editor Transactions keep Undo and Redo artifact-only while preserving pain
   await page.getByLabel("Template editor tools").getByRole("button", { name: "Redo" }).click();
   await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
   await expect.poll(async () => (await savedProjectSnapshot(page))?.workflowProgress.lineworkReviewed).toBe(false);
+});
+
+test("automatic Remove Line deletes a targeted maker stroke without changing generated detail", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "targeted-maker-stroke-removal.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const cleanControls = page.getByLabel("Clean Lines primary controls");
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  const rasterBefore = await detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await cleanControls.getByRole("button", { name: "Add Missing Line" }).click();
+  await drawStroke(detailCanvas, [
+    [0.22, 0.22],
+    [0.30, 0.27],
+    [0.38, 0.22]
+  ]);
+  await drawStroke(detailCanvas, [
+    [0.62, 0.62],
+    [0.70, 0.67],
+    [0.78, 0.62]
+  ]);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(2);
+
+  const beforeRemoval = await savedProjectSnapshot(page);
+  if (!beforeRemoval) throw new Error("Autosave did not contain the maker strokes.");
+  const [firstStroke, secondStroke] = beforeRemoval.manualStrokes;
+  const targetPoint = firstStroke.points[Math.floor(firstStroke.points.length / 2)];
+
+  await cleanControls.getByRole("button", { name: "Remove Line" }).click();
+  await detailCanvas.click({
+    position: await canvasLocalPoint(
+      detailCanvas,
+      targetPoint.x / beforeRemoval.analysis.previewWidthPx,
+      targetPoint.y / beforeRemoval.analysis.previewHeightPx
+    )
+  });
+
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.map((stroke: { id: string }) => stroke.id)).toEqual([secondStroke.id]);
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterBefore);
+
+  await cleanControls.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.map((stroke: { id: string }) => stroke.id)).toEqual([firstStroke.id, secondStroke.id]);
+
+  const moreTools = page.getByLabel("More Tools");
+  if (!await moreTools.evaluate((element) => element instanceof HTMLDetailsElement && element.open)) {
+    await moreTools.locator("summary").click();
+  }
+  await page.getByLabel("Template editor tools").getByRole("button", { name: "Redo" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.map((stroke: { id: string }) => stroke.id)).toEqual([secondStroke.id]);
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(rasterBefore);
 });
 
 test("project name and Finished Size preserve reviewed project work", async ({ page }) => {
@@ -528,6 +605,85 @@ test("project name and Finished Size preserve reviewed project work", async ({ p
     ...before.workflowProgress,
     activeStep: "upload"
   });
+});
+
+test("automatic maker strokes survive size changes and save/reopen, then reset cleanly", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  let pdfRequestBody: Buffer | null = null;
+  await page.route("**/api/export", async (route) => {
+    pdfRequestBody = route.request().postDataBuffer();
+    await route.fulfill({ status: 200, contentType: "application/pdf", body: Buffer.from("%PDF-1.4\n%%EOF") });
+  });
+  await page.goto("/");
+
+  const uploadStep = page.getByLabel("Upload step");
+  await uploadStep.getByLabel("Source image").setInputFiles({
+    name: "automatic-maker-stroke.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await uploadStep.getByRole("button", { name: "Generate Template" }).click();
+
+  const guidedWorkflow = page.getByLabel("Guided workflow");
+  const cleanControls = page.getByLabel("Clean Lines primary controls");
+  const detailCanvas = page.getByLabel("Editable interior detail lines");
+  const generatedRaster = await detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await cleanControls.getByRole("button", { name: "Add Missing Line" }).click();
+  const moreTools = page.getByLabel("More Tools");
+  await moreTools.locator("summary").click();
+  await page.getByLabel("Brush size").selectOption("thin");
+  await drawStroke(detailCanvas, [[0.3, 0.35], [0.5, 0.42], [0.7, 0.35]]);
+
+  await expect.poll(() => detailCanvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(generatedRaster);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
+  const afterDraw = await savedProjectSnapshot(page);
+  expect(afterDraw.editedDetailPngDataUrl).toBeNull();
+  expect(afterDraw.manualStrokes[0].width).toBe(10);
+
+  const fileMenu = page.getByLabel("File menu");
+  await fileMenu.getByText("File", { exact: true }).click();
+  const savePromise = page.waitForEvent("download");
+  await fileMenu.getByRole("button", { name: "Save Project" }).click();
+  const saved = JSON.parse(await readDownloadText(await savePromise));
+  expect(saved.manualStrokes).toEqual(afterDraw.manualStrokes);
+  expect(saved.editedDetailPngDataUrl).toBeNull();
+
+  await page.locator("input.hidden-project-input").setInputFiles({
+    name: "automatic-maker-stroke.cutout.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(saved))
+  });
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes).toEqual(afterDraw.manualStrokes);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.editedDetailPngDataUrl).toBeNull();
+
+  await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await downloadFrom(page, "Download Printable PDF");
+  const requestText = pdfRequestBody ? new TextDecoder("latin1").decode(pdfRequestBody) : "";
+  expect(requestText).toContain('"manualStrokes":[{"id":"stroke-1"');
+  expect(requestText).toContain('"width":10');
+  expect(requestText).not.toContain('name="editedDetail"');
+
+  await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
+  await expect.poll(() => canvasVisiblePixelCount(page.locator(".feature-line-layer"))).toBeGreaterThan(0);
+  if (!await moreTools.evaluate((element) => element instanceof HTMLDetailsElement && element.open)) {
+    await moreTools.locator("summary").click();
+  }
+  await moreTools.getByRole("button", { name: "Reset details" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(0);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.editedDetailPngDataUrl).toBeNull();
+  await expect.poll(() => canvasVisiblePixelCount(page.locator(".feature-line-layer"))).toBe(0);
+
+  await cleanControls.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes).toEqual(afterDraw.manualStrokes);
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.editedDetailPngDataUrl).toBeNull();
+
+  await guidedWorkflow.getByRole("button", { name: /Upload/ }).click();
+  await uploadStep.getByLabel("Finished height").fill("48");
+  await expect.poll(async () => (await savedProjectSnapshot(page))?.settings.finishedHeightIn).toBe(48);
+  const afterResize = await savedProjectSnapshot(page);
+  expect(afterResize.manualStrokes).toEqual(afterDraw.manualStrokes);
+  expect(afterResize.editedDetailPngDataUrl).toBeNull();
 });
 
 test("maker can use authored SVG ink as editable starter lines", async ({ page }) => {
@@ -1108,7 +1264,9 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   const svg = await readDownloadText(svgDownload);
   expect(svg).toContain("<path");
   expect(svg).toContain('id="manual-strokes"');
-  expect(svg).toContain("stroke-width=\"34\"");
+  const exportedStrokeWidth = Number(svg.match(/id="stroke-[^"]+"[^>]+stroke-width="([^"]+)"/)?.[1]);
+  const exportedStrokePoints = exportedStrokeWidth * projectJson.analysis.finishedHeightIn / projectJson.analysis.previewHeightPx * 72;
+  expect(exportedStrokePoints).toBeCloseTo(6, 1);
   expect(svg).not.toContain("reference-layer");
   expect(svg).not.toContain("original-underlay");
   expect(svg).not.toContain("selectedStrokeId");
