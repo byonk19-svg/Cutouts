@@ -75,8 +75,8 @@ const analysis = {
   assert(svg.includes('d="M 4 4 L 276 4 L 276 716 L 4 716 Z"'), "SVG export should include the cutline as vector path data");
   assert(!svg.includes("data:image/png;base64,outer-cutline"), "SVG export should not embed the cutline PNG");
   assert(svg.includes('id="manual-strokes"'), "SVG export should include a manual stroke layer");
-  assert(svg.includes('stroke-width="12"'), "SVG export should preserve thin manual stroke widths");
-  assert(svg.includes('stroke-width="20"'), "SVG export should preserve normal manual stroke widths");
+  assert(svg.includes('stroke-width="0.694"'), "SVG export should convert thin manual stroke widths to physical viewBox units");
+  assert(svg.includes('stroke-width="1.111"'), "SVG export should convert normal manual stroke widths to physical viewBox units");
   assert(svg.includes('stroke-linecap="round"'), "SVG export should keep round line caps");
   assert(svg.includes('stroke-linejoin="round"'), "SVG export should keep round line joins");
   assert(svg.includes('id="calibration-square"'), "SVG export should include a print calibration square");
@@ -132,7 +132,32 @@ const analysis = {
 
   assertEqual(after, before, "save/load project then SVG export should preserve stroke data");
   assert(after.includes("M 12 11"), "edited stroke should appear in SVG export with moved geometry");
-  assert(after.includes('stroke-width="34"'), "edited stroke width should persist through save/load into SVG export");
+  assert(after.includes('stroke-width="1.667"'), "edited stroke physical width should persist through save/load into SVG export");
+}
+
+{
+  for (const [logicalWidth, expectedPoints] of [[10, 2.5], [20, 4], [34, 6]] as const) {
+    for (const [previewHeightPx, finishedHeightIn] of [[480, 24], [1440, 48]] as const) {
+      const variantAnalysis = {
+        ...analysis,
+        previewWidthPx: previewHeightPx / 2,
+        previewHeightPx,
+        finishedWidthIn: finishedHeightIn / 2,
+        finishedHeightIn
+      };
+      const svg = buildTraceLineworkSvg({
+        projectName: "Physical stroke width",
+        analysis: variantAnalysis,
+        manualStrokes: [createTraceStroke(`stroke-${logicalWidth}`, [{ x: 10, y: 10 }, { x: 20, y: 20 }], logicalWidth)]
+      });
+      const encodedWidth = Number(svg.match(/stroke-\d+" d="[^"]+" stroke-width="([^"]+)"/)?.[1]);
+      const actualPoints = encodedWidth * finishedHeightIn / previewHeightPx * 72;
+      assert(
+        Math.abs(actualPoints - expectedPoints) < 0.002,
+        `${logicalWidth}px logical stroke should remain ${expectedPoints}pt at ${finishedHeightIn}in / ${previewHeightPx}px`
+      );
+    }
+  }
 }
 
 {

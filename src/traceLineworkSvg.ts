@@ -1,5 +1,5 @@
 import type { CutoutProjectAnalysis } from "./cutoutProject";
-import type { TraceStroke } from "./traceStrokes";
+import { traceStrokeWidthViewBox, type TraceStroke } from "./traceStrokes.ts";
 
 export type TraceLineworkSvgInput = {
   projectName: string;
@@ -52,7 +52,12 @@ export function buildTraceLineworkSvg({
   for (const stroke of manualStrokes) {
     const pathData = strokePathData(stroke);
     if (!pathData) continue;
-    parts.push(`<path id="${escapeXml(stroke.id)}" d="${pathData}" stroke-width="${formatNumber(stroke.width)}"/>`);
+    const strokeWidth = traceStrokeWidthViewBox(
+      stroke.width,
+      analysis.previewHeightPx,
+      analysis.finishedHeightIn
+    );
+    parts.push(`<path id="${escapeXml(stroke.id)}" d="${pathData}" stroke-width="${formatNumber(strokeWidth)}"/>`);
   }
   parts.push("</g>");
 

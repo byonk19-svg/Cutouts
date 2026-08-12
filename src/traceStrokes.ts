@@ -36,6 +36,17 @@ export type DrawTraceStrokeOptions = {
   dimUnselected?: boolean;
 };
 
+export function traceStrokeWidthPoints(width: number) {
+  if (width <= 12) return 2.5;
+  if (width >= 30) return 6;
+  return 4;
+}
+
+export function traceStrokeWidthViewBox(width: number, previewHeightPx: number, finishedHeightIn: number) {
+  if (previewHeightPx <= 0 || finishedHeightIn <= 0) return 0;
+  return traceStrokeWidthPoints(width) / 72 * previewHeightPx / finishedHeightIn;
+}
+
 export function createTraceStroke(id: string, points: TracePoint[], width: number): TraceStroke {
   return {
     id,

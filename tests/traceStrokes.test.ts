@@ -14,12 +14,28 @@ import {
   smoothTraceStrokeById,
   smoothTracePoints,
   strokeHitTest,
+  traceStrokeWidthPoints,
+  traceStrokeWidthViewBox,
   updateTraceStrokePoint,
   type TraceStroke
 } from "../src/traceStrokes.ts";
 
 function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message);
+}
+
+{
+  assertEqual(traceStrokeWidthPoints(10), 2.5, "thin maker strokes should print at 2.5 points");
+  assertEqual(traceStrokeWidthPoints(20), 4, "normal maker strokes should print at 4 points");
+  assertEqual(traceStrokeWidthPoints(34), 6, "bold maker strokes should print at 6 points");
+
+  for (const finishedHeightIn of [24, 48]) {
+    for (const previewHeightPx of [480, 1440]) {
+      const viewBoxWidth = traceStrokeWidthViewBox(10, previewHeightPx, finishedHeightIn);
+      const physicalPoints = viewBoxWidth * finishedHeightIn / previewHeightPx * 72;
+      assertEqual(Number(physicalPoints.toFixed(6)), 2.5, "thin SVG strokes should retain physical width across size and preview changes");
+    }
+  }
 }
 
 function assertEqual(actual: unknown, expected: unknown, message: string) {

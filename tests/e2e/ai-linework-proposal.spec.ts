@@ -389,17 +389,20 @@ test("a proposal response is ignored after accepted Detail Lines change while th
   await expect(proposalCard.getByRole("status")).toBeVisible();
 
   const acceptedBefore = await canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  const makerStrokesBefore = (await savedProject(page)).manualStrokes;
   await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Add Missing Line" }).click();
   await drawStroke(canvas, [[0.38, 0.38], [0.48, 0.42], [0.58, 0.38]]);
-  await expect.poll(() => canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(acceptedBefore);
-  const acceptedAfter = await canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(acceptedBefore);
+  await expect.poll(async () => (await savedProject(page)).manualStrokes.length).toBe(makerStrokesBefore.length + 1);
+  const makerStrokesAfter = (await savedProject(page)).manualStrokes;
   await expect(proposalCard).toContainText("Simplify for wood template");
 
   releaseResponse?.();
   await page.waitForTimeout(500);
   await expect(proposalCard).toContainText("Simplify for wood template");
   await expect(proposalCard).not.toContainText("Ready for visual review");
-  await expect.poll(() => canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(acceptedAfter);
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).toBe(acceptedBefore);
+  await expect.poll(async () => (await savedProject(page)).manualStrokes).toEqual(makerStrokesAfter);
 });
 
 test("exports only accepted AI Detail Lines to SVG and PDF", async ({ page }) => {
