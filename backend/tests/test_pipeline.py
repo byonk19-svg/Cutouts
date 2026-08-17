@@ -35,6 +35,7 @@ from backend.cutout_studio.pipeline import (
     _fill_small_holes,
     _line_art,
     _manual_stroke_width_pt,
+    _make_trace_image,
     _remove_small_components,
     _subject_mask,
 )
@@ -206,6 +207,19 @@ def sparse_alpha_subject_fixture() -> bytes:
     draw.line((90, 178, 132, 220), fill=ink, width=3)
     draw.line((90, 266, 50, 342), fill=ink, width=3)
     draw.line((90, 266, 136, 342), fill=ink, width=3)
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+def thin_alpha_subject_fixture() -> bytes:
+    image = Image.new("RGBA", (246, 581), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((72, 20, 174, 150), outline=(0, 0, 0, 255), width=3)
+    draw.line((123, 151, 123, 410), fill=(0, 0, 0, 255), width=3)
+    draw.line((25, 245, 221, 245), fill=(0, 0, 0, 255), width=3)
+    draw.line((123, 410, 42, 558), fill=(0, 0, 0, 255), width=3)
+    draw.line((123, 410, 212, 558), fill=(0, 0, 0, 255), width=3)
     out = io.BytesIO()
     image.save(out, format="PNG")
     return out.getvalue()
@@ -453,6 +467,77 @@ def jpeg_dark_color_cartoon_fixture() -> tuple[Image.Image, Image.Image]:
 
 
 class PrintPipelineTest(unittest.TestCase):
+    def test_analysis_reports_thin_silhouette_without_replacing_original_cutline(self) -> None:
+        analysis = analyze_template(thin_alpha_subject_fixture(), TemplateSettings(finished_height_in=36))
+
+        self.assertIsNotNone(analysis.thin_silhouette)
+        self.assertTrue(analysis.thin_silhouette.detected)
+        self.assertLess(analysis.thin_silhouette.p10_width_in, 0.25)
+        self.assertTrue(analysis.outer_cut_path.startswith("M "))
+        payload = analysis.to_json()
+        self.assertTrue(payload["thinSilhouette"]["detected"])
+        self.assertEqual(payload["outerCutPath"], analysis.outer_cut_path)
+
+    def test_trace_uses_accepted_cutline_path_without_replacing_original_detail(self) -> None:
+        source = Image.new("RGBA", (160, 240), (255, 255, 255, 0))
+        draw = ImageDraw.Draw(source)
+        draw.ellipse((20, 20, 140, 220), fill=(220, 80, 80, 255))
+        draw.line((45, 120, 115, 120), fill=(0, 0, 0, 255), width=5)
+        mask = _subject_mask(source, TemplateSettings())
+        bounds = pipeline._mask_bounds(mask)
+        cropped_source = source.crop(bounds)
+        cropped_mask = mask.crop(bounds)
+        width_in = 12 * cropped_source.width / cropped_source.height
+        triangle = f"M 2 2 L {cropped_source.width - 3} 2 L {cropped_source.width / 2:.3f} {cropped_source.height - 3} Z"
+        accepted_settings = TemplateSettings(
+            finished_height_in=12,
+            template_style="detailed",
+            detail_extraction_mode="rendered",
+            accepted_cut_line_path=triangle,
+            accepted_cut_line_width_px=cropped_source.width,
+            accepted_cut_line_height_px=cropped_source.height,
+        )
+
+        accepted_with_detail = _make_trace_image(
+            cropped_source,
+            cropped_mask,
+            accepted_settings,
+            width_in,
+            12,
+        )
+        accepted_cut_only = _make_trace_image(
+            cropped_source,
+            cropped_mask,
+            TemplateSettings(
+                **{
+                    **accepted_settings.__dict__,
+                    "detail_lines": False,
+                }
+            ),
+            width_in,
+            12,
+        )
+        baseline_cut_only = _make_trace_image(
+            cropped_source,
+            cropped_mask,
+            TemplateSettings(finished_height_in=12, detail_lines=False),
+            width_in,
+            12,
+        )
+
+        self.assertIsNotNone(ImageChops.difference(accepted_cut_only, baseline_cut_only).getbbox())
+        self.assertIsNotNone(ImageChops.difference(accepted_with_detail, accepted_cut_only).getbbox())
+
+    def test_export_rejects_malformed_accepted_cutline_path(self) -> None:
+        settings = TemplateSettings(
+            accepted_cut_line_path="M 0 0 Q 10 10 20 20 Z",
+            accepted_cut_line_width_px=100,
+            accepted_cut_line_height_px=100,
+        )
+
+        with self.assertRaisesRegex(ValueError, "accepted Cut Line"):
+            build_template_pdf(transparent_fixture(), settings)
+
     def test_rejects_over_limit_image_header_before_rgba_conversion(self) -> None:
         class FakeLargeImage:
             width = 10_000

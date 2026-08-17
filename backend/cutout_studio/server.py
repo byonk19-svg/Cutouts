@@ -7,7 +7,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .ai_linework import CONFIRMED_ESTIMATE_USD, generate_linework_proposal
-from .pipeline import TemplateSettings, analyze_template, build_template_pdf, match_paint_hex
+from .pipeline import TemplateSettings, analyze_template, build_template_pdf, match_paint_hex, propose_cutline_reinforcement
+from .thin_silhouette import PROPOSAL_MAX_WIDTH_IN, PROPOSAL_MIN_WIDTH_IN
 
 
 HOST = "127.0.0.1"
@@ -19,7 +20,7 @@ ALLOWED_BROWSER_ORIGINS = {
 MULTIPART_BODY_LIMIT_BYTES = 25 * 1024 * 1024
 JSON_BODY_LIMIT_BYTES = 64 * 1024
 JSON_POST_ROUTES = {"/api/match-color"}
-MULTIPART_POST_ROUTES = {"/api/analyze", "/api/export", "/api/generate-linework"}
+MULTIPART_POST_ROUTES = {"/api/analyze", "/api/export", "/api/generate-linework", "/api/reinforce-cutline"}
 GET_ROUTES = {"/api/health"}
 ALL_API_ROUTES = GET_ROUTES | JSON_POST_ROUTES | MULTIPART_POST_ROUTES
 
@@ -68,6 +69,27 @@ class CutoutStudioHandler(BaseHTTPRequestHandler):
                 image_bytes, settings, _edited_detail = self._read_template_request()
                 analysis = analyze_template(image_bytes, settings)
                 self._send_json(analysis.to_json())
+                return
+            if self.path == "/api/reinforce-cutline":
+                form = self._read_template_form()
+                image_bytes, settings = self._image_and_settings(form)
+                try:
+                    minimum_width_in = float(form.get("minimumWidthIn", b"").decode("utf-8"))
+                except (UnicodeDecodeError, ValueError) as exc:
+                    raise ValueError("Minimum finished width must be between 0.25 and 0.75 inches.") from exc
+                if not PROPOSAL_MIN_WIDTH_IN <= minimum_width_in <= PROPOSAL_MAX_WIDTH_IN:
+                    raise ValueError("Minimum finished width must be between 0.25 and 0.75 inches.")
+                proposal, outer_line_png = propose_cutline_reinforcement(image_bytes, settings, minimum_width_in)
+                self._send_json({
+                    "minimumWidthIn": proposal.minimum_width_in,
+                    "outerCutPath": proposal.outer_cut_path,
+                    "outerLinePngDataUrl": _png_data_url(outer_line_png),
+                    "previewWidthPx": proposal.preview_width_px,
+                    "previewHeightPx": proposal.preview_height_px,
+                    "topologyChanges": proposal.topology.to_json(),
+                    "diagnostic": proposal.diagnostic.to_json(),
+                    "excludedSmallComponentCount": proposal.excluded_small_component_count,
+                })
                 return
             if self.path == "/api/export":
                 image_bytes, settings, edited_detail = self._read_template_request()

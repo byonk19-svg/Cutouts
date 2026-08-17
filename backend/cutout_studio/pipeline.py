@@ -17,6 +17,13 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
+from .thin_silhouette import (
+    ThinSilhouetteDiagnostic,
+    ThinSilhouetteProposal,
+    measure_thin_silhouette,
+    propose_reinforced_silhouette,
+)
+
 
 TEMPLATE_STYLES = {"cutOnly", "clean", "manual", "marker", "detailed"}
 TEMPLATE_STYLE_ALIASES = {"outline": "cutOnly", "paint": "clean", "extra": "detailed"}
@@ -80,6 +87,9 @@ class TemplateSettings:
     manual_strokes: tuple[ManualTraceStroke, ...] = field(default_factory=tuple)
     manual_stroke_source_width_px: float = 0.0
     manual_stroke_source_height_px: float = 0.0
+    accepted_cut_line_path: str = ""
+    accepted_cut_line_width_px: float = 0.0
+    accepted_cut_line_height_px: float = 0.0
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "TemplateSettings":
@@ -110,6 +120,9 @@ class TemplateSettings:
             manual_strokes=_manual_strokes_from_mapping(data.get("manualStrokes")),
             manual_stroke_source_width_px=_bounded_float(data.get("manualStrokeSourceWidthPx"), 0.0, 10000.0, 0.0),
             manual_stroke_source_height_px=_bounded_float(data.get("manualStrokeSourceHeightPx"), 0.0, 10000.0, 0.0),
+            accepted_cut_line_path=str(data.get("acceptedCutLinePath", "")),
+            accepted_cut_line_width_px=_bounded_float(data.get("acceptedCutLineWidthPx"), 0.0, 10000.0, 0.0),
+            accepted_cut_line_height_px=_bounded_float(data.get("acceptedCutLineHeightPx"), 0.0, 10000.0, 0.0),
         )
 
 
@@ -169,6 +182,7 @@ class TemplateAnalysis:
     preview_height_px: int
     palette: tuple[PaletteColor, ...]
     trace_quality: dict[str, Any]
+    thin_silhouette: ThinSilhouetteDiagnostic | None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -188,6 +202,7 @@ class TemplateAnalysis:
             "previewWidthPx": self.preview_width_px,
             "previewHeightPx": self.preview_height_px,
             "traceQuality": self.trace_quality,
+            "thinSilhouette": self.thin_silhouette.to_json() if self.thin_silhouette else None,
             "palette": [
                 {
                     "rgb": color.rgb,
@@ -238,6 +253,10 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
     preview, outer_line, detail_line, paint_guide = _make_preview_layers(cropped_source, cropped_mask, settings)
     preview_mask = _preview_mask(cropped_source, cropped_mask)
     outer_cut_path = _mask_to_svg_path(preview_mask, simplify_px=max(1.2, settings.smoothing))
+    try:
+        thin_silhouette = measure_thin_silhouette(preview_mask, settings.finished_height_in)
+    except ValueError:
+        thin_silhouette = None
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
     trace_quality = _trace_quality_summary(
         source,
@@ -268,7 +287,24 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
         preview_height_px=Image.open(io.BytesIO(preview)).height,
         palette=palette,
         trace_quality=trace_quality,
+        thin_silhouette=thin_silhouette,
     )
+
+
+def propose_cutline_reinforcement(
+    image_bytes: bytes,
+    settings: TemplateSettings,
+    minimum_width_in: float,
+) -> tuple[ThinSilhouetteProposal, bytes]:
+    source = _load_image(image_bytes)
+    mask = _subject_mask(source, settings)
+    bounds = _mask_bounds(mask)
+    cropped_source = source.crop(bounds)
+    cropped_mask = mask.crop(bounds)
+    preview_mask = _preview_mask(cropped_source, cropped_mask)
+    proposal = propose_reinforced_silhouette(preview_mask, settings.finished_height_in, minimum_width_in)
+    outer_line = _outer_line_from_mask(Image.fromarray(proposal.mask.astype(np.uint8) * 255, mode="L"), 3)
+    return proposal, _png_bytes(outer_line)
 
 
 def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_detail_png: bytes | None = None) -> bytes:
@@ -990,6 +1026,15 @@ def _make_trace_image(
         detail_extraction_mode=detail_extraction_mode,
         print_scale=True,
     )
+    if settings.accepted_cut_line_path.strip():
+        outer = _accepted_cut_line_layer(
+            settings.accepted_cut_line_path,
+            settings.accepted_cut_line_width_px,
+            settings.accepted_cut_line_height_px,
+            target_px,
+            line_width=9,
+        )
+        composed = _compose_line_layers(outer, detail)
     if edited_detail_png:
         edited_detail = _edited_detail_layer(edited_detail_png, target_px)
         return _compose_line_layers(outer, edited_detail)
@@ -1056,6 +1101,45 @@ def _transparent_line_layer(mask: Image.Image) -> Image.Image:
     layer = Image.new("RGBA", mask.size, BLACK_LINE_COLOR)
     layer.putalpha(mask.convert("L"))
     return layer
+
+
+def _outer_line_from_mask(mask: Image.Image, line_width: int) -> Image.Image:
+    mask_l = mask.convert("L")
+    eroded = _erode_mask(mask_l, 3)
+    boundary = Image.fromarray(
+        np.maximum(0, np.asarray(mask_l, dtype=np.int16) - np.asarray(eroded, dtype=np.int16)).astype(np.uint8),
+        mode="L",
+    )
+    return _transparent_line_layer(boundary.filter(ImageFilter.MaxFilter(_odd_filter_size(line_width))))
+
+
+def _accepted_cut_line_layer(
+    path: str,
+    source_width_px: float,
+    source_height_px: float,
+    target_size: tuple[int, int],
+    *,
+    line_width: int,
+) -> Image.Image:
+    points = _accepted_cut_line_points(path, source_width_px, source_height_px)
+    scale_x = target_size[0] / source_width_px
+    scale_y = target_size[1] / source_height_px
+    scaled = [(round(x * scale_x), round(y * scale_y)) for x, y in points]
+    alpha = Image.new("L", target_size, 0)
+    ImageDraw.Draw(alpha).line([*scaled, scaled[0]], fill=255, width=line_width, joint="curve")
+    return _transparent_line_layer(alpha)
+
+
+def _accepted_cut_line_points(path: str, width_px: float, height_px: float) -> list[tuple[float, float]]:
+    number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
+    grammar = rf"\s*M\s+{number}\s+{number}(?:\s+L\s+{number}\s+{number}){{2,}}\s+Z\s*"
+    if width_px <= 0 or height_px <= 0 or not re.fullmatch(grammar, path):
+        raise ValueError("The accepted Cut Line path or preview dimensions are invalid.")
+    values = [float(value) for value in re.findall(number, path)]
+    points = list(zip(values[0::2], values[1::2], strict=True))
+    if any(not math.isfinite(x) or not math.isfinite(y) or x < 0 or y < 0 or x > width_px or y > height_px for x, y in points):
+        raise ValueError("The accepted Cut Line path extends outside its preview dimensions.")
+    return points
 
 
 def _antialias_line_art_mask(mask: Image.Image) -> Image.Image:
