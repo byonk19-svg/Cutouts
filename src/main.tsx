@@ -71,6 +71,14 @@ import {
 } from "./traceStrokes";
 import { buildTraceLineworkSvg, svgLineworkFileName } from "./traceLineworkSvg";
 import { buildTraceQualityReview } from "./traceQuality";
+import {
+  INITIAL_REINFORCEMENT_WIDTH_IN,
+  MAX_REINFORCEMENT_WIDTH_IN,
+  MIN_REINFORCEMENT_WIDTH_IN,
+  REINFORCEMENT_NOT_SAFETY_COPY,
+  parseThinSilhouetteProposalResponse,
+  topologyChangeSummary
+} from "./thinSilhouette";
 import { isSvgFile, prepareSvgFastPathUpload, svgInkForPreview } from "./svgFastPath";
 import {
   DEFAULT_WORKFLOW_PROGRESS,
@@ -286,6 +294,9 @@ function App() {
   const aiProposal = aiProposalState.status === "ready" ? aiProposalState.proposal : null;
   const aiProposalReview = aiProposalState.status === "ready" ? aiProposalState.review : null;
   const aiProposalError = aiProposalState.status === "failed" ? aiProposalState.error : null;
+  const cutLineProposalState = sessionView.cutLineProposal;
+  const cutLineProposal = cutLineProposalState.status === "ready" ? cutLineProposalState.proposal : null;
+  const cutLineProposalError = cutLineProposalState.status === "failed" ? cutLineProposalState.error : null;
   const workflowProgress = projectCapabilities.guidedWorkflow.progress;
   const [projectNameDraft, setProjectNameDraft] = useState(projectName);
   const updateProjectSettings = (nextSettings: Settings) => applyProjectSessionAction({
@@ -315,6 +326,8 @@ function App() {
   const [projectStatus, setProjectStatus] = useState<ProjectStatus>("No saved project");
   const [autoStarterOpen, setAutoStarterOpen] = useState(true);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [reinforcementReviewOpen, setReinforcementReviewOpen] = useState(false);
+  const [reinforcementWidthIn, setReinforcementWidthIn] = useState(INITIAL_REINFORCEMENT_WIDTH_IN);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTool, setEditorTool] = useState<EditorTool>("remove");
   const [brushSize, setBrushSize] = useState<BrushSize>("normal");
@@ -626,6 +639,12 @@ function App() {
           })
         : null;
       const initialProjectPalette = seedProjectPaletteFromDetected(body.palette, []);
+      const preparedAnalysis: Analysis = {
+        ...body,
+        originalOuterCutPath: body.outerCutPath,
+        originalOuterLinePngDataUrl: body.outerLinePngDataUrl,
+        cutLineReinforcement: null
+      };
       const completed = applyProjectSessionAction({
         type: "complete-source-analysis",
         token,
@@ -641,7 +660,7 @@ function App() {
             }
           : {}),
         settings: nextSettings,
-        analysis: body,
+        analysis: preparedAnalysis,
         inputReadiness: candidate?.inputReadinessOverride
           ?? inputReadinessForAnalysis(body, targetSvgAuthoredMarkup !== null),
         initialDetailPngDataUrl: importedSvgDetail,
@@ -748,6 +767,63 @@ function App() {
     applyProjectSessionAction({ type: "reject-ai-proposal" });
   }
 
+  async function requestCutLineReinforcement(minimumWidthIn: number) {
+    if (!image || !analysis) return;
+    const requesting = applyProjectSessionAction({ type: "begin-cutline-reinforcement" });
+    if (requesting.outcome.status !== "requesting-cutline-reinforcement") return;
+    const token = requesting.outcome.token;
+    try {
+      const payload = new FormData();
+      payload.append("image", image);
+      payload.append("settings", JSON.stringify(settings));
+      payload.append("minimumWidthIn", String(minimumWidthIn));
+      const response = await fetch("/api/reinforce-cutline", { method: "POST", body: payload });
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        const message = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
+          ? body.error
+          : "Unable to reinforce the Cut Line coherently.";
+        throw new Error(message);
+      }
+      const proposal = parseThinSilhouetteProposalResponse(body);
+      applyProjectSessionAction({ type: "complete-cutline-reinforcement", token, proposal });
+    } catch (err) {
+      applyProjectSessionAction({
+        type: "fail-cutline-reinforcement",
+        token,
+        error: err instanceof Error ? err.message : "Unable to reinforce the Cut Line coherently."
+      });
+    }
+  }
+
+  function openCutLineReinforcementReview() {
+    setReinforcementWidthIn(INITIAL_REINFORCEMENT_WIDTH_IN);
+    setReinforcementReviewOpen(true);
+    void requestCutLineReinforcement(INITIAL_REINFORCEMENT_WIDTH_IN);
+  }
+
+  function changeReinforcementWidth(width: number) {
+    setReinforcementWidthIn(width);
+    applyProjectSessionAction({ type: "cancel-cutline-reinforcement" });
+  }
+
+  function acceptCutLineReinforcement() {
+    const accepted = applyProjectSessionAction({ type: "accept-cutline-reinforcement" });
+    if (accepted.outcome.status !== "applied") return;
+    setReinforcementReviewOpen(false);
+    setProjectStatus("Unsaved changes");
+  }
+
+  function keepOriginalCutLine() {
+    applyProjectSessionAction({ type: "cancel-cutline-reinforcement" });
+    setReinforcementReviewOpen(false);
+  }
+
+  function restoreOriginalCutLineSelection() {
+    const restored = applyProjectSessionAction({ type: "restore-original-cutline" });
+    if (restored.outcome.status === "applied") setProjectStatus("Unsaved changes");
+  }
+
   async function exportPdf() {
     if (!canExport || !image) return;
     const authorized = applyProjectSessionAction({ type: "request-export" });
@@ -767,7 +843,14 @@ function App() {
         paintGuideEntriesOnly: true,
         manualStrokes,
         manualStrokeSourceWidthPx: manualStrokes.length > 0 && analysis ? analysis.previewWidthPx : 0,
-        manualStrokeSourceHeightPx: manualStrokes.length > 0 && analysis ? analysis.previewHeightPx : 0
+        manualStrokeSourceHeightPx: manualStrokes.length > 0 && analysis ? analysis.previewHeightPx : 0,
+        ...(analysis?.cutLineReinforcement
+          ? {
+              acceptedCutLinePath: analysis.cutLineReinforcement.outerCutPath,
+              acceptedCutLineWidthPx: analysis.cutLineReinforcement.previewWidthPx,
+              acceptedCutLineHeightPx: analysis.cutLineReinforcement.previewHeightPx
+            }
+          : {})
       };
       payload.append("image", image);
       payload.append("settings", JSON.stringify(pdfSettings));
@@ -2167,6 +2250,25 @@ function App() {
                         reviewed={workflowProgress.lineworkReviewed}
                         review={traceQualityReview}
                       />
+                      {analysis.thinSilhouette?.detected || analysis.cutLineReinforcement ? (
+                        <ThinSilhouetteReinforcementCard
+                          reviewOpen={reinforcementReviewOpen}
+                          activeReinforcement={analysis.cutLineReinforcement ?? null}
+                          phase={cutLineProposalState.status}
+                          proposal={cutLineProposal}
+                          error={cutLineProposalError}
+                          widthIn={reinforcementWidthIn}
+                          originalOuterLinePngDataUrl={analysis.originalOuterLinePngDataUrl ?? analysis.outerLinePngDataUrl}
+                          canBegin={projectCapabilities.cutLineReinforcement.canBegin}
+                          canAccept={projectCapabilities.cutLineReinforcement.canAccept}
+                          onOpen={openCutLineReinforcementReview}
+                          onWidthChange={changeReinforcementWidth}
+                          onUpdate={() => void requestCutLineReinforcement(reinforcementWidthIn)}
+                          onAccept={acceptCutLineReinforcement}
+                          onKeepOriginal={keepOriginalCutLine}
+                          onRestoreOriginal={restoreOriginalCutLineSelection}
+                        />
+                      ) : null}
                       {inputReadiness === "ready-line-art" ? <ReadyLineArtNotice /> : <NeedsSimplificationNotice />}
                       {showAiProposal ? (
                         <AiProposalCard
@@ -3448,6 +3550,102 @@ function CleanLinesStatus({
         </section>
       ) : null}
     </details>
+  );
+}
+
+function ThinSilhouetteReinforcementCard({
+  reviewOpen,
+  activeReinforcement,
+  phase,
+  proposal,
+  error,
+  widthIn,
+  originalOuterLinePngDataUrl,
+  canBegin,
+  canAccept,
+  onOpen,
+  onWidthChange,
+  onUpdate,
+  onAccept,
+  onKeepOriginal,
+  onRestoreOriginal
+}: {
+  reviewOpen: boolean;
+  activeReinforcement: Analysis["cutLineReinforcement"] | null;
+  phase: "idle" | "requesting" | "failed" | "ready";
+  proposal: Analysis["cutLineReinforcement"] | null;
+  error: string | null;
+  widthIn: number;
+  originalOuterLinePngDataUrl: string;
+  canBegin: boolean;
+  canAccept: boolean;
+  onOpen: () => void;
+  onWidthChange: (width: number) => void;
+  onUpdate: () => void;
+  onAccept: () => void;
+  onKeepOriginal: () => void;
+  onRestoreOriginal: () => void;
+}) {
+  if (!reviewOpen) {
+    return (
+      <section className="thin-silhouette-alert" aria-label="Thin silhouette warning">
+        <div>
+          <strong>{activeReinforcement ? `Reinforced Cut Line active at ${activeReinforcement.minimumWidthIn.toFixed(2)} in` : "Some Cut Line sections are unusually thin"}</strong>
+          <p>{activeReinforcement
+            ? "The exact accepted reinforced path will be used for SVG and PDF export."
+            : "Review a stronger outer silhouette before deciding. The original remains active until you accept a proposal."}</p>
+        </div>
+        <div className="thin-silhouette-alert-actions">
+          <button className="tool-button" onClick={onOpen} disabled={!canBegin}>Reinforce thin areas</button>
+          {activeReinforcement ? <button className="tool-button" onClick={onRestoreOriginal}>Restore original Cut Line</button> : null}
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="thin-silhouette-review" aria-label="Thin silhouette reinforcement review">
+      <div className="thin-silhouette-review-header">
+        <div>
+          <strong>Reinforce thin areas</strong>
+          <p>Compare the exact Cut Lines. Nothing changes until you choose Use reinforced.</p>
+        </div>
+        <button className="icon-tool-button" onClick={onKeepOriginal} aria-label="Close reinforcement review"><X size={16} /></button>
+      </div>
+      <label className="thin-silhouette-width-control">
+        <span>Minimum finished width</span>
+        <input
+          type="range"
+          min={MIN_REINFORCEMENT_WIDTH_IN}
+          max={MAX_REINFORCEMENT_WIDTH_IN}
+          step={0.05}
+          value={widthIn}
+          onChange={(event) => onWidthChange(Number(event.target.value))}
+          aria-label="Minimum finished width"
+        />
+        <output>{widthIn.toFixed(2)} in</output>
+      </label>
+      <p className="thin-silhouette-safety-copy">{REINFORCEMENT_NOT_SAFETY_COPY}</p>
+      <div className="thin-silhouette-comparison">
+        <figure>
+          <figcaption>Original Cut Line</figcaption>
+          <img src={originalOuterLinePngDataUrl} alt="Original Cut Line" />
+        </figure>
+        <figure>
+          <figcaption>Proposed reinforced Cut Line</figcaption>
+          {proposal
+            ? <img src={proposal.outerLinePngDataUrl} alt="Proposed reinforced Cut Line" />
+            : <div className="thin-silhouette-preview-state" role="status">{phase === "requesting" ? "Building exact preview..." : "Update the preview to compare this width."}</div>}
+        </figure>
+      </div>
+      {proposal ? <p className={proposal.topologyChanges.gapMergeWarning ? "thin-silhouette-topology warning" : "thin-silhouette-topology"}>{topologyChangeSummary(proposal.topologyChanges)}</p> : null}
+      {error ? <p className="thin-silhouette-topology warning" role="alert">{error} The original Cut Line is still active.</p> : null}
+      <div className="thin-silhouette-review-actions">
+        <button className="tool-button" onClick={onUpdate} disabled={!canBegin || phase === "requesting"}>Update preview</button>
+        <button className="primary-action" onClick={onAccept} disabled={!canAccept || !proposal}>Use reinforced</button>
+        <button className="secondary-action" onClick={onKeepOriginal}>Keep original</button>
+      </div>
+    </section>
   );
 }
 

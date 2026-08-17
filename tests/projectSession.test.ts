@@ -2139,4 +2139,20 @@ const persistedWorkspace: Pick<
   assertEqual(resized.session.project.analysis?.cutLineReinforcement, null, "Finished Size should require fresh reinforcement acceptance");
 }
 
+{
+  const session = createProjectSession({ ...lifecycleProject, analysis: thinAnalysis });
+  const requesting = transitionProjectSession(session, { type: "begin-cutline-reinforcement" });
+  assert(requesting.outcome.status === "requesting-cutline-reinforcement", "expected Cut Line proposal token");
+  const mismatched = transitionProjectSession(requesting.session, {
+    type: "complete-cutline-reinforcement",
+    token: requesting.outcome.token,
+    proposal: { ...cutLineProposal, previewWidthPx: 399 }
+  });
+
+  assertEqual(projectSessionView(mismatched.session).capabilities.cutLineReinforcement.canAccept, false, "mismatched preview geometry should not be acceptable");
+  const rejected = transitionProjectSession(mismatched.session, { type: "accept-cutline-reinforcement" });
+  assertEqual(rejected.outcome.status, "rejected", "mismatched preview geometry should be rejected atomically");
+  assertEqual(rejected.session.project.analysis?.outerCutPath, analysis.outerCutPath, "rejected proposal should preserve the original Cut Line");
+}
+
 console.log("project session tests passed");
