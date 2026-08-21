@@ -4,11 +4,11 @@ import { deflateSync } from "node:zlib";
 
 test("thin silhouette reinforcement stays preview-only until the maker accepts it", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
-  let analysisBody: Record<string, any> | null = null;
+  let analysisBody: (Record<string, unknown> & { previewWidthPx: number; previewHeightPx: number }) | null = null;
   let exportRequestText = "";
   await page.route("**/api/analyze", async (route) => {
     const response = await route.fetch();
-    const body = await response.json();
+    const body = await response.json() as Record<string, unknown> & { previewWidthPx: number; previewHeightPx: number };
     body.thinSilhouette = {
       detected: true,
       minimumWidthIn: 0.07,

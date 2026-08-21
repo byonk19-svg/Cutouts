@@ -2137,6 +2137,9 @@ const persistedWorkspace: Pick<
   const resized = transitionProjectSession(session, { type: "change-finished-size", finishedHeightIn: 48 });
   assertEqual(resized.session.project.analysis?.outerCutPath, analysis.outerCutPath, "Finished Size should restore original Cut Line before resizing");
   assertEqual(resized.session.project.analysis?.cutLineReinforcement, null, "Finished Size should require fresh reinforcement acceptance");
+  assertEqual(resized.session.project.workflowProgress?.activeStep, "clean", "Finished Size should return an invalidated reinforced Cut Line to Clean Lines");
+  assertEqual(resized.session.project.workflowProgress?.lineworkReviewed, false, "Finished Size should revoke review of the replaced reinforced Cut Line");
+  assertEqual(resized.session.project.workflowProgress?.colorsOutcome, "incomplete", "Finished Size should revoke downstream color review after Cut Line replacement");
 }
 
 {

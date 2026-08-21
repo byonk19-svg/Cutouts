@@ -1129,6 +1129,8 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
   if (action.type === "change-finished-size" && action.finishedHeightIn === session.project.settings.finishedHeightIn) {
     return unchangedTransition(session);
   }
+  const finishedSizeReplacesReinforcedCutLine = action.type === "change-finished-size"
+    && Boolean(session.project.analysis?.cutLineReinforcement);
   const project = action.type === "rename-project"
     ? { ...session.project, projectName: normalizedProjectName as string } as TProject
     : action.type === "change-finished-size"
@@ -1145,7 +1147,13 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
               session.project.settings.minimumTileCols ?? 0,
               session.project.settings.minimumTileRows ?? 0
             )
-          : null
+          : null,
+        ...(finishedSizeReplacesReinforcedCutLine
+          ? {
+              workflowProgress: invalidateLineworkReview(normalizedWorkflowProgress(session.project)),
+              cleanupChecks: emptyCleanupChecks()
+            }
+          : {})
         } as TProject
       : {
           ...projectWithNonSizeSettings(session.project, action.settings)
