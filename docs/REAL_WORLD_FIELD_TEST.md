@@ -202,6 +202,35 @@ subject-mask repair. The historical results above remain unchanged.
   may continue after this evidence is integrated, with the physical-validation
   limitation kept explicit.
 
+### Post-merge targeted validation
+
+This is a separate digital validation of the two hard product cases after the
+opt-in thin-silhouette reinforcement feature merged to `main` at
+`dd5972a5fca743bd0c84dfe84929068bbfad3079`. It is not a replacement ten-source
+round and does not change the historical or corrected-baseline worksheet above.
+
+- **Run 8 targeted result:** The exact source
+  `tmp/field-test-sources/run-08-stickfigure.png` (SHA-256
+  `B51AF051C9D65755BC23D68A38E965507D64048C04934C5D53E1279DC72FC1C9`) was
+  loaded through the ordinary browser workflow. The maker reviewed the
+  original and reinforced Cut Lines at `0.25`, `0.50`, and `0.75` finished
+  inches, then explicitly accepted `0.50`. The accepted packet is `12.63 x 36`
+  inches with 8 trace pages; the post-merge PDF SHA-256 is
+  `E3A54DCB3C855F2C216E7BBC1F3CE72D96A200498551BF563942DEDCD31FDB33`.
+  The rendered pages match the pre-merge validation packet. This establishes
+  that the new opt-in workflow can rescue the thin-silhouette case digitally;
+  it is not a physical woodworking safety or reliability-gate result.
+- **Run 6 targeted result:** The exact dark-background violinist source was
+  loaded on the same merge SHA. Three ordinary Thin maker strokes were added
+  for the violin/bow and exported at the corrected narrow width. The final
+  packet is mechanically valid at `14.59 x 36` inches with 8 trace pages; PDF
+  SHA-256 is `9FB262A47D1C445376E9E156C83A1227FBAAFC7042B962AAB86E0A271CAE609C`.
+  The width bug is fixed, but the violin body, neck, and bow still do not form a
+  coherent recognizable transfer accessory. Run 6 remains Fail for accessory
+  preservation/reconstruction, not for manual-stroke export width.
+- **Physical status:** No paper printing, calibration measurement, transfer,
+  or jigsaw acceptance was performed for either targeted validation.
+
 ### Repeated product-learning requirements
 
 - **Interior transfer-line simplification:** When one thick or outlined source
