@@ -722,6 +722,16 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertLess(self._count_region_pixels(detail, (28, 80, 45, 180)), 20)
         self.assertGreater(self._count_region_pixels(detail, (54, 157, 166, 168)), 650)
 
+    def test_bounding_box_skeletonization_matches_full_canvas_skeletonization(self) -> None:
+        mask = np.zeros((900, 1200), dtype=np.uint8)
+        cv2.line(mask, (80, 120), (220, 470), 255, 5)
+        cv2.ellipse(mask, (980, 650), (45, 30), 0, 0, 360, 255, 3)
+
+        expected = pipeline._morphological_skeleton_full(mask)
+        optimized = pipeline._morphological_skeleton_cropped(mask)
+
+        np.testing.assert_array_equal(optimized, expected)
+
     def test_analyze_transparent_image_returns_preview_and_tile_summary(self) -> None:
         settings = TemplateSettings(finished_height_in=24, threshold=40, palette_size=4)
 
