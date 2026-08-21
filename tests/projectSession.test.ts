@@ -6,6 +6,7 @@ import {
   transitionProjectSession,
   type ProjectPreparationToken,
   type ProjectSessionAiProposalResult,
+  type ProjectSessionCutLineProposalResult,
   type ProjectSessionEffect,
   type ProjectSessionPaintMatchState,
   type ProjectSessionProject
@@ -186,6 +187,36 @@ const detectedPalette: CutoutProjectAnalysis["palette"] = [
 const analysisWithPalette: CutoutProjectAnalysis = {
   ...analysis,
   palette: detectedPalette
+};
+const thinAnalysis: CutoutProjectAnalysis = {
+  ...analysis,
+  originalOuterCutPath: analysis.outerCutPath,
+  originalOuterLinePngDataUrl: analysis.outerLinePngDataUrl,
+  cutLineReinforcement: null,
+  thinSilhouette: {
+    detected: true,
+    minimumWidthIn: 0.07,
+    p10WidthIn: 0.08,
+    thinFraction: 0.91,
+    longestThinRunIn: 18,
+    componentCount: 2
+  }
+};
+const cutLineProposal: ProjectSessionCutLineProposalResult = {
+  minimumWidthIn: 0.5,
+  outerCutPath: "M 10 10 L 390 10 L 200 990 Z",
+  outerLinePngDataUrl: "data:image/png;base64,reinforced",
+  previewWidthPx: 400,
+  previewHeightPx: 1000,
+  topologyChanges: {
+    componentsBefore: 2,
+    componentsAfter: 1,
+    holesBefore: 0,
+    holesAfter: 0,
+    componentsJoined: true,
+    enclosedRegionsChanged: false,
+    gapMergeWarning: true
+  }
 };
 const defaultProjectPalette: ProjectPaintColor[] = [
   projectPaintColor({
@@ -2037,6 +2068,94 @@ const persistedWorkspace: Pick<
   assertEqual(downloads.length, 1, "explicit save should download exactly once");
   assertEqual(autosaves.length, 3, "explicit save should refresh Autosave with the identical serialization");
   assertEqual(downloads[0], autosaves[2], "explicit save and Autosave should use one coherent serialization");
+}
+
+{
+  const session = createProjectSession({ ...lifecycleProject, analysis: thinAnalysis });
+  const requesting = transitionProjectSession(session, { type: "begin-cutline-reinforcement" });
+  assertEqual(requesting.outcome.status, "requesting-cutline-reinforcement", "thin Cut Line review should start a local proposal request");
+  assert(requesting.outcome.status === "requesting-cutline-reinforcement", "expected Cut Line proposal token");
+
+  const completed = transitionProjectSession(requesting.session, {
+    type: "complete-cutline-reinforcement",
+    token: requesting.outcome.token,
+    proposal: cutLineProposal
+  });
+  assertEqual(completed.session.cutLineProposal.status, "ready", "completed reinforcement should be review-only until accepted");
+  assertEqual(completed.session.project.analysis?.outerCutPath, analysis.outerCutPath, "proposal preview must not replace the original Cut Line");
+
+  const accepted = transitionProjectSession(completed.session, { type: "accept-cutline-reinforcement" });
+  assertEqual(accepted.session.project.analysis?.outerCutPath, cutLineProposal.outerCutPath, "acceptance should apply the exact previewed path");
+  assertEqual(accepted.session.project.analysis?.cutLineReinforcement?.minimumWidthIn, 0.5, "accepted width should be durable");
+  assertEqual(accepted.session.project.workflowProgress?.activeStep, "clean", "Cut Line changes should return review to Clean Lines");
+  assertEqual(accepted.session.project.workflowProgress?.lineworkReviewed, false, "Cut Line changes should revoke linework review");
+
+  const restored = transitionProjectSession(accepted.session, { type: "restore-original-cutline" });
+  assertEqual(restored.session.project.analysis?.outerCutPath, analysis.outerCutPath, "Restore original should recover the generated Cut Line");
+  assertEqual(restored.session.project.analysis?.cutLineReinforcement, null, "Restore original should clear durable reinforcement");
+}
+
+{
+  const session = createProjectSession({ ...lifecycleProject, analysis: thinAnalysis });
+  const requesting = transitionProjectSession(session, { type: "begin-cutline-reinforcement" });
+  assert(requesting.outcome.status === "requesting-cutline-reinforcement", "expected Cut Line proposal token");
+  const renamed = transitionProjectSession(requesting.session, { type: "rename-project", projectName: "Changed while loading" });
+  const stale = transitionProjectSession(renamed.session, {
+    type: "complete-cutline-reinforcement",
+    token: requesting.outcome.token,
+    proposal: cutLineProposal
+  });
+  assertEqual(stale.outcome.status, "stale", "proposal from an older Project Revision should be discarded");
+  assertEqual(stale.session.project.analysis?.outerCutPath, analysis.outerCutPath, "stale proposal must not mutate the Cut Line");
+}
+
+{
+  const session = createProjectSession({ ...lifecycleProject, analysis: thinAnalysis });
+  const requesting = transitionProjectSession(session, { type: "begin-cutline-reinforcement" });
+  assert(requesting.outcome.status === "requesting-cutline-reinforcement", "expected Cut Line proposal token");
+  const failed = transitionProjectSession(requesting.session, {
+    type: "fail-cutline-reinforcement",
+    token: requesting.outcome.token,
+    error: "No coherent silhouette"
+  });
+  assertEqual(failed.session.cutLineProposal.status, "failed", "proposal failure should remain visible");
+  assertEqual(failed.session.project.analysis?.outerCutPath, analysis.outerCutPath, "proposal failure should preserve the original Cut Line");
+  const retried = transitionProjectSession(failed.session, { type: "begin-cutline-reinforcement" });
+  assert(retried.outcome.status === "requesting-cutline-reinforcement", "failed proposal should be retryable");
+  const cancelled = transitionProjectSession(retried.session, { type: "cancel-cutline-reinforcement" });
+  assertEqual(cancelled.session.cutLineProposal.status, "idle", "cancel should clear transient proposal state");
+}
+
+{
+  const acceptedAnalysis: CutoutProjectAnalysis = {
+    ...thinAnalysis,
+    outerCutPath: cutLineProposal.outerCutPath,
+    outerLinePngDataUrl: cutLineProposal.outerLinePngDataUrl,
+    cutLineReinforcement: cutLineProposal
+  };
+  const session = createProjectSession({ ...lifecycleProject, analysis: acceptedAnalysis });
+  const resized = transitionProjectSession(session, { type: "change-finished-size", finishedHeightIn: 48 });
+  assertEqual(resized.session.project.analysis?.outerCutPath, analysis.outerCutPath, "Finished Size should restore original Cut Line before resizing");
+  assertEqual(resized.session.project.analysis?.cutLineReinforcement, null, "Finished Size should require fresh reinforcement acceptance");
+  assertEqual(resized.session.project.workflowProgress?.activeStep, "clean", "Finished Size should return an invalidated reinforced Cut Line to Clean Lines");
+  assertEqual(resized.session.project.workflowProgress?.lineworkReviewed, false, "Finished Size should revoke review of the replaced reinforced Cut Line");
+  assertEqual(resized.session.project.workflowProgress?.colorsOutcome, "incomplete", "Finished Size should revoke downstream color review after Cut Line replacement");
+}
+
+{
+  const session = createProjectSession({ ...lifecycleProject, analysis: thinAnalysis });
+  const requesting = transitionProjectSession(session, { type: "begin-cutline-reinforcement" });
+  assert(requesting.outcome.status === "requesting-cutline-reinforcement", "expected Cut Line proposal token");
+  const mismatched = transitionProjectSession(requesting.session, {
+    type: "complete-cutline-reinforcement",
+    token: requesting.outcome.token,
+    proposal: { ...cutLineProposal, previewWidthPx: 399 }
+  });
+
+  assertEqual(projectSessionView(mismatched.session).capabilities.cutLineReinforcement.canAccept, false, "mismatched preview geometry should not be acceptable");
+  const rejected = transitionProjectSession(mismatched.session, { type: "accept-cutline-reinforcement" });
+  assertEqual(rejected.outcome.status, "rejected", "mismatched preview geometry should be rejected atomically");
+  assertEqual(rejected.session.project.analysis?.outerCutPath, analysis.outerCutPath, "rejected proposal should preserve the original Cut Line");
 }
 
 console.log("project session tests passed");

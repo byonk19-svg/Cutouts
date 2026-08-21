@@ -2,6 +2,105 @@ import { expect, test, type Download, type Locator, type Page } from "@playwrigh
 import { mkdirSync, readFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
+test("thin silhouette reinforcement stays preview-only until the maker accepts it", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  let analysisBody: (Record<string, unknown> & { previewWidthPx: number; previewHeightPx: number }) | null = null;
+  let exportRequestText = "";
+  await page.route("**/api/analyze", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json() as Record<string, unknown> & { previewWidthPx: number; previewHeightPx: number };
+    body.thinSilhouette = {
+      detected: true,
+      minimumWidthIn: 0.07,
+      p10WidthIn: 0.08,
+      thinFraction: 0.91,
+      longestThinRunIn: 18,
+      componentCount: 2
+    };
+    analysisBody = body;
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+  await page.route("**/api/reinforce-cutline", async (route) => {
+    if (!analysisBody) throw new Error("analysis must finish before reinforcement");
+    const width = Number(route.request().postData()?.match(/name="minimumWidthIn"\r\n\r\n([^\r]+)/)?.[1] ?? 0.5);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        minimumWidthIn: width,
+        outerCutPath: `M 10 10 L ${analysisBody.previewWidthPx - 10} 10 L ${analysisBody.previewWidthPx / 2} ${analysisBody.previewHeightPx - 10} Z`,
+        outerLinePngDataUrl: `data:image/png;base64,${createSmokeCharacterPng().toString("base64")}`,
+        previewWidthPx: analysisBody.previewWidthPx,
+        previewHeightPx: analysisBody.previewHeightPx,
+        topologyChanges: {
+          componentsBefore: 2,
+          componentsAfter: 1,
+          holesBefore: 0,
+          holesAfter: 0,
+          componentsJoined: true,
+          enclosedRegionsChanged: false,
+          gapMergeWarning: true
+        },
+        diagnostic: {
+          detected: true,
+          minimumWidthIn: 0.4,
+          p10WidthIn: 0.46,
+          thinFraction: 0.5,
+          longestThinRunIn: 1.3,
+          componentCount: 1
+        },
+        excludedSmallComponentCount: 3
+      })
+    });
+  });
+  await page.route("**/api/export", async (route) => {
+    exportRequestText = new TextDecoder("latin1").decode(route.request().postDataBuffer() ?? new Uint8Array());
+    await route.fulfill({ status: 200, contentType: "application/pdf", body: Buffer.from("%PDF-1.4\n%%EOF") });
+  });
+  await page.goto("/");
+  const upload = page.getByLabel("Upload step");
+  await upload.getByLabel("Source image").setInputFiles({
+    name: "thin-subject.png",
+    mimeType: "image/png",
+    buffer: createSmokeCharacterPng()
+  });
+  await upload.getByRole("button", { name: "Generate Template" }).click();
+  const before = await expect.poll(() => savedProjectSnapshot(page)).not.toBeNull().then(() => savedProjectSnapshot(page));
+  const originalPath = before.analysis.outerCutPath;
+
+  await page.getByRole("button", { name: "Reinforce thin areas" }).click();
+  const review = page.getByLabel("Thin silhouette reinforcement review");
+  await expect(review).toBeVisible();
+  await expect(review.getByLabel("Minimum finished width")).toHaveValue("0.5");
+  await expect(review).toContainText("not a universal safety recommendation");
+  await expect(review).toContainText("joined previously separate components");
+  await expect(review).toContainText("gaps may have merged");
+  await expect.poll(async () => (await savedProjectSnapshot(page)).analysis.outerCutPath).toBe(originalPath);
+
+  await review.getByRole("button", { name: "Use reinforced" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page)).analysis.cutLineReinforcement?.minimumWidthIn).toBe(0.5);
+  const reinforcedPath = (await savedProjectSnapshot(page)).analysis.outerCutPath;
+  expect(reinforcedPath).not.toBe(originalPath);
+
+  await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await downloadFrom(page, "Download Printable PDF");
+  expect(exportRequestText).toContain('"acceptedCutLinePath"');
+  expect(exportRequestText).toContain(reinforcedPath);
+  expect(exportRequestText).toContain('"acceptedCutLineWidthPx"');
+
+  const moreExportOptions = page.getByLabel("Export workspace").getByLabel("More Export Options");
+  await moreExportOptions.locator("summary").click();
+  const svg = await readDownloadText(await downloadFrom(page, "Download SVG Linework"));
+  expect(svg).toContain(`d="${reinforcedPath}"`);
+
+  await page.getByLabel("Guided workflow").getByRole("button", { name: /Clean Lines/ }).click();
+
+  await page.getByRole("button", { name: "Restore original Cut Line" }).click();
+  await expect.poll(async () => (await savedProjectSnapshot(page)).analysis.outerCutPath).toBe(originalPath);
+  await expect.poll(async () => (await savedProjectSnapshot(page)).analysis.cutLineReinforcement).toBeNull();
+});
+
 test("locked Guided Workflow requests stay rejected when disabled controls are bypassed", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
   await page.goto("/");

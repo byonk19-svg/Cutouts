@@ -37,6 +37,34 @@ export type TraceQualityMetadata = {
   warnings: string[];
 };
 
+export type ThinSilhouetteDiagnosticMetadata = {
+  detected: boolean;
+  minimumWidthIn: number;
+  p10WidthIn: number;
+  thinFraction: number;
+  longestThinRunIn: number;
+  componentCount: number;
+};
+
+export type ThinSilhouetteTopologyChanges = {
+  componentsBefore: number;
+  componentsAfter: number;
+  holesBefore: number;
+  holesAfter: number;
+  componentsJoined: boolean;
+  enclosedRegionsChanged: boolean;
+  gapMergeWarning: boolean;
+};
+
+export type AcceptedCutLineReinforcement = {
+  minimumWidthIn: number;
+  outerCutPath: string;
+  outerLinePngDataUrl: string;
+  previewWidthPx: number;
+  previewHeightPx: number;
+  topologyChanges: ThinSilhouetteTopologyChanges;
+};
+
 export type CutoutProjectAnalysis = {
   sourceWidthPx?: number;
   sourceHeightPx?: number;
@@ -55,6 +83,10 @@ export type CutoutProjectAnalysis = {
   previewHeightPx: number;
   palette: ProjectPaletteColor[];
   traceQuality?: TraceQualityMetadata;
+  thinSilhouette?: ThinSilhouetteDiagnosticMetadata | null;
+  originalOuterCutPath?: string;
+  originalOuterLinePngDataUrl?: string;
+  cutLineReinforcement?: AcceptedCutLineReinforcement | null;
 };
 
 export type ProjectLayerVisibility = {
@@ -101,7 +133,8 @@ export function resizeAnalysisForFinishedHeight(
   minimumTileCols = 0,
   minimumTileRows = 0
 ): CutoutProjectAnalysis {
-  const finishedWidthIn = Number((finishedHeightIn * (analysis.finishedWidthIn / analysis.finishedHeightIn)).toFixed(2));
+  const originalAnalysis = restoreOriginalCutLine(analysis);
+  const finishedWidthIn = Number((finishedHeightIn * (originalAnalysis.finishedWidthIn / originalAnalysis.finishedHeightIn)).toFixed(2));
   const tileWidthIn = 8.5 - (2 * 0.35);
   const tileHeightIn = 11 - (2 * 0.35) - 0.42;
   const tileStepWidthIn = tileWidthIn - 0.25;
@@ -110,7 +143,7 @@ export function resizeAnalysisForFinishedHeight(
   const tileRows = Math.max(1, minimumTileRows, Math.ceil(Math.max(0.01, finishedHeightIn - 0.25) / tileStepHeightIn));
 
   return {
-    ...analysis,
+    ...originalAnalysis,
     finishedWidthIn,
     finishedHeightIn,
     tileCols,
@@ -119,8 +152,28 @@ export function resizeAnalysisForFinishedHeight(
   };
 }
 
+export function normalizeCutLineAnalysis(analysis: CutoutProjectAnalysis): CutoutProjectAnalysis {
+  return {
+    ...analysis,
+    originalOuterCutPath: analysis.originalOuterCutPath ?? analysis.outerCutPath,
+    originalOuterLinePngDataUrl: analysis.originalOuterLinePngDataUrl ?? analysis.outerLinePngDataUrl,
+    cutLineReinforcement: analysis.cutLineReinforcement ?? null
+  };
+}
+
+export function restoreOriginalCutLine(analysis: CutoutProjectAnalysis): CutoutProjectAnalysis {
+  const normalized = normalizeCutLineAnalysis(analysis);
+  return {
+    ...normalized,
+    outerCutPath: normalized.originalOuterCutPath ?? normalized.outerCutPath,
+    outerLinePngDataUrl: normalized.originalOuterLinePngDataUrl ?? normalized.outerLinePngDataUrl,
+    cutLineReinforcement: null
+  };
+}
+
 export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): CutoutProject {
   const projectPalette = cloneProjectPalette(input.projectPalette ?? seedProjectPaletteFromDetected(input.analysis.palette, input.paintGuideEdits ?? []));
+  const normalizedAnalysis = normalizeCutLineAnalysis(input.analysis);
   assertProjectPalette(projectPalette);
   return {
     schemaVersion: CUTOUT_PROJECT_SCHEMA_VERSION,
@@ -131,11 +184,17 @@ export function createCutoutProjectSnapshot(input: CutoutProjectSnapshotInput): 
     settings: { ...input.settings },
     traceMode: input.traceMode,
     analysis: {
-      ...input.analysis,
-      palette: input.analysis.palette.map((color) => ({
+      ...normalizedAnalysis,
+      palette: normalizedAnalysis.palette.map((color) => ({
         ...color,
         matches: color.matches.map((match) => ({ ...match }))
-      }))
+      })),
+      cutLineReinforcement: normalizedAnalysis.cutLineReinforcement
+        ? {
+            ...normalizedAnalysis.cutLineReinforcement,
+            topologyChanges: { ...normalizedAnalysis.cutLineReinforcement.topologyChanges }
+          }
+        : null
     },
     editedDetailPngDataUrl: input.editedDetailPngDataUrl ?? null,
     manualStrokes: input.manualStrokes.map((stroke) => ({
@@ -312,6 +371,40 @@ function assertAnalysis(value: unknown): asserts value is CutoutProjectAnalysis 
   if ("sourceHeightPx" in value) assertNumber(value.sourceHeightPx, "analysis.sourceHeightPx");
   if ("subjectBoundsPx" in value) assertBounds(value.subjectBoundsPx, "analysis.subjectBoundsPx");
   if ("traceQuality" in value && value.traceQuality !== undefined) assertTraceQuality(value.traceQuality);
+  if (!("originalOuterCutPath" in value)) value.originalOuterCutPath = value.outerCutPath;
+  if (!("originalOuterLinePngDataUrl" in value)) value.originalOuterLinePngDataUrl = value.outerLinePngDataUrl;
+  assertString(value.originalOuterCutPath, "analysis.originalOuterCutPath");
+  assertString(value.originalOuterLinePngDataUrl, "analysis.originalOuterLinePngDataUrl");
+  if (!("cutLineReinforcement" in value)) value.cutLineReinforcement = null;
+  if (value.cutLineReinforcement !== null) assertCutLineReinforcement(value.cutLineReinforcement);
+  if ("thinSilhouette" in value && value.thinSilhouette !== undefined && value.thinSilhouette !== null) {
+    assertThinSilhouetteDiagnostic(value.thinSilhouette);
+  }
+}
+
+function assertThinSilhouetteDiagnostic(value: unknown): asserts value is ThinSilhouetteDiagnosticMetadata {
+  if (!isRecord(value) || typeof value.detected !== "boolean") throw new Error("Project analysis.thinSilhouette is invalid.");
+  for (const key of ["minimumWidthIn", "p10WidthIn", "thinFraction", "longestThinRunIn", "componentCount"] as const) {
+    assertNumber(value[key], `analysis.thinSilhouette.${key}`);
+  }
+}
+
+function assertCutLineReinforcement(value: unknown): asserts value is AcceptedCutLineReinforcement {
+  if (!isRecord(value)) throw new Error("Project analysis.cutLineReinforcement is invalid.");
+  for (const key of ["minimumWidthIn", "previewWidthPx", "previewHeightPx"] as const) {
+    assertNumber(value[key], `analysis.cutLineReinforcement.${key}`);
+  }
+  assertString(value.outerCutPath, "analysis.cutLineReinforcement.outerCutPath");
+  assertString(value.outerLinePngDataUrl, "analysis.cutLineReinforcement.outerLinePngDataUrl");
+  if (!isRecord(value.topologyChanges)) throw new Error("Project analysis.cutLineReinforcement.topologyChanges is invalid.");
+  for (const key of ["componentsBefore", "componentsAfter", "holesBefore", "holesAfter"] as const) {
+    assertNumber(value.topologyChanges[key], `analysis.cutLineReinforcement.topologyChanges.${key}`);
+  }
+  for (const key of ["componentsJoined", "enclosedRegionsChanged", "gapMergeWarning"] as const) {
+    if (typeof value.topologyChanges[key] !== "boolean") {
+      throw new Error(`Project analysis.cutLineReinforcement.topologyChanges.${key} is invalid.`);
+    }
+  }
 }
 
 function assertBounds(value: unknown, label: string): asserts value is [number, number, number, number] {

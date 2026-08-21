@@ -84,6 +84,38 @@ const analysis: CutoutProjectAnalysis = {
 }
 
 {
+  const reinforced: CutoutProjectAnalysis = {
+    ...analysis,
+    originalOuterCutPath: analysis.outerCutPath,
+    originalOuterLinePngDataUrl: analysis.outerLinePngDataUrl,
+    outerCutPath: "M 10 10 L 390 10 L 200 990 Z",
+    outerLinePngDataUrl: "data:image/png;base64,reinforced",
+    cutLineReinforcement: {
+      minimumWidthIn: 0.5,
+      outerCutPath: "M 10 10 L 390 10 L 200 990 Z",
+      outerLinePngDataUrl: "data:image/png;base64,reinforced",
+      previewWidthPx: 400,
+      previewHeightPx: 1000,
+      topologyChanges: {
+        componentsBefore: 2,
+        componentsAfter: 1,
+        holesBefore: 0,
+        holesAfter: 0,
+        componentsJoined: true,
+        enclosedRegionsChanged: false,
+        gapMergeWarning: true
+      }
+    }
+  };
+
+  const resized = resizeAnalysisForFinishedHeight(reinforced, 48);
+
+  assertEqual(resized.outerCutPath, analysis.outerCutPath, "Finished Size should restore the original Cut Line");
+  assertEqual(resized.outerLinePngDataUrl, analysis.outerLinePngDataUrl, "Finished Size should restore the original Cut Line layer");
+  assertEqual(resized.cutLineReinforcement, null, "Finished Size should invalidate accepted reinforcement");
+}
+
+{
   const strokes = [
     createTraceStroke("face-line", [{ x: 10, y: 12 }, { x: 40, y: 20 }], 12),
     createTraceStroke("coat-line", [{ x: 30, y: 90 }, { x: 60, y: 140 }], 20)

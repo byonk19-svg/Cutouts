@@ -8,7 +8,10 @@ import {
   type AiProposalReviewView
 } from "./aiLineworkReview.ts";
 import {
+  normalizeCutLineAnalysis,
   resizeAnalysisForFinishedHeight,
+  restoreOriginalCutLine,
+  type AcceptedCutLineReinforcement,
   type CutoutProjectAnalysis
 } from "./cutoutProject.ts";
 import type { EditorTransaction } from "./editorTransactions.ts";
@@ -101,6 +104,11 @@ export type ProjectSessionPaintMatchToken = {
   requestId: number;
 };
 
+export type ProjectSessionCutLineProposalToken = {
+  revision: number;
+  requestId: number;
+};
+
 export type CraftPaintMatchValidation =
   | { ok: true; matches: readonly CraftPaintMatch[] }
   | { ok: false; message: string };
@@ -126,6 +134,14 @@ export type ProjectSessionAiProposalState =
   | { status: "requesting"; estimatedCostUsd: number; token: ProjectSessionAiProposalToken }
   | { status: "failed"; error: string }
   | { status: "ready"; proposal: ProjectSessionAiProposalResult; review: AiProposalReview };
+
+export type ProjectSessionCutLineProposalResult = AcceptedCutLineReinforcement;
+
+export type ProjectSessionCutLineProposalState =
+  | { status: "idle" }
+  | { status: "requesting"; token: ProjectSessionCutLineProposalToken }
+  | { status: "failed"; error: string }
+  | { status: "ready"; proposal: ProjectSessionCutLineProposalResult };
 
 export type ProjectSessionPaintMatchState =
   | { status: "idle" }
@@ -153,8 +169,10 @@ export type ProjectSession<TProject extends ProjectSessionProject = ProjectSessi
   nextPaintColorId: number;
   proposalRevision: number;
   nextAiProposalRequestId: number;
+  nextCutLineProposalRequestId: number;
   nextPaintMatchRequestId: number;
   aiProposal: ProjectSessionAiProposalState;
+  cutLineProposal: ProjectSessionCutLineProposalState;
   paintMatch: ProjectSessionPaintMatchState;
   persistence: ProjectPersistenceHealth;
 };
@@ -179,6 +197,12 @@ export type AiProposalCapabilities = {
   readonly canReject: boolean;
 };
 
+export type CutLineReinforcementCapabilities = {
+  readonly canBegin: boolean;
+  readonly canAccept: boolean;
+  readonly canRestoreOriginal: boolean;
+};
+
 export type PaintCapabilities = {
   readonly canMutate: boolean;
 };
@@ -193,6 +217,7 @@ export type ProjectCapabilities = {
   readonly saveProject: boolean;
   readonly exportProject: boolean;
   readonly aiProposal: AiProposalCapabilities;
+  readonly cutLineReinforcement: CutLineReinforcementCapabilities;
   readonly paint: PaintCapabilities;
   readonly guidedWorkflow: GuidedWorkflowCapabilities;
 };
@@ -211,6 +236,12 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
   | { type: "review-ai-proposal-view"; view: AiProposalReviewView }
   | { type: "reject-ai-proposal" }
   | { type: "accept-ai-proposal" }
+  | { type: "begin-cutline-reinforcement" }
+  | { type: "cancel-cutline-reinforcement" }
+  | { type: "complete-cutline-reinforcement"; token: ProjectSessionCutLineProposalToken; proposal: ProjectSessionCutLineProposalResult }
+  | { type: "fail-cutline-reinforcement"; token: ProjectSessionCutLineProposalToken; error: string }
+  | { type: "accept-cutline-reinforcement" }
+  | { type: "restore-original-cutline" }
   | { type: "navigate-workflow"; target: WorkflowStep }
   | { type: "complete-linework-review" }
   | { type: "complete-color-review"; outcome: Exclude<ColorsOutcome, "incomplete"> }
@@ -276,6 +307,7 @@ export type ProjectSessionTransition<TProject extends ProjectSessionProject> = {
     | { status: "unchanged" }
     | { status: "preparing"; token: ProjectPreparationToken }
     | { status: "requesting"; token: ProjectSessionAiProposalToken }
+    | { status: "requesting-cutline-reinforcement"; token: ProjectSessionCutLineProposalToken }
     | { status: "requesting-paint-match"; token: ProjectSessionPaintMatchToken }
     | { status: "failed"; error: string }
     | { status: "successful" }
@@ -300,6 +332,7 @@ export type ProjectSessionRejectionCode =
   | "ai-proposal-unavailable"
   | "ai-proposal-confirmation-required"
   | "ai-proposal-acceptance-unavailable"
+  | "cutline-reinforcement-unavailable"
   | "paint-color-target-missing"
   | "paint-color-target-ambiguous"
   | "workflow-blocked";
@@ -324,8 +357,10 @@ export function createProjectSession<TProject extends ProjectSessionProject>(
     nextPaintColorId: deriveNextPaintColorId(normalizedProject.projectPalette),
     proposalRevision: 0,
     nextAiProposalRequestId: 1,
+    nextCutLineProposalRequestId: 1,
     nextPaintMatchRequestId: 1,
     aiProposal: idleAiProposalState(),
+    cutLineProposal: idleCutLineProposalState(),
     paintMatch: idlePaintMatchState(),
     persistence: { status: "idle" }
   };
@@ -339,6 +374,7 @@ export function projectSessionView<TProject extends ProjectSessionProject>(
     project: session.project,
     operation: session.operation,
     aiProposal: session.aiProposal,
+    cutLineProposal: session.cutLineProposal,
     paintMatch: session.paintMatch,
     capabilities: projectCapabilities(session)
   };
@@ -395,6 +431,91 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
         : { status: "failed", error: action.error },
       effects: []
     };
+  }
+  if (action.type === "begin-cutline-reinforcement") {
+    if (!canBeginCutLineReinforcement(session)) {
+      return rejectedTransition(session, "cutline-reinforcement-unavailable", "Thin Cut Line reinforcement is unavailable for the current project state.");
+    }
+    const token = Object.freeze({
+      revision: session.revision,
+      requestId: session.nextCutLineProposalRequestId
+    } satisfies ProjectSessionCutLineProposalToken);
+    const nextSession = {
+      ...session,
+      nextCutLineProposalRequestId: session.nextCutLineProposalRequestId + 1,
+      cutLineProposal: requestingCutLineProposalState(token)
+    };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "requesting-cutline-reinforcement", token },
+      effects: []
+    };
+  }
+  if (action.type === "cancel-cutline-reinforcement") {
+    if (session.cutLineProposal.status === "idle") return unchangedTransition(session);
+    const nextSession = { ...session, cutLineProposal: idleCutLineProposalState() };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "cancelled" },
+      effects: []
+    };
+  }
+  if (action.type === "fail-cutline-reinforcement") {
+    if (!isCurrentCutLineProposalRequest(session, action.token)) return staleAiProposalTransition(session);
+    const nextSession = { ...session, cutLineProposal: failedCutLineProposalState(action.error) };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "failed", error: action.error },
+      effects: []
+    };
+  }
+  if (action.type === "complete-cutline-reinforcement") {
+    if (!isCurrentCutLineProposalRequest(session, action.token)) return staleAiProposalTransition(session);
+    const nextSession = { ...session, cutLineProposal: readyCutLineProposalState(action.proposal) };
+    return {
+      session: nextSession,
+      capabilities: projectCapabilities(nextSession),
+      outcome: { status: "successful" },
+      effects: []
+    };
+  }
+  if (action.type === "accept-cutline-reinforcement") {
+    if (!canAcceptCutLineReinforcement(session) || session.cutLineProposal.status !== "ready" || !session.project.analysis) {
+      return rejectedTransition(session, "cutline-reinforcement-unavailable", "There is no reinforced Cut Line ready to accept.");
+    }
+    const proposal = snapshotCutLineProposalResult(session.cutLineProposal.proposal);
+    const currentAnalysis = normalizeCutLineAnalysis(session.project.analysis);
+    if (
+      proposal.previewWidthPx !== currentAnalysis.previewWidthPx
+      || proposal.previewHeightPx !== currentAnalysis.previewHeightPx
+      || !proposal.outerCutPath.trim()
+    ) {
+      return rejectedTransition(session, "cutline-reinforcement-unavailable", "The reinforced Cut Line does not match the current analysis.");
+    }
+    const nextAnalysis = {
+      ...currentAnalysis,
+      outerCutPath: proposal.outerCutPath,
+      outerLinePngDataUrl: proposal.outerLinePngDataUrl,
+      cutLineReinforcement: proposal
+    };
+    return applyProjectTransition(session, {
+      ...session.project,
+      analysis: nextAnalysis,
+      workflowProgress: invalidateLineworkReview(normalizedWorkflowProgress(session.project)),
+      cleanupChecks: emptyCleanupChecks()
+    } as TProject, { cutLineProposalOverride: idleCutLineProposalState() });
+  }
+  if (action.type === "restore-original-cutline") {
+    if (!session.project.analysis?.cutLineReinforcement) return unchangedTransition(session);
+    return applyProjectTransition(session, {
+      ...session.project,
+      analysis: restoreOriginalCutLine(session.project.analysis),
+      workflowProgress: invalidateLineworkReview(normalizedWorkflowProgress(session.project)),
+      cleanupChecks: emptyCleanupChecks()
+    } as TProject, { cutLineProposalOverride: idleCutLineProposalState() });
   }
   if (action.type === "begin-ai-proposal-request") {
     if (!canBeginAiProposalRequest(session)) {
@@ -875,6 +996,7 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       nextPaintColorId: reconcileNextPaintColorId(session.nextPaintColorId, project.projectPalette),
       proposalRevision: session.proposalRevision + 1,
       aiProposal: idleAiProposalState(),
+      cutLineProposal: idleCutLineProposalState(),
       paintMatch: idlePaintMatchState(),
       operation: { status: "successful", operation: "restore-project" } as const,
       persistence: action.requestAutosave
@@ -949,6 +1071,7 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       nextPaintColorId: reconcileNextPaintColorId(session.nextPaintColorId, project.projectPalette),
       proposalRevision: session.proposalRevision + 1,
       aiProposal: idleAiProposalState(),
+      cutLineProposal: idleCutLineProposalState(),
       paintMatch: idlePaintMatchState(),
       operation: { status: "successful", operation: action.mode } as const,
       persistence: { status: "pending", revision, mode: "autosave" } as const
@@ -981,6 +1104,7 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
       nextPaintColorId: reconcileNextPaintColorId(session.nextPaintColorId, project.projectPalette),
       proposalRevision: session.proposalRevision + 1,
       aiProposal: idleAiProposalState(),
+      cutLineProposal: idleCutLineProposalState(),
       paintMatch: idlePaintMatchState(),
       operation: { status: "successful", operation: "new-project" } as const,
       persistence: { status: "idle" } as const
@@ -1005,6 +1129,8 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
   if (action.type === "change-finished-size" && action.finishedHeightIn === session.project.settings.finishedHeightIn) {
     return unchangedTransition(session);
   }
+  const finishedSizeReplacesReinforcedCutLine = action.type === "change-finished-size"
+    && Boolean(session.project.analysis?.cutLineReinforcement);
   const project = action.type === "rename-project"
     ? { ...session.project, projectName: normalizedProjectName as string } as TProject
     : action.type === "change-finished-size"
@@ -1021,7 +1147,13 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
               session.project.settings.minimumTileCols ?? 0,
               session.project.settings.minimumTileRows ?? 0
             )
-          : null
+          : null,
+        ...(finishedSizeReplacesReinforcedCutLine
+          ? {
+              workflowProgress: invalidateLineworkReview(normalizedWorkflowProgress(session.project)),
+              cleanupChecks: emptyCleanupChecks()
+            }
+          : {})
         } as TProject
       : {
           ...projectWithNonSizeSettings(session.project, action.settings)
@@ -1206,6 +1338,29 @@ function snapshotAiProposalResult(proposal: ProjectSessionAiProposalResult): Pro
   });
 }
 
+function idleCutLineProposalState(): ProjectSessionCutLineProposalState {
+  return Object.freeze({ status: "idle" });
+}
+
+function requestingCutLineProposalState(token: ProjectSessionCutLineProposalToken): ProjectSessionCutLineProposalState {
+  return Object.freeze({ status: "requesting", token });
+}
+
+function failedCutLineProposalState(error: string): ProjectSessionCutLineProposalState {
+  return Object.freeze({ status: "failed", error });
+}
+
+function readyCutLineProposalState(proposal: ProjectSessionCutLineProposalResult): ProjectSessionCutLineProposalState {
+  return Object.freeze({ status: "ready", proposal: snapshotCutLineProposalResult(proposal) });
+}
+
+function snapshotCutLineProposalResult(proposal: ProjectSessionCutLineProposalResult): ProjectSessionCutLineProposalResult {
+  return Object.freeze({
+    ...proposal,
+    topologyChanges: Object.freeze({ ...proposal.topologyChanges })
+  });
+}
+
 function idlePaintMatchState(): ProjectSessionPaintMatchState {
   return Object.freeze({ status: "idle" });
 }
@@ -1236,6 +1391,11 @@ function projectCapabilities<TProject extends ProjectSessionProject>(
       canConfirmRequest: session.aiProposal.status === "confirming" && canAiProposalRequestPrerequisites(session),
       canAccept: session.aiProposal.status === "ready" && canAcceptAiProposal(session.aiProposal.review),
       canReject: session.aiProposal.status === "ready" && session.aiProposal.review.decision === "pending"
+    }),
+    cutLineReinforcement: Object.freeze({
+      canBegin: canBeginCutLineReinforcement(session),
+      canAccept: canAcceptCutLineReinforcement(session),
+      canRestoreOriginal: Boolean(session.project.analysis?.cutLineReinforcement)
     }),
     paint: Object.freeze({
       canMutate: !isWorkflowBlockedByAiProposal(session)
@@ -1351,6 +1511,19 @@ function canBeginAiProposalRequest<TProject extends ProjectSessionProject>(sessi
     && !isWorkflowBlockedByAiProposal(session);
 }
 
+function canBeginCutLineReinforcement<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
+  return Boolean(session.project.analysis?.thinSilhouette?.detected)
+    && session.cutLineProposal.status !== "requesting";
+}
+
+function canAcceptCutLineReinforcement<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
+  if (session.cutLineProposal.status !== "ready" || !session.project.analysis) return false;
+  const proposal = session.cutLineProposal.proposal;
+  return proposal.previewWidthPx === session.project.analysis.previewWidthPx
+    && proposal.previewHeightPx === session.project.analysis.previewHeightPx
+    && proposal.outerCutPath.trim().length > 0;
+}
+
 function currentProjectPalette(project: ProjectSessionProject) {
   return [...(project.projectPalette ?? [])];
 }
@@ -1424,6 +1597,16 @@ function isCurrentAiProposalRequest<TProject extends ProjectSessionProject>(
     && session.proposalRevision === token.proposalRevision;
 }
 
+function isCurrentCutLineProposalRequest<TProject extends ProjectSessionProject>(
+  session: ProjectSession<TProject>,
+  token: ProjectSessionCutLineProposalToken
+) {
+  return session.cutLineProposal.status === "requesting"
+    && session.cutLineProposal.token.requestId === token.requestId
+    && session.cutLineProposal.token.revision === token.revision
+    && session.revision === token.revision;
+}
+
 function isWorkflowBlockedByAiProposal<TProject extends ProjectSessionProject>(session: ProjectSession<TProject>) {
   return session.aiProposal.status === "requesting"
     || (session.aiProposal.status === "ready" && session.aiProposal.review.decision === "pending");
@@ -1492,6 +1675,7 @@ function applyProjectTransition<TProject extends ProjectSessionProject>(
   options?: {
     proposalChange?: "preserve" | "invalidate";
     aiProposalOverride?: ProjectSessionAiProposalState;
+    cutLineProposalOverride?: ProjectSessionCutLineProposalState;
     editorTransaction?: EditorTransaction<ProjectSessionEditableArtifact>;
   }
 ): ProjectSessionTransition<TProject> {
@@ -1508,6 +1692,7 @@ function applyProjectTransition<TProject extends ProjectSessionProject>(
     aiProposal: proposalChange === "invalidate"
       ? idleAiProposalState()
       : options?.aiProposalOverride ?? session.aiProposal,
+    cutLineProposal: options?.cutLineProposalOverride ?? idleCutLineProposalState(),
     paintMatch: idlePaintMatchState(),
     persistence: persistable
       ? { status: "pending", revision, mode: "autosave" } as const

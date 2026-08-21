@@ -387,6 +387,53 @@ class GenerateLineworkApiTest(ApiServerTestCase):
         return self._request("POST", "/api/generate-linework", body=body, headers=headers)
 
 
+class ReinforceCutlineApiTest(ApiServerTestCase):
+    def test_returns_review_only_cutline_proposal(self) -> None:
+        source = Image.new("RGBA", (246, 581), (255, 255, 255, 0))
+        draw = ImageDraw.Draw(source)
+        draw.ellipse((72, 20, 174, 150), outline=(0, 0, 0, 255), width=3)
+        draw.line((123, 151, 123, 410), fill=(0, 0, 0, 255), width=3)
+        draw.line((25, 245, 221, 245), fill=(0, 0, 0, 255), width=3)
+        draw.line((123, 410, 42, 558), fill=(0, 0, 0, 255), width=3)
+        draw.line((123, 410, 212, 558), fill=(0, 0, 0, 255), width=3)
+
+        response, body = self._post_reinforcement(source, 0.50)
+        payload = json.loads(body)
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["minimumWidthIn"], 0.50)
+        self.assertTrue(payload["outerCutPath"].startswith("M "))
+        self.assertTrue(payload["outerLinePngDataUrl"].startswith("data:image/png;base64,"))
+        self.assertGreater(payload["previewWidthPx"], 0)
+        self.assertGreater(payload["previewHeightPx"], 0)
+        self.assertLessEqual(payload["previewWidthPx"], source.width)
+        self.assertLessEqual(payload["previewHeightPx"], source.height)
+        self.assertIn("componentsJoined", payload["topologyChanges"])
+        self.assertIn("gapMergeWarning", payload["topologyChanges"])
+
+    def test_rejects_width_outside_review_range(self) -> None:
+        source = Image.new("RGBA", (64, 96), (255, 255, 255, 0))
+        ImageDraw.Draw(source).line((32, 8, 32, 88), fill=(0, 0, 0, 255), width=1)
+
+        response, body = self._post_reinforcement(source, 0.80)
+
+        self.assertEqual(response.status, 400)
+        self.assertIn("between 0.25 and 0.75", json.loads(body)["error"])
+
+    def _post_reinforcement(self, image: Image.Image, minimum_width_in: float) -> tuple[http.client.HTTPResponse, bytes]:
+        body, content_type = _multipart_body({
+            "image": ("source.png", _png_bytes(image), "image/png"),
+            "settings": json.dumps({"finishedHeightIn": 36}),
+            "minimumWidthIn": str(minimum_width_in),
+        })
+        return self._request(
+            "POST",
+            "/api/reinforce-cutline",
+            body=body,
+            headers={"Content-Type": content_type},
+        )
+
+
 def _png_bytes(image: Image.Image) -> bytes:
     output = io.BytesIO()
     image.save(output, format="PNG")
