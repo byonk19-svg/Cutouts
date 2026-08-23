@@ -1503,12 +1503,12 @@ test("guided workflow remains focused and responsive through Coraline acceptance
 
   await primaryControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
   const colorsWorkspace = page.getByLabel("Colors workspace");
-  await expectSinglePrimaryAction(colorsWorkspace, "Continue to Export");
+  await expectSinglePrimaryAction(colorsWorkspace, "Skip Paint Guide");
   await expectFutureStepsLocked(guidedWorkflow, ["Export"]);
   await expect(colorsWorkspace.getByLabel("Edit Color Details")).not.toHaveAttribute("open", "");
   await captureResponsiveStep(page, evidenceDir, "colors", colorsWorkspace);
 
-  await colorsWorkspace.getByRole("button", { name: "Continue to Export" }).click();
+  await colorsWorkspace.getByRole("button", { name: "Skip Paint Guide" }).click();
   const exportWorkspace = page.getByLabel("Export workspace");
   await expectSinglePrimaryAction(exportWorkspace, "Download Printable PDF");
   await expect(exportWorkspace.getByLabel("More Export Options")).not.toHaveAttribute("open", "");
