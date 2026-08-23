@@ -6,6 +6,7 @@ import {
   matchConfidenceLabel,
   matchDisplayName,
   mergeProjectPaintColors,
+  isCoveragePlaceholder,
   paintGuideEntriesForPalette,
   paintGuideEntriesForProjectPalette,
   paintGuideReadiness,
@@ -54,8 +55,40 @@ const palette: ProjectPaletteColor[] = [
 
   assertEqual(readiness.includedCount, 3, "readiness should count included colors");
   assertEqual(readiness.genericLabelCount, 0, "coverage-based palette labels should not be generic");
+  assertEqual(readiness.placeholderLabelCount, 3, "coverage-based labels should require explicit area review");
   assertEqual(readiness.unresolvedPaintCount, 3, "default palette should report unresolved paint choices");
   assertEqual(readiness.ready, false, "generic unresolved guide should require an explicit review decision");
+}
+
+{
+  const entries = paintGuideEntriesForPalette(palette, [
+    { hex: "#0C143A", label: "Largest area", note: "", included: true, selectedMatchId: "folkart-outdoor-navy", manualOverride: "", labelReviewed: true },
+    { hex: "#f1ce2d", label: "Second-largest area", note: "", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "", labelReviewed: true },
+    { hex: "#6a5424", label: "Accent area 1", note: "", included: true, selectedMatchId: null, manualOverride: "Choose in store", labelReviewed: true }
+  ]);
+  const readiness = paintGuideReadiness(entries);
+
+  assertEqual(readiness.placeholderLabelCount, 0, "explicitly reviewed coverage labels should be accepted");
+  assertEqual(readiness.ready, true, "explicit coverage-label review and paint decisions should make the guide ready");
+  assert(isCoveragePlaceholder("Largest area"), "coverage labels should be recognized as placeholders");
+}
+
+{
+  const entries = paintGuideEntriesForPalette(palette, [
+    { hex: "#0C143A", label: "Largest area", note: "", included: true, selectedMatchId: "folkart-outdoor-navy", manualOverride: "", labelReviewed: false },
+    { hex: "#f1ce2d", label: "Coat", note: "", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "", labelReviewed: true },
+    { hex: "#6a5424", label: "Boots", note: "", included: true, selectedMatchId: null, manualOverride: "Any warm brown", labelReviewed: true }
+  ]);
+  assertEqual(filterPaintGuideEntries(entries, "missing").length, 1, "missing filter should include an unreviewed placeholder even when paint is selected");
+}
+
+{
+  const seeded = seedProjectPaletteFromDetected(palette, [
+    { hex: "#0C143A", label: "Largest area", note: "", included: true, selectedMatchId: null, manualOverride: "" }
+  ]);
+
+  assertEqual(seeded[0].note, "", "an intentionally blank saved note should remain blank");
+  assertEqual(seeded[0].labelReviewed, false, "coverage labels should remain unreviewed without explicit acceptance");
 }
 
 {

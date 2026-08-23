@@ -250,7 +250,7 @@ export type ProjectSessionAction<TProject extends ProjectSessionProject = Projec
   | {
       type: "update-project-paint-color";
       id: string;
-      patch: Partial<Pick<ProjectPaintColor, "hex" | "label" | "note" | "included" | "selectedMatchId" | "manualOverride" | "locked">>;
+      patch: Partial<Pick<ProjectPaintColor, "hex" | "label" | "note" | "included" | "selectedMatchId" | "manualOverride" | "locked" | "labelReviewed">>;
     }
   | { type: "remove-project-paint-color"; id: string }
   | { type: "merge-project-paint-colors"; ids: readonly string[] }
@@ -1550,6 +1550,7 @@ function snapshotProjectPaintColor(color: ProjectPaintColor): ProjectPaintColor 
   const label = color.label.trim();
   const note = color.note.trim();
   const manualOverride = color.manualOverride.trim();
+  const labelReviewed = color.labelReviewed;
   const selectedMatchId = color.selectedMatchId && matches.some((match) => match.id === color.selectedMatchId)
     ? color.selectedMatchId
     : null;
@@ -1561,6 +1562,7 @@ function snapshotProjectPaintColor(color: ProjectPaintColor): ProjectPaintColor 
     && label === color.label
     && note === color.note
     && manualOverride === color.manualOverride
+    && labelReviewed === color.labelReviewed
     && selectedMatchId === color.selectedMatchId
   ) {
     return color;
@@ -1572,6 +1574,7 @@ function snapshotProjectPaintColor(color: ProjectPaintColor): ProjectPaintColor 
     label,
     note,
     manualOverride,
+    ...(labelReviewed === undefined ? {} : { labelReviewed }),
     selectedMatchId,
     matches
   }) as ProjectPaintColor;
@@ -1921,6 +1924,7 @@ function sameProjectPaintColor(left: ProjectPaintColor | undefined, right: Proje
     && left.hex === right.hex
     && left.label === right.label
     && left.note === right.note
+    && (left.labelReviewed ?? false) === (right.labelReviewed ?? false)
     && left.included === right.included
     && left.selectedMatchId === right.selectedMatchId
     && left.manualOverride === right.manualOverride

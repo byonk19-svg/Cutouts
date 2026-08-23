@@ -38,6 +38,7 @@ import { type AiProposalReview, type AiProposalReviewView } from "./aiLineworkRe
 import {
   filterPaintGuideEntries,
   groupShoppingListItems,
+  isCoveragePlaceholder,
   isValidHexColor,
   matchConfidenceLabel,
   matchDisplayName,
@@ -2943,7 +2944,7 @@ function App() {
                                   : "Choose a paint match below or choose in store."}
                             </em>
                           </div>
-                          {isGenericPaintLabel(entry) ? <b>Needs label</b> : null}
+                          {entry.labelReviewed !== true ? <b>Needs area review</b> : null}
                         </article>
                       ))}
                     </div>
@@ -2964,7 +2965,7 @@ function App() {
                                   : "Choose in store"}
                             </em>
                           </span>
-                          {isGenericPaintLabel(entry) ? <span className="needs-label-badge">Needs label</span> : null}
+                          {entry.labelReviewed !== true ? <span className="needs-label-badge">Needs area review</span> : null}
                         </summary>
                         <div className="palette-row-body">
                           <div className="swatch" style={{ backgroundColor: entry.hex }} />
@@ -2973,8 +2974,17 @@ function App() {
                               <strong>{entry.index}. {entry.label}</strong>
                               <span>{entry.hex.toUpperCase()} / {entry.source === "manual" ? "manual" : `${Math.round(entry.coverage * 100)}%`}{entry.locked ? " / locked" : ""}</span>
                             </div>
-                            {isGenericPaintLabel(entry) ? <span className="needs-label-badge">Needs label</span> : null}
+                            {entry.labelReviewed !== true ? <span className="needs-label-badge">Needs area review</span> : null}
                             <div className="palette-row-tools">
+                              <label className="toggle-row compact-toggle">
+                                <input
+                                  type="checkbox"
+                                  checked={entry.labelReviewed === true}
+                                  aria-label={isCoveragePlaceholder(entry.label) ? "Review coverage area" : "Confirm area review"}
+                                  onChange={() => updatePaintGuideEntry(entry.id, { labelReviewed: !(entry.labelReviewed === true) })}
+                                />
+                                {isCoveragePlaceholder(entry.label) ? "Reviewed area label" : "Area label reviewed"}
+                              </label>
                               <label className="toggle-row compact-toggle">
                                 <input
                                   type="checkbox"
@@ -3655,17 +3665,17 @@ function ThinSilhouetteReinforcementCard({
 }
 
 function ColorGuideReadinessCard({ readiness }: { readiness: ReturnType<typeof paintGuideReadiness> }) {
-  const labelText = readiness.genericLabelCount === 1 ? "1 label still uses a generic Color number" : `${readiness.genericLabelCount} labels still use generic Color numbers`;
+  const labelText = readiness.placeholderLabelCount === 1 ? "1 area label still needs review" : `${readiness.placeholderLabelCount} area labels still need review`;
   const paintText = readiness.unresolvedPaintCount === 1 ? "1 paint choice is unresolved" : `${readiness.unresolvedPaintCount} paint choices are unresolved`;
   const decisionText = [
-    readiness.genericLabelCount > 0 ? labelText : "",
+    readiness.placeholderLabelCount > 0 ? labelText : "",
     readiness.unresolvedPaintCount > 0 ? paintText : ""
   ].filter(Boolean).join("; ");
-  const guidance = readiness.genericLabelCount > 0
+  const guidance = readiness.placeholderLabelCount > 0
     ? readiness.unresolvedPaintCount > 0
-      ? "Rename swatches and choose a match, or skip the guide below instead of exporting an apparently finished generic guide."
-      : "Rename the swatches or skip the guide below instead of exporting an apparently finished generic guide."
-    : "Choose a paint match or record a manual choice, or skip the guide below instead of exporting an apparently unfinished guide.";
+      ? "Name the area or explicitly accept the coverage-only label, then choose a match or record a manual choice. You can also skip the guide."
+      : "Name the area or explicitly accept the coverage-only label, or skip the guide."
+    : "Choose a paint match or record a manual choice, or skip the guide below.";
   return (
     <section className="color-guide-readiness-card" aria-label="Color Guide readiness">
       <div>
@@ -3801,10 +3811,6 @@ function canvasContentBounds(canvas: HTMLCanvasElement): TraceBounds | null {
     }
   }
   return right >= left && bottom >= top ? { left, top, right: right + 1, bottom: bottom + 1 } : null;
-}
-
-function isGenericPaintLabel(entry: PaintGuideEntry) {
-  return /^Color \d+$/i.test(entry.label.trim());
 }
 
 function groupDuplicatePaintPurchases(entries: PaintGuideEntry[]) {

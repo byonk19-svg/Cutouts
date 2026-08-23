@@ -298,6 +298,33 @@ const analysis: CutoutProjectAnalysis = {
 }
 
 {
+  const restored = restoreCutoutProject({
+    schemaVersion: CUTOUT_PROJECT_SCHEMA_VERSION,
+    projectName: "Legacy paint edits",
+    createdAt: "2026-07-07T10:00:00.000Z",
+    updatedAt: "2026-07-07T10:00:00.000Z",
+    sourceImage: { name: "source.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,source" },
+    settings,
+    traceMode: "manual",
+    analysis,
+    paintGuideEdits: [{ hex: "#f1ce2d", label: "Largest area", note: "", included: true, selectedMatchId: null, manualOverride: "" }],
+    manualStrokes: [],
+    referenceOpacity: 35,
+    layerVisibility: {
+      showReference: false,
+      showCutline: true,
+      showManualLines: true,
+      showSuggestions: false,
+      printPreview: false
+    },
+    traceViewport: DEFAULT_TRACE_VIEWPORT
+  });
+
+  assertEqual(restored.projectPalette[0].note, "", "legacy intentionally blank paint notes should remain blank");
+  assertEqual(restored.projectPalette[0].labelReviewed, false, "legacy coverage labels should remain unreviewed");
+}
+
+{
   const project = createCutoutProjectSnapshot({
     projectName: "Invalid saved progress",
     createdAt: "2026-07-07T10:00:00.000Z",

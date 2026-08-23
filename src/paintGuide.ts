@@ -22,6 +22,7 @@ export type PaintGuideEdit = {
   included: boolean;
   selectedMatchId: string | null;
   manualOverride: string;
+  labelReviewed?: boolean;
 };
 
 export type ProjectPaintColor = PaintGuideEdit & {
@@ -29,6 +30,7 @@ export type ProjectPaintColor = PaintGuideEdit & {
   coverage: number;
   matches: CraftPaintMatch[];
   locked: boolean;
+  labelReviewed?: boolean;
   source: "detected" | "manual";
 };
 
@@ -57,6 +59,7 @@ export type PaintSanityWarning = {
 export type PaintGuideReadiness = {
   includedCount: number;
   genericLabelCount: number;
+  placeholderLabelCount: number;
   unresolvedPaintCount: number;
   ready: boolean;
 };
@@ -64,17 +67,24 @@ export type PaintGuideReadiness = {
 export function paintGuideReadiness(entries: PaintGuideEntry[]): PaintGuideReadiness {
   const included = entries.filter((entry) => entry.included);
   const genericLabelCount = included.filter((entry) => isGenericPaintLabel(entry.label)).length;
+  const placeholderLabelCount = included.filter((entry) => entry.labelReviewed !== true).length;
   const unresolvedPaintCount = included.filter((entry) => !entry.selectedMatch && !entry.manualOverride.trim()).length;
   return {
     includedCount: included.length,
     genericLabelCount,
+    placeholderLabelCount,
     unresolvedPaintCount,
-    ready: genericLabelCount === 0 && unresolvedPaintCount === 0
+    ready: placeholderLabelCount === 0 && unresolvedPaintCount === 0
   };
 }
 
 export function isGenericPaintLabel(label: string): boolean {
   return /^Color\s+\d+$/i.test(label.trim());
+}
+
+export function isCoveragePlaceholder(label: string): boolean {
+  return isGenericPaintLabel(label)
+    || /^(?:Largest area|Second-largest area|Accent area \d+)$/i.test(label.trim());
 }
 
 function defaultDetectedPaintLabel(index: number): string {
@@ -91,16 +101,18 @@ function defaultDetectedPaintNote(coverage: number): string {
 export function seedProjectPaletteFromDetected(palette: ProjectPaletteColor[], edits: PaintGuideEdit[] = []): ProjectPaintColor[] {
   const colors = palette.map((color, index) => {
     const edit = edits.find((item) => sameHex(item.hex, color.hex));
-    const label = edit?.label.trim() || defaultDetectedPaintLabel(index);
+    const savedLabel = edit?.label.trim() || "";
+    const label = savedLabel || defaultDetectedPaintLabel(index);
     const selectedMatchId = edit?.selectedMatchId ?? null;
     return {
       id: `detected-${index + 1}-${normalizeHex(color.hex).slice(1)}`,
       hex: normalizeHex(color.hex),
       label,
-      note: edit?.note.trim() || defaultDetectedPaintNote(color.coverage),
+      note: edit ? edit.note.trim() : defaultDetectedPaintNote(color.coverage),
       included: edit?.included ?? true,
       selectedMatchId,
       manualOverride: edit?.manualOverride.trim() || "",
+      labelReviewed: edit?.labelReviewed ?? Boolean(savedLabel && !isCoveragePlaceholder(savedLabel)),
       coverage: color.coverage,
       matches: color.matches,
       locked: false,
@@ -121,6 +133,7 @@ export function seedProjectPaletteFromDetected(palette: ProjectPaletteColor[], e
       coverage: 0,
       matches: [],
       locked: true,
+      labelReviewed: true,
       source: "manual" as const
     }))
   ];
@@ -138,6 +151,7 @@ export function paintGuideEntriesForProjectPalette(projectPalette: ProjectPaintC
     label: color.label.trim() || `Color ${index + 1}`,
     note: color.note.trim(),
     manualOverride: color.manualOverride.trim(),
+    labelReviewed: color.labelReviewed ?? false,
     selectedMatch: color.matches.find((match) => match.id === color.selectedMatchId) ?? null
   }));
 }
@@ -166,6 +180,7 @@ export function addProjectPaintColor(
       coverage: 0,
       matches: input.matches ?? [],
       locked: true,
+      labelReviewed: true,
       source: "manual"
     }
   ];
@@ -190,6 +205,11 @@ export function updateProjectPaintColor(
       hex: patch.hex ? normalizeHex(patch.hex) : color.hex,
       label: patch.label ?? color.label,
       note: patch.note ?? color.note,
+      labelReviewed: "labelReviewed" in patch
+        ? patch.labelReviewed ?? false
+        : patch.label !== undefined
+          ? Boolean(patch.label.trim() && !isCoveragePlaceholder(patch.label))
+          : color.labelReviewed ?? false,
       included: patch.included ?? color.included,
       selectedMatchId: nextSelectedMatchId,
       manualOverride: patch.manualOverride ?? color.manualOverride,
@@ -219,6 +239,7 @@ export function mergeProjectPaintColors(palette: ProjectPaintColor[], ids: strin
     included: selected.some((color) => color.included),
     coverage: selected.reduce((total, color) => total + color.coverage, 0),
     locked: selected.some((color) => color.locked),
+    labelReviewed: selected.every((color) => color.labelReviewed === true),
     manualOverride: preservedManualOverride,
     selectedMatchId: preservedManualOverride ? null : preservedSelectedMatchId,
     matches: primary.matches
@@ -232,7 +253,7 @@ export function mergeProjectPaintColors(palette: ProjectPaintColor[], ids: strin
 
 export function filterPaintGuideEntries(entries: PaintGuideEntry[], filter: PaintReviewFilter) {
   if (filter === "included") return entries.filter((entry) => entry.included);
-  if (filter === "missing") return entries.filter((entry) => !entry.selectedMatch && !entry.manualOverride);
+  if (filter === "missing") return entries.filter((entry) => entry.labelReviewed !== true || (!entry.selectedMatch && !entry.manualOverride));
   return entries;
 }
 
@@ -257,7 +278,8 @@ export function paintGuideEditsFromProjectPalette(projectPalette: ProjectPaintCo
     note: color.note,
     included: color.included,
     selectedMatchId: color.selectedMatchId,
-    manualOverride: color.manualOverride
+    manualOverride: color.manualOverride,
+    labelReviewed: color.labelReviewed
   }));
 }
 
@@ -308,8 +330,8 @@ export function paintSanityWarnings(entries: PaintGuideEntry[]): PaintSanityWarn
       reason
     });
 
-    if (/^color\s+\d+$/i.test(entry.label.trim())) {
-      addWarning("Needs label");
+    if (entry.labelReviewed !== true) {
+      addWarning(isGenericPaintLabel(entry.label) ? "Needs label" : "Needs area label review");
     }
     if (unresolved) {
       addWarning("Needs paint choice or choose-in-store review");

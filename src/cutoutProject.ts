@@ -1,7 +1,7 @@
 import type { TraceStroke } from "./traceStrokes";
 import { DEFAULT_TRACE_VIEWPORT, type TraceViewport } from "./traceViewport.ts";
 import type { DetailExtractionMode, Settings, TraceMode } from "./traceWorkflow";
-import { paintGuideEditsFromProjectPalette, seedProjectPaletteFromDetected, type CraftPaintMatch, type PaintGuideEdit, type ProjectPaintColor } from "./paintGuide.ts";
+import { isCoveragePlaceholder, paintGuideEditsFromProjectPalette, seedProjectPaletteFromDetected, type CraftPaintMatch, type PaintGuideEdit, type ProjectPaintColor } from "./paintGuide.ts";
 import {
   deriveLegacyWorkflowProgress,
   normalizeWorkflowProgress,
@@ -502,6 +502,11 @@ function assertProjectPalette(value: unknown): asserts value is ProjectPaintColo
     if (color.selectedMatchId !== null && typeof color.selectedMatchId !== "string") throw new Error("Project projectPalette.selectedMatchId is invalid.");
     if (!("manualOverride" in color)) color.manualOverride = "";
     if (typeof color.manualOverride !== "string") throw new Error("Project projectPalette.manualOverride is invalid.");
+    if (!("labelReviewed" in color)) {
+      color.labelReviewed = color.source === "manual"
+        || (typeof color.label === "string" && Boolean(color.label.trim()) && !isCoveragePlaceholder(color.label));
+    }
+    if (typeof color.labelReviewed !== "boolean") throw new Error("Project projectPalette.labelReviewed is invalid.");
     assertNumber(color.coverage, "projectPalette.coverage");
     if (!Array.isArray(color.matches)) throw new Error("Project projectPalette.matches is invalid.");
     if (typeof color.locked !== "boolean") color.locked = false;
