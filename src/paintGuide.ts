@@ -54,6 +54,29 @@ export type PaintSanityWarning = {
   reason: string;
 };
 
+export type PaintGuideReadiness = {
+  includedCount: number;
+  genericLabelCount: number;
+  unresolvedPaintCount: number;
+  ready: boolean;
+};
+
+export function paintGuideReadiness(entries: PaintGuideEntry[]): PaintGuideReadiness {
+  const included = entries.filter((entry) => entry.included);
+  const genericLabelCount = included.filter((entry) => isGenericPaintLabel(entry.label)).length;
+  const unresolvedPaintCount = included.filter((entry) => !entry.selectedMatch && !entry.manualOverride.trim()).length;
+  return {
+    includedCount: included.length,
+    genericLabelCount,
+    unresolvedPaintCount,
+    ready: genericLabelCount === 0 && unresolvedPaintCount === 0
+  };
+}
+
+export function isGenericPaintLabel(label: string): boolean {
+  return /^Color\s+\d+$/i.test(label.trim());
+}
+
 export function seedProjectPaletteFromDetected(palette: ProjectPaletteColor[], edits: PaintGuideEdit[] = []): ProjectPaintColor[] {
   const colors = palette.map((color, index) => {
     const edit = edits.find((item) => sameHex(item.hex, color.hex));
