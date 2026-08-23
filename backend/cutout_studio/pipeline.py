@@ -243,6 +243,7 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
     bounds = _mask_bounds(mask)
     cropped_source = source.crop(bounds)
     cropped_mask = mask.crop(bounds)
+    cropped_cut_line_mask = _authoritative_cut_line_mask(cropped_mask)
     finished_width = settings.finished_height_in * (cropped_source.width / cropped_source.height)
     tile_cols, tile_rows = tile_grid(
         finished_width,
@@ -252,9 +253,10 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
     )
     preview, outer_line, detail_line, paint_guide = _make_preview_layers(cropped_source, cropped_mask, settings)
     preview_mask = _preview_mask(cropped_source, cropped_mask)
-    outer_cut_path = _mask_to_svg_path(preview_mask, simplify_px=max(1.2, settings.smoothing))
+    cut_line_preview_mask = _preview_mask(cropped_source, cropped_cut_line_mask)
+    outer_cut_path = _mask_to_svg_path(cut_line_preview_mask, simplify_px=max(1.2, settings.smoothing))
     try:
-        thin_silhouette = measure_thin_silhouette(preview_mask, settings.finished_height_in)
+        thin_silhouette = measure_thin_silhouette(cut_line_preview_mask, settings.finished_height_in)
     except ValueError:
         thin_silhouette = None
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
@@ -300,7 +302,7 @@ def propose_cutline_reinforcement(
     mask = _subject_mask(source, settings)
     bounds = _mask_bounds(mask)
     cropped_source = source.crop(bounds)
-    cropped_mask = mask.crop(bounds)
+    cropped_mask = _authoritative_cut_line_mask(mask.crop(bounds))
     preview_mask = _preview_mask(cropped_source, cropped_mask)
     proposal = propose_reinforced_silhouette(preview_mask, settings.finished_height_in, minimum_width_in)
     outer_line = _outer_line_from_mask(Image.fromarray(proposal.mask.astype(np.uint8) * 255, mode="L"), 3)
@@ -851,19 +853,27 @@ def _keep_nearby_subject_components(mask: Image.Image, settings: TemplateSetting
     relative area/shape threshold and stay close to the primary subject so page
     marks and isolated background noise remain discarded.
     """
+    labels, selected = _nearby_subject_component_labels(mask, settings.speck_area)
+    if not selected:
+        return mask
+    keep = np.isin(labels, tuple(selected))
+    return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
+
+
+def _nearby_subject_component_labels(mask: Image.Image, speck_area: int) -> tuple[np.ndarray, set[int]]:
     subject = np.asarray(mask.convert("L")) > 0
     labels, stats = _connected_components(subject)
     if len(stats) <= 1:
-        return mask
+        return labels, set()
 
     areas = stats[1:, cv2.CC_STAT_AREA]
     if len(areas) == 0 or int(areas.max()) == 0:
-        return mask
+        return labels, set()
 
     largest_label = int(np.argmax(areas) + 1)
     largest_area = int(areas[largest_label - 1])
-    minimum_area = max(settings.speck_area, round(largest_area * 0.005))
-    proximity = max(24, min(80, round(min(mask.size) * 0.12)))
+    minimum_area = max(speck_area, round(largest_area * 0.005))
+    proximity = max(2, round(min(mask.size) * 0.16))
     selected = {largest_label}
 
     def gap_between(first: np.ndarray, second: np.ndarray) -> int:
@@ -885,7 +895,7 @@ def _keep_nearby_subject_components(mask: Image.Image, settings: TemplateSetting
         elongated = span >= max(24, round(min(mask.size) * 0.08)) and span >= min(width, height) * 1.5
         return area >= minimum_area and (
             area >= round(largest_area * 0.015)
-            or (area >= settings.speck_area * 4 and elongated)
+            or (area >= speck_area * 4 and elongated)
         )
 
     nearby = {
@@ -896,9 +906,12 @@ def _keep_nearby_subject_components(mask: Image.Image, settings: TemplateSetting
         and gap_between(stats[label], stats[largest_label]) <= proximity
     }
     selected.update(nearby)
+    return labels, selected
 
-    keep = np.isin(labels, tuple(selected))
-    return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
+
+def _authoritative_cut_line_mask(mask: Image.Image) -> Image.Image:
+    """Return the single connected silhouette owned by the Cut Line."""
+    return _keep_largest_component(mask)
 
 
 def _remove_small_components(mask: Image.Image, min_area: int) -> Image.Image:
@@ -1137,8 +1150,12 @@ def _line_art_layers(
     detail_extraction_mode: str = "auto",
 ) -> tuple[Image.Image, Image.Image, Image.Image]:
     mask_l = mask.convert("L")
-    eroded = _erode_mask(mask_l, 3)
-    boundary = Image.fromarray(np.maximum(0, np.asarray(mask_l, dtype=np.int16) - np.asarray(eroded, dtype=np.int16)).astype(np.uint8), mode="L")
+    cut_line_mask = _authoritative_cut_line_mask(mask_l)
+    eroded = _erode_mask(cut_line_mask, 3)
+    boundary = Image.fromarray(
+        np.maximum(0, np.asarray(cut_line_mask, dtype=np.int16) - np.asarray(eroded, dtype=np.int16)).astype(np.uint8),
+        mode="L",
+    )
     outer = _transparent_line_layer(boundary.filter(ImageFilter.MaxFilter(outer_line_width)))
     detail = Image.new("RGBA", image.size, (255, 255, 255, 0))
 
@@ -1312,8 +1329,12 @@ def _detail_line_mask(
         detail = _clean_feature_line_mask(image, mask, cleanup, print_scale)
         detail = _suppress_exterior_detail_band(detail, mask, print_scale)
         hole_boundary = _enclosed_hole_boundary_mask(mask, min_area=24)
+        accessory_boundary = _nearby_component_boundary_mask(mask)
         return Image.fromarray(
-            np.maximum(np.asarray(detail.convert("L"), dtype=np.uint8), hole_boundary.astype(np.uint8) * 255),
+            np.maximum(
+                np.asarray(detail.convert("L"), dtype=np.uint8),
+                np.maximum(hole_boundary, accessory_boundary).astype(np.uint8) * 255,
+            ),
             mode="L",
         )
     work_image, work_mask, original_size = _detail_work_image(image, mask)
@@ -1977,6 +1998,21 @@ def _enclosed_hole_boundary_mask(mask: Image.Image, min_area: int) -> np.ndarray
             continue
         component = (labels == label).astype(np.uint8)
         boundary |= (cv2.dilate(component, kernel, iterations=1) > 0) & subject
+    return boundary
+
+
+def _nearby_component_boundary_mask(mask: Image.Image) -> np.ndarray:
+    labels, selected = _nearby_subject_component_labels(mask, speck_area=60)
+    if not selected:
+        return np.zeros(labels.shape, dtype=bool)
+    largest = min(selected, key=lambda label: -np.count_nonzero(labels == label))
+    boundary = np.zeros(labels.shape, dtype=bool)
+    kernel = np.ones((3, 3), dtype=np.uint8)
+    for label in selected:
+        if label == largest:
+            continue
+        component = (labels == label).astype(np.uint8)
+        boundary |= (component > 0) & ~(cv2.erode(component, kernel, iterations=1) > 0)
     return boundary
 
 
