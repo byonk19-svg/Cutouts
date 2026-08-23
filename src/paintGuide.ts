@@ -77,16 +77,27 @@ export function isGenericPaintLabel(label: string): boolean {
   return /^Color\s+\d+$/i.test(label.trim());
 }
 
+function defaultDetectedPaintLabel(index: number): string {
+  if (index === 0) return "Largest area";
+  if (index === 1) return "Second-largest area";
+  return `Accent area ${index - 1}`;
+}
+
+function defaultDetectedPaintNote(coverage: number): string {
+  const percent = Math.round(Math.max(0, Math.min(1, coverage)) * 100);
+  return `Detected in approximately ${percent}% of the subject; review before painting.`;
+}
+
 export function seedProjectPaletteFromDetected(palette: ProjectPaletteColor[], edits: PaintGuideEdit[] = []): ProjectPaintColor[] {
   const colors = palette.map((color, index) => {
     const edit = edits.find((item) => sameHex(item.hex, color.hex));
-    const label = edit?.label.trim() || `Color ${index + 1}`;
+    const label = edit?.label.trim() || defaultDetectedPaintLabel(index);
     const selectedMatchId = edit?.selectedMatchId ?? null;
     return {
       id: `detected-${index + 1}-${normalizeHex(color.hex).slice(1)}`,
       hex: normalizeHex(color.hex),
       label,
-      note: edit?.note.trim() || "",
+      note: edit?.note.trim() || defaultDetectedPaintNote(color.coverage),
       included: edit?.included ?? true,
       selectedMatchId,
       manualOverride: edit?.manualOverride.trim() || "",
