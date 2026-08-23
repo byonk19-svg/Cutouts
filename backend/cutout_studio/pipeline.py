@@ -1691,6 +1691,25 @@ def _protected_lower_transfer_feature_skeleton(
 
 
 def _morphological_skeleton(mask: np.ndarray) -> np.ndarray:
+    return _morphological_skeleton_cropped(mask)
+
+
+def _morphological_skeleton_cropped(mask: np.ndarray) -> np.ndarray:
+    coordinates = cv2.findNonZero((mask > 0).astype(np.uint8))
+    if coordinates is None:
+        return np.zeros_like(mask)
+    x, y, width, height = cv2.boundingRect(coordinates)
+    left = max(0, x - 1)
+    top = max(0, y - 1)
+    right = min(mask.shape[1], x + width + 1)
+    bottom = min(mask.shape[0], y + height + 1)
+    cropped = _morphological_skeleton_full(mask[top:bottom, left:right])
+    result = np.zeros_like(mask)
+    result[top:bottom, left:right] = cropped
+    return result
+
+
+def _morphological_skeleton_full(mask: np.ndarray) -> np.ndarray:
     remaining = mask.copy()
     skeleton = np.zeros_like(remaining)
     element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
