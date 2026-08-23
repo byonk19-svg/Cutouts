@@ -109,6 +109,28 @@ def white_background_fixture() -> bytes:
     return out.getvalue()
 
 
+def disconnected_accessory_fixture() -> bytes:
+    """Synthetic Run 6-style source with a meaningful accessory near the body."""
+    image = Image.new("RGBA", (400, 600), (0, 0, 0, 255))
+    draw = ImageDraw.Draw(image)
+    body = (220, 220, 205, 255)
+    accessory = (235, 235, 220, 255)
+    draw.ellipse((130, 40, 270, 170), fill=body)
+    draw.rounded_rectangle((100, 150, 300, 440), radius=40, fill=body)
+    draw.rectangle((130, 400, 190, 560), fill=body)
+    draw.rectangle((210, 400, 270, 560), fill=body)
+    # A substantial but distant page artifact must still be discarded.
+    draw.rectangle((0, 20, 30, 80), fill=body)
+    # A dark accessory body inside the light torso becomes an enclosed mask hole.
+    draw.ellipse((220, 225, 280, 335), fill=(12, 16, 20, 255))
+    # The narrow accessory is intentionally separated from the hand by a small gap.
+    draw.line((325, 250, 370, 160), fill=accessory, width=18)
+    draw.ellipse((360, 145, 380, 175), fill=accessory)
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
 def line_art_fixture() -> bytes:
     image = Image.new("RGB", (220, 260), "white")
     draw = ImageDraw.Draw(image)
@@ -775,6 +797,33 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertLess(top, 55)
         self.assertGreater(right, 200)
         self.assertGreater(bottom, 165)
+
+    def test_nearby_disconnected_accessory_survives_subject_cleanup(self) -> None:
+        settings = TemplateSettings(
+            threshold=35,
+            smoothing=2,
+            speck_area=60,
+            hole_area=220,
+            detail_lines=False,
+        )
+        source = Image.open(io.BytesIO(disconnected_accessory_fixture())).convert("RGBA")
+        mask = _subject_mask(source, settings)
+
+        # The accessory is a meaningful, nearby foreground component rather than
+        # a page speck and must remain available to the generated trace layers.
+        self.assertGreater(mask.getpixel((344, 211)), 0)
+        self.assertGreater(mask.getpixel((370, 160)), 0)
+        self.assertEqual(mask.getpixel((10, 40)), 0)
+
+        detail = _detail_line_mask(
+            source,
+            mask,
+            cleanup=88,
+            print_scale=False,
+            template_style="clean",
+            detail_extraction_mode="rendered",
+        )
+        self.assertGreater(detail.getpixel((219, 280)), 0)
 
     def test_baked_checkerboard_background_is_excluded_from_subject_mask_and_palette(self) -> None:
         settings = TemplateSettings(
