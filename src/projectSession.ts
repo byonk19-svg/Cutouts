@@ -18,6 +18,8 @@ import type { EditorTransaction } from "./editorTransactions.ts";
 import {
   addProjectPaintColor,
   mergeProjectPaintColors,
+  paintGuideEntriesForProjectPalette,
+  paintGuideReadiness,
   removeProjectPaintColor,
   seedProjectPaletteFromDetected,
   updateProjectPaintColor,
@@ -328,6 +330,7 @@ export type ProjectSessionRejectionCode =
   | "locked-workflow-step"
   | "invalid-cut-line"
   | "linework-review-required"
+  | "paint-guide-review-required"
   | "color-review-required"
   | "ai-proposal-unavailable"
   | "ai-proposal-confirmation-required"
@@ -681,6 +684,12 @@ export function transitionProjectSession<TProject extends ProjectSessionProject>
     const progress = normalizedWorkflowProgress(session.project);
     if (!progress.lineworkReviewed) {
       return rejectedTransition(session, "linework-review-required", "Review Clean Lines before completing Colors.");
+    }
+    if (action.outcome === "reviewed") {
+      const readiness = paintGuideReadiness(paintGuideEntriesForProjectPalette(currentProjectPalette(session.project)));
+      if (!readiness.ready) {
+        return rejectedTransition(session, "paint-guide-review-required", "Review every included area label and paint choice, or skip the Color Guide.");
+      }
     }
     return applyProjectTransition(session, {
       ...session.project,
