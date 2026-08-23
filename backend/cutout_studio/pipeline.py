@@ -545,7 +545,7 @@ def _clean_subject_mask(
         mask = _remove_small_components(mask, settings.speck_area)
     if settings.hole_area > 0:
         mask = _fill_small_holes(mask, settings.hole_area)
-    mask = _keep_largest_component(mask)
+    mask = _keep_nearby_subject_components(mask, settings)
 
     if not np.any(np.asarray(mask) > 0):
         raise ValueError("No subject was detected. Try lowering the threshold or using a simpler background.")
@@ -835,6 +835,64 @@ def _keep_largest_component(mask: Image.Image) -> Image.Image:
 
     keep_label = int(np.argmax(areas) + 1)
     keep = labels == keep_label
+    return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
+
+
+def _keep_nearby_subject_components(mask: Image.Image, settings: TemplateSettings) -> Image.Image:
+    """Keep a primary subject plus substantial, nearby accessory components.
+
+    A disconnected prop can be a meaningful part of a cutout even when a small
+    background gap separates it from the body. Components still have to clear a
+    relative area/shape threshold and stay close to the primary subject so page
+    marks and isolated background noise remain discarded.
+    """
+    subject = np.asarray(mask.convert("L")) > 0
+    labels, stats = _connected_components(subject)
+    if len(stats) <= 1:
+        return mask
+
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    if len(areas) == 0 or int(areas.max()) == 0:
+        return mask
+
+    largest_label = int(np.argmax(areas) + 1)
+    largest_area = int(areas[largest_label - 1])
+    minimum_area = max(settings.speck_area, round(largest_area * 0.005))
+    proximity = max(24, min(80, round(min(mask.size) * 0.12)))
+    selected = {largest_label}
+
+    def gap_between(first: np.ndarray, second: np.ndarray) -> int:
+        first_left, first_top, first_width, first_height = first[:4]
+        second_left, second_top, second_width, second_height = second[:4]
+        first_right = first_left + first_width
+        first_bottom = first_top + first_height
+        second_right = second_left + second_width
+        second_bottom = second_top + second_height
+        horizontal_gap = max(second_left - first_right, first_left - second_right, 0)
+        vertical_gap = max(second_top - first_bottom, first_top - second_bottom, 0)
+        return max(horizontal_gap, vertical_gap)
+
+    def is_substantial(label: int) -> bool:
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        width = int(stats[label, cv2.CC_STAT_WIDTH])
+        height = int(stats[label, cv2.CC_STAT_HEIGHT])
+        span = max(width, height)
+        elongated = span >= max(24, round(min(mask.size) * 0.08)) and span >= min(width, height) * 1.5
+        return area >= minimum_area and (
+            area >= round(largest_area * 0.015)
+            or (area >= settings.speck_area * 4 and elongated)
+        )
+
+    nearby = {
+        label
+        for label in range(1, len(stats))
+        if label != largest_label
+        and is_substantial(label)
+        and gap_between(stats[label], stats[largest_label]) <= proximity
+    }
+    selected.update(nearby)
+
+    keep = np.isin(labels, tuple(selected))
     return Image.fromarray((keep.astype(np.uint8) * 255), mode="L")
 
 
@@ -1247,7 +1305,12 @@ def _detail_line_mask(
     if template_style == "clean":
         cleanup = max(cleanup, 76)
         detail = _clean_feature_line_mask(image, mask, cleanup, print_scale)
-        return _suppress_exterior_detail_band(detail, mask, print_scale)
+        detail = _suppress_exterior_detail_band(detail, mask, print_scale)
+        hole_boundary = _enclosed_hole_boundary_mask(mask, min_area=24)
+        return Image.fromarray(
+            np.maximum(np.asarray(detail.convert("L"), dtype=np.uint8), hole_boundary.astype(np.uint8) * 255),
+            mode="L",
+        )
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
     cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
@@ -1317,7 +1380,11 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
     detail_arr = np.asarray(detail.convert("L")) > 0
     color_detail_arr = np.asarray(_clean_color_boundary_mask(flattened, work_mask, cleanup, print_scale).convert("L")) > 0
     head_detail_arr = np.asarray(_head_feature_boost_mask(flattened, work_mask, cleanup).convert("L")) > 0
-    detail = Image.fromarray(((detail_arr | color_detail_arr | head_detail_arr).astype(np.uint8) * 255), mode="L")
+    enclosed_hole_arr = _enclosed_hole_boundary_mask(work_mask, min_area)
+    detail = Image.fromarray(
+        ((detail_arr | color_detail_arr | head_detail_arr | enclosed_hole_arr).astype(np.uint8) * 255),
+        mode="L",
+    )
     detail = _remove_small_components(detail, max(24, min_area - 14))
     detail = _filter_clean_detail_components(detail)
     if detail.size != original_size:
@@ -1877,6 +1944,35 @@ def _feature_line_interior(mask: Image.Image) -> Image.Image:
     subject_height = bounds[3] - bounds[1]
     perimeter_clearance = max(4, round(min(subject_width, subject_height) * 0.04))
     return _erode_mask(mask, perimeter_clearance * 2 + 1)
+
+
+def _enclosed_hole_boundary_mask(mask: Image.Image, min_area: int) -> np.ndarray:
+    """Return boundaries of substantial enclosed foreground holes as detail lines.
+
+    Dark accessories on a light subject can be intentionally absent from the
+    subject mask because they resemble the background. Their enclosed boundary
+    is still a useful transfer cue, while holes connected to the image edge are
+    ordinary background and must remain excluded.
+    """
+    subject = np.asarray(mask.convert("L")) > 0
+    inverse = (~subject).astype(np.uint8)
+    labels, stats = _connected_components(inverse)
+    if len(stats) <= 1:
+        return np.zeros_like(subject)
+
+    edge_labels = set(np.unique(labels[0, :]))
+    edge_labels.update(np.unique(labels[-1, :]))
+    edge_labels.update(np.unique(labels[:, 0]))
+    edge_labels.update(np.unique(labels[:, -1]))
+    boundary = np.zeros_like(subject)
+    kernel = np.ones((3, 3), dtype=np.uint8)
+    for label in range(1, len(stats)):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if label in edge_labels or area < min_area:
+            continue
+        component = (labels == label).astype(np.uint8)
+        boundary |= (cv2.dilate(component, kernel, iterations=1) > 0) & subject
+    return boundary
 
 
 def _detail_work_image(
