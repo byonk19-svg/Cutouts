@@ -889,8 +889,9 @@ class PrintPipelineTest(unittest.TestCase):
         settings = TemplateSettings(threshold=35, smoothing=2, speck_area=60, hole_area=220)
         source = Image.open(io.BytesIO(disconnected_accessory_fixture())).convert("RGBA")
         retained_mask = _subject_mask(source, settings)
-        cutline_bounds = pipeline._mask_bounds(pipeline._authoritative_cut_line_mask(retained_mask))
-        expected_width = settings.finished_height_in * ((cutline_bounds[2] - cutline_bounds[0]) / (cutline_bounds[3] - cutline_bounds[1]))
+        cutline_mask = pipeline._authoritative_cut_line_mask(retained_mask)
+        cutline_width, cutline_height = pipeline._raw_mask_size(cutline_mask)
+        expected_width = settings.finished_height_in * (cutline_width / cutline_height)
 
         analysis = analyze_template(disconnected_accessory_fixture(), settings)
 

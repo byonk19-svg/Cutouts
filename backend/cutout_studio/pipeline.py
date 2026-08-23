@@ -242,8 +242,9 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
     cropped_source = source.crop(support_bounds)
     cropped_mask = mask.crop(support_bounds)
     cropped_cut_line_mask = cut_line_mask.crop(support_bounds)
-    finished_width = settings.finished_height_in * ((cut_line_bounds[2] - cut_line_bounds[0]) / (cut_line_bounds[3] - cut_line_bounds[1]))
-    trace_width, trace_height = _trace_extent_in(support_bounds, cut_line_bounds, settings.finished_height_in)
+    cut_line_width, cut_line_height = _cut_line_scale_size(cut_line_mask, support_bounds, cut_line_bounds)
+    finished_width = settings.finished_height_in * (cut_line_width / cut_line_height)
+    trace_width, trace_height = _trace_extent_in(support_bounds, cut_line_mask, cut_line_bounds, settings.finished_height_in)
     tile_cols, tile_rows = tile_grid(
         trace_width,
         trace_height,
@@ -314,8 +315,9 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_de
     _initial_mask, mask, _cut_line_mask, support_bounds, cut_line_bounds = _subject_geometry(source, settings)
     cropped_source = source.crop(support_bounds)
     cropped_mask = mask.crop(support_bounds)
-    finished_width = settings.finished_height_in * ((cut_line_bounds[2] - cut_line_bounds[0]) / (cut_line_bounds[3] - cut_line_bounds[1]))
-    trace_width, trace_height = _trace_extent_in(support_bounds, cut_line_bounds, settings.finished_height_in)
+    cut_line_width, cut_line_height = _cut_line_scale_size(_cut_line_mask, support_bounds, cut_line_bounds)
+    finished_width = settings.finished_height_in * (cut_line_width / cut_line_height)
+    trace_width, trace_height = _trace_extent_in(support_bounds, _cut_line_mask, cut_line_bounds, settings.finished_height_in)
     tile_cols, tile_rows = tile_grid(
         trace_width,
         trace_height,
@@ -509,15 +511,32 @@ def _subject_geometry(
 
 def _trace_extent_in(
     support_bounds: tuple[int, int, int, int],
+    cut_line_mask: Image.Image,
     cut_line_bounds: tuple[int, int, int, int],
     finished_height_in: float,
 ) -> tuple[float, float]:
-    cut_width = max(1, cut_line_bounds[2] - cut_line_bounds[0])
-    cut_height = max(1, cut_line_bounds[3] - cut_line_bounds[1])
+    _cut_width, cut_height = _cut_line_scale_size(cut_line_mask, support_bounds, cut_line_bounds)
     pixels_per_inch = cut_height / finished_height_in
     support_width = max(1, support_bounds[2] - support_bounds[0])
     support_height = max(1, support_bounds[3] - support_bounds[1])
     return support_width / pixels_per_inch, support_height / pixels_per_inch
+
+
+def _raw_mask_size(mask: Image.Image) -> tuple[int, int]:
+    bbox = mask.getbbox()
+    if bbox is None:
+        raise ValueError("No subject was detected.")
+    return max(1, bbox[2] - bbox[0]), max(1, bbox[3] - bbox[1])
+
+
+def _cut_line_scale_size(
+    cut_line_mask: Image.Image,
+    support_bounds: tuple[int, int, int, int],
+    cut_line_bounds: tuple[int, int, int, int],
+) -> tuple[int, int]:
+    if support_bounds == cut_line_bounds:
+        return max(1, cut_line_bounds[2] - cut_line_bounds[0]), max(1, cut_line_bounds[3] - cut_line_bounds[1])
+    return _raw_mask_size(cut_line_mask)
 
 
 def _initial_subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image:
