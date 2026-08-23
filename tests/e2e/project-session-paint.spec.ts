@@ -25,6 +25,7 @@ test("failed reviewed-color match refresh preserves prior matches, palette state
   await firstRow.locator(".paint-match-chip").first().click();
   await expect.poll(async () => (await autosave(page))?.projectPalette?.[0]?.selectedMatchId).toBe("match-navy");
 
+  await reviewColorsForExport(page);
   await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
   await expect.poll(async () => (await autosave(page))?.workflowProgress?.colorsOutcome).toBe("reviewed");
   await page.getByLabel("Guided workflow").getByRole("button", { name: /Colors/ }).click();
@@ -154,6 +155,7 @@ test("malformed paint match payload preserves the reviewed palette and visible r
   await firstRow.locator(".paint-match-chip").first().click();
   await expect.poll(async () => (await autosave(page))?.projectPalette?.[0]?.selectedMatchId).toBe("match-navy");
 
+  await reviewColorsForExport(page);
   await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
   await expect.poll(async () => (await autosave(page))?.workflowProgress?.colorsOutcome).toBe("reviewed");
   await page.getByLabel("Guided workflow").getByRole("button", { name: /Colors/ }).click();
@@ -207,6 +209,18 @@ async function openEditColorDetails(page: Page) {
 async function openPaletteRow(row: ReturnType<Page["locator"]>) {
   const isClosed = await row.evaluate((element) => element instanceof HTMLDetailsElement && !element.open);
   if (isClosed) await row.locator("summary").click();
+}
+
+async function reviewColorsForExport(page: Page) {
+  const rows = page.locator(".palette-row");
+  for (let index = 0; index < await rows.count(); index += 1) {
+    const row = rows.nth(index);
+    await openPaletteRow(row);
+    const review = row.locator('input[type="checkbox"][aria-label="Review coverage area"]');
+    if (await review.count() && !(await review.isChecked())) await review.check();
+    const select = row.locator("select");
+    if (await select.count() && await select.locator("option").count() > 1) await select.selectOption({ index: 1 });
+  }
 }
 
 async function autosave(page: Page) {
