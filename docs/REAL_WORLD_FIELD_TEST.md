@@ -240,3 +240,40 @@ round and does not change the historical or corrected-baseline worksheet above.
   maker-quality observation forward when reviewing corrected Runs 4, 9, and
   10. Record the evidence during the rerun; defer production changes until the
   corrected ten-source round is complete.
+
+### Post-stabilization Run 6 review
+
+This targeted review was run after the Cut Line ownership, support-canvas scale,
+and Color Guide lifecycle stabilization work merged to `main` at
+`09c229767a9367ebf4a0ccac0cd2715bf73df6d0a`.
+
+- **Source:** `tmp/field-test-sources/run-06-black-background-cartoon-violinist.jpg`
+  (SHA-256
+  `0D68FAC935D14228E5E1823E5E0E740ADCD50BC85C99965953346BF1A83B6BB4`).
+- **Execution:** Fresh project at `http://127.0.0.1:5173`, exact source loaded
+  with Playwright `setInputFiles`, ordinary recommended settings, no manual
+  cleanup before export.
+- **Warnings:** The trace-quality review reported that several isolated
+  foreground regions were discarded and directed inspection of defining
+  accessories and small limbs.
+- **Starter PDF:**
+  `C:\Users\byonk\.codex\worktrees\run6-final-validation\Cutouts\output\run6-final-validation\run6-final-starter.pdf`
+  (SHA-256
+  `58BDD08B17C1857A2F250ECE8D42547D5529AC35465387CDB92D230B160D789E`).
+  The packet has 9 pages (cover plus 8 trace pages), a single outer Cut Line,
+  visible Detail Lines, page labels, overlap guides, and calibration content.
+  Finished size is `13.66 x 36.00 in` for the authoritative Cut Line; support
+  detail extends beyond that silhouette without becoming another cut contour.
+- **Starter SVG:**
+  `C:\Users\byonk\.codex\worktrees\run6-final-validation\Cutouts\output\run6-final-validation\run6-final-starter.svg`
+  (SHA-256
+  `893A747D993354129FA295D81C29AA7C6AB4BE005B96B45AFE797809ECF34533`).
+  It contains exactly one `cutline-layer` path and uses the support-canvas
+  physical dimensions for SVG calibration and viewBox scaling.
+- **Result:** The PDF and SVG agree on one authoritative outer Cut Line, and
+  the disconnected accessory is represented only in transfer/detail geometry.
+  The violin body, neck, and bow remain fragmented rather than coherent and
+  recognizable enough for transfer. Run 6 therefore remains **Fail** under the
+  existing protocol; no cleanup rescue or physical test was attempted.
+- **Physical status:** No printing, calibration measurement, page assembly,
+  transfer, or jigsaw acceptance was performed. Physical Run 6 remains Pending.
