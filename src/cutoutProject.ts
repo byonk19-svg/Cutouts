@@ -71,6 +71,8 @@ export type CutoutProjectAnalysis = {
   subjectBoundsPx?: [number, number, number, number];
   finishedWidthIn: number;
   finishedHeightIn: number;
+  traceWidthIn?: number;
+  traceHeightIn?: number;
   tileCols: number;
   tileRows: number;
   tileCount: number;
@@ -135,6 +137,13 @@ export function resizeAnalysisForFinishedHeight(
 ): CutoutProjectAnalysis {
   const originalAnalysis = restoreOriginalCutLine(analysis);
   const finishedWidthIn = Number((finishedHeightIn * (originalAnalysis.finishedWidthIn / originalAnalysis.finishedHeightIn)).toFixed(2));
+  const heightScale = finishedHeightIn / originalAnalysis.finishedHeightIn;
+  const traceWidthIn = originalAnalysis.traceWidthIn === undefined
+    ? finishedWidthIn
+    : Number((originalAnalysis.traceWidthIn * heightScale).toFixed(2));
+  const traceHeightIn = originalAnalysis.traceHeightIn === undefined
+    ? finishedHeightIn
+    : Number((originalAnalysis.traceHeightIn * heightScale).toFixed(2));
   const tileWidthIn = 8.5 - (2 * 0.35);
   const tileHeightIn = 11 - (2 * 0.35) - 0.42;
   const tileStepWidthIn = tileWidthIn - 0.25;
@@ -146,6 +155,8 @@ export function resizeAnalysisForFinishedHeight(
     ...originalAnalysis,
     finishedWidthIn,
     finishedHeightIn,
+    traceWidthIn,
+    traceHeightIn,
     tileCols,
     tileRows,
     tileCount: tileCols * tileRows

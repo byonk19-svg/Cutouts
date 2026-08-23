@@ -170,6 +170,8 @@ class TemplateAnalysis:
     subject_bounds_px: tuple[int, int, int, int]
     finished_width_in: float
     finished_height_in: float
+    trace_width_in: float
+    trace_height_in: float
     tile_cols: int
     tile_rows: int
     tile_count: int
@@ -191,6 +193,8 @@ class TemplateAnalysis:
             "subjectBoundsPx": self.subject_bounds_px,
             "finishedWidthIn": round(self.finished_width_in, 2),
             "finishedHeightIn": round(self.finished_height_in, 2),
+            "traceWidthIn": round(self.trace_width_in, 2),
+            "traceHeightIn": round(self.trace_height_in, 2),
             "tileCols": self.tile_cols,
             "tileRows": self.tile_rows,
             "tileCount": self.tile_count,
@@ -272,6 +276,8 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
         subject_bounds_px=support_bounds,
         finished_width_in=finished_width,
         finished_height_in=settings.finished_height_in,
+        trace_width_in=trace_width,
+        trace_height_in=trace_height,
         tile_cols=tile_cols,
         tile_rows=tile_rows,
         tile_count=tile_cols * tile_rows,
