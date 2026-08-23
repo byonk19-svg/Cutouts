@@ -122,6 +122,7 @@ function projectPaintColor(input: {
   coverage?: number;
   matches?: ReturnType<typeof paintMatch>[];
   locked?: boolean;
+  labelReviewed?: boolean;
   source?: "detected" | "manual";
 }): ProjectPaintColor {
   return {
@@ -135,6 +136,7 @@ function projectPaintColor(input: {
     coverage: input.coverage ?? 0,
     matches: input.matches ?? [],
     locked: input.locked ?? false,
+    labelReviewed: input.labelReviewed ?? true,
     source: input.source ?? "detected"
   };
 }
@@ -1199,6 +1201,8 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   const blockedReviewed = transitionProjectSession(unreviewedGuide, { type: "complete-color-review", outcome: "reviewed" });
   assertEqual(blockedReviewed.outcome.status, "rejected", "reviewed Color Guide completion should require explicit area review");
   assertEqual(blockedReviewed.session, unreviewedGuide, "unreviewed Color Guide completion should preserve the session");
+  assertEqual(projectSessionView(unreviewedGuide).capabilities.guidedWorkflow.canCompleteColorReview, false, "Color capability should match reviewed completion enforcement");
+  assertEqual(projectSessionView(unreviewedGuide).capabilities.guidedWorkflow.canSkipColorReview, true, "Skip capability should remain available for an unreviewed guide");
 
   const revisited = transitionProjectSession(skipped.session, { type: "navigate-workflow", target: "colors" });
   const paintDecision = transitionProjectSession(revisited.session, {
