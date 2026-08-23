@@ -189,6 +189,7 @@ export type GuidedWorkflowCapabilities = {
   readonly steps: readonly WorkflowStepItem[];
   readonly canCompleteLineworkReview: boolean;
   readonly canCompleteColorReview: boolean;
+  readonly canSkipColorReview: boolean;
   readonly canRestartColorReview: boolean;
 };
 
@@ -1426,7 +1427,10 @@ function guidedWorkflowCapabilities<TProject extends ProjectSessionProject>(
     progress: Object.freeze(progress),
     steps: Object.freeze(steps.map((item) => Object.freeze(item))),
     canCompleteLineworkReview: hasValidCutLine(session.project) && !isWorkflowBlockedByAiProposal(session),
-    canCompleteColorReview: progress.lineworkReviewed && !isWorkflowBlockedByAiProposal(session),
+    canCompleteColorReview: progress.lineworkReviewed
+      && paintGuideReadiness(paintGuideEntriesForProjectPalette(currentProjectPalette(session.project))).ready
+      && !isWorkflowBlockedByAiProposal(session),
+    canSkipColorReview: progress.lineworkReviewed && !isWorkflowBlockedByAiProposal(session),
     canRestartColorReview: progress.lineworkReviewed && progress.colorsOutcome !== "incomplete" && !isWorkflowBlockedByAiProposal(session)
   });
 }
