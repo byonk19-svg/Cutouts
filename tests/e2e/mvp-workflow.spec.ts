@@ -83,7 +83,7 @@ test("thin silhouette reinforcement stays preview-only until the maker accepts i
   expect(reinforcedPath).not.toBe(originalPath);
 
   await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
-  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Skip Paint Guide" }).click();
   await downloadFrom(page, "Download Printable PDF");
   expect(exportRequestText).toContain('"acceptedCutLinePath"');
   expect(exportRequestText).toContain(reinforcedPath);
@@ -289,7 +289,7 @@ test("accepted authored detail keeps its native resolution when analysis is rend
   expect(Math.max(...manualStrokePoints.map((point) => point.y))).toBeLessThanOrEqual(generated.analysis.previewHeightPx);
 
   await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
-  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Skip Paint Guide" }).click();
   await downloadFrom(page, "Download Printable PDF");
   const requestText = pdfRequestBody ? new TextDecoder("latin1").decode(pdfRequestBody) : "";
   const pdfDetailDataUrl = requestText.match(/name="editedDetail"[\s\S]*?(data:image\/png;base64,[A-Za-z0-9+/=]+)/)?.[1];
@@ -485,7 +485,7 @@ test("authored detail and Feature Lines stay aligned through restore and both ex
   await expect.poll(() => canvasVisiblePixelCount(page.locator(".feature-line-layer"))).toBeGreaterThan(0);
 
   await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
-  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Skip Paint Guide" }).click();
   const exportWorkspace = page.getByLabel("Export workspace");
   await downloadFrom(page, "Download Printable PDF");
   expect(pdfRequestBody).not.toBeNull();
@@ -525,7 +525,7 @@ test("Editor Transactions keep Undo and Redo artifact-only while preserving pain
     await colorDetails.locator(":scope > summary").click();
   }
   await addProjectPaintColor(page, "#315c78", "Lifecycle paint");
-  await page.getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByRole("button", { name: "Skip Paint Guide" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
 
   await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
@@ -575,7 +575,7 @@ test("Editor Transactions keep Undo and Redo artifact-only while preserving pain
   await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
 
   await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
-  await page.getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByRole("button", { name: "Skip Paint Guide" }).click();
   await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
   if (!await moreTools.evaluate((element) => element instanceof HTMLDetailsElement && element.open)) {
     await moreTools.locator("summary").click();
@@ -756,7 +756,7 @@ test("automatic maker strokes survive size changes and save/reopen, then reset c
   await expect.poll(async () => (await savedProjectSnapshot(page))?.editedDetailPngDataUrl).toBeNull();
 
   await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
-  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Skip Paint Guide" }).click();
   await downloadFrom(page, "Download Printable PDF");
   const requestText = pdfRequestBody ? new TextDecoder("latin1").decode(pdfRequestBody) : "";
   expect(requestText).toContain('"manualStrokes":[{"id":"stroke-1"');
@@ -1172,6 +1172,11 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect.poll(() => savedProjectColorsOutcome(page)).toBe("skipped");
   await guidedWorkflow.getByRole("button", { name: /Colors/ }).click();
   await expect(editColorDetails.getByLabel("Paint Palette Editor")).toBeVisible();
+  for (let index = 0; index < await primaryColorRows.count(); index += 1) {
+    const row = primaryColorRows.nth(index);
+    await row.getByLabel(/Area label for/).fill(`Reviewed color area ${index + 1}`);
+    await row.getByLabel(/Selected paint for/).selectOption({ index: 1 });
+  }
   await colorsWorkspace.getByRole("button", { name: "Continue to Export" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
   await expect(page.getByText("Complete color review before including the Color Guide.")).toHaveCount(0);
@@ -1299,15 +1304,18 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   expect(await paintRows.nth(0).evaluate((element) => element instanceof HTMLDetailsElement)).toBe(true);
   await expect(paintReview).toBeVisible();
   await expect(page.getByLabel("Project Palette Summary")).toBeVisible();
-  await expect(page.getByText("Needs area review").first()).toBeVisible();
-  await paintRows.nth(0).locator(":scope > summary").click();
-  await paintRows.nth(0).locator('input[type="checkbox"]').first().check();
-  await expect(paintRows.nth(0).locator('input[type="checkbox"]').first()).toBeChecked();
+  await expect(page.getByText("Needs area review")).toHaveCount(0);
 
   await addProjectPaintColor(page, "#f1c7a5", "Skin tone");
-  await expect(page.locator(".palette-row").filter({ hasText: "Skin tone" })).toBeVisible();
+  const skinToneRow = page.locator(".palette-row").filter({ hasText: "Skin tone" });
+  await expect(skinToneRow).toBeVisible();
+  await skinToneRow.locator("summary").click();
+  await skinToneRow.locator("select").selectOption({ index: 1 });
   await addProjectPaintColor(page, "#0c143a", "Blue hair");
-  await expect(page.locator(".palette-row").filter({ hasText: "Blue hair" })).toBeVisible();
+  const blueHairRow = page.locator(".palette-row").filter({ hasText: "Blue hair" });
+  await expect(blueHairRow).toBeVisible();
+  await blueHairRow.locator("summary").click();
+  await blueHairRow.locator("select").selectOption({ index: 1 });
 
   await updatePaintRow(paintRows.nth(0), "Hair", "blue hair and outline");
   await paintRows.nth(0).locator(".paint-match-chip").first().click();
@@ -1317,7 +1325,8 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await paintRows.nth(1).locator('input[placeholder*="brand"]').fill("Bring source swatch and choose a yellow craft paint");
 
   await updatePaintRow(paintRows.nth(2), "Boots", "rain boots");
-  await paintRows.nth(2).locator("select").selectOption("");
+  await paintRows.nth(2).locator("select").selectOption("__manual__");
+  await paintRows.nth(2).locator('input[placeholder*="brand"]').fill("Bring source swatch and choose a brown craft paint");
 
   await updatePaintRow(paintRows.nth(3), "Background test", "exclude from shopping list");
   await paintRows.nth(3).getByLabel("Include in shopping list").uncheck();
@@ -1325,7 +1334,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   const shoppingList = page.locator(".shopping-list-preview");
   await expect(shoppingList).toContainText("Hair");
   await expect(shoppingList).toContainText("Bring source swatch and choose a yellow craft paint - Coat");
-  await expect(shoppingList).toContainText("No match / choose in store - Boots");
+  await expect(shoppingList).toContainText("Bring source swatch and choose a brown craft paint - Boots");
   await expect(shoppingList).not.toContainText("Background test");
 
   await fileMenu.getByText("File", { exact: true }).click();
@@ -1494,12 +1503,12 @@ test("guided workflow remains focused and responsive through Coraline acceptance
 
   await primaryControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
   const colorsWorkspace = page.getByLabel("Colors workspace");
-  await expectSinglePrimaryAction(colorsWorkspace, "Continue to Export");
+  await expectSinglePrimaryAction(colorsWorkspace, "Skip Paint Guide");
   await expectFutureStepsLocked(guidedWorkflow, ["Export"]);
   await expect(colorsWorkspace.getByLabel("Edit Color Details")).not.toHaveAttribute("open", "");
   await captureResponsiveStep(page, evidenceDir, "colors", colorsWorkspace);
 
-  await colorsWorkspace.getByRole("button", { name: "Continue to Export" }).click();
+  await colorsWorkspace.getByRole("button", { name: "Skip Paint Guide" }).click();
   const exportWorkspace = page.getByLabel("Export workspace");
   await expectSinglePrimaryAction(exportWorkspace, "Download Printable PDF");
   await expect(exportWorkspace.getByLabel("More Export Options")).not.toHaveAttribute("open", "");
