@@ -256,7 +256,7 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
     cut_line_preview_mask = _preview_mask(cropped_source, cropped_cut_line_mask)
     outer_cut_path = _mask_to_svg_path(cut_line_preview_mask, simplify_px=max(1.2, settings.smoothing))
     try:
-        thin_silhouette = measure_thin_silhouette(cut_line_preview_mask, settings.finished_height_in)
+        thin_silhouette = measure_thin_silhouette(cut_line_preview_mask, trace_height)
     except ValueError:
         thin_silhouette = None
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
@@ -301,11 +301,12 @@ def propose_cutline_reinforcement(
     minimum_width_in: float,
 ) -> tuple[ThinSilhouetteProposal, bytes]:
     source = _load_image(image_bytes)
-    _initial_mask, mask, cut_line_mask, support_bounds, _cut_line_bounds = _subject_geometry(source, settings)
+    _initial_mask, mask, cut_line_mask, support_bounds, cut_line_bounds = _subject_geometry(source, settings)
     cropped_source = source.crop(support_bounds)
     cropped_mask = cut_line_mask.crop(support_bounds)
     preview_mask = _preview_mask(cropped_source, cropped_mask)
-    proposal = propose_reinforced_silhouette(preview_mask, settings.finished_height_in, minimum_width_in)
+    _trace_width, trace_height = _trace_extent_in(support_bounds, cut_line_mask, cut_line_bounds, settings.finished_height_in)
+    proposal = propose_reinforced_silhouette(preview_mask, trace_height, minimum_width_in)
     outer_line = _outer_line_from_mask(Image.fromarray(proposal.mask.astype(np.uint8) * 255, mode="L"), 3)
     return proposal, _png_bytes(outer_line)
 
