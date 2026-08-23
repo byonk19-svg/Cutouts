@@ -842,6 +842,16 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertIsNotNone(detail.crop(accessory_region).getchannel("A").getbbox())
         self.assertEqual(analysis.outer_cut_path.count("M "), 1)
 
+        faithful_detail = _detail_line_mask(
+            Image.open(io.BytesIO(disconnected_accessory_fixture())).convert("RGBA"),
+            _subject_mask(Image.open(io.BytesIO(disconnected_accessory_fixture())).convert("RGBA"), settings),
+            cleanup=35,
+            print_scale=False,
+            template_style="detailed",
+            detail_extraction_mode="rendered",
+        )
+        self.assertIsNotNone(faithful_detail.crop((300, 130, 390, 260)).getbbox())
+
     def test_disconnected_accessory_classification_scales_with_resolution(self) -> None:
         settings = TemplateSettings(threshold=35, smoothing=2, speck_area=60, hole_area=220)
         source = Image.open(io.BytesIO(disconnected_accessory_fixture())).convert("RGBA")
@@ -874,6 +884,17 @@ class PrintPipelineTest(unittest.TestCase):
         outer = Image.open(io.BytesIO(outer_png)).convert("RGBA")
 
         self.assertEqual(outer.crop((235, 90, 292, 230)).getchannel("A").getbbox(), None)
+
+    def test_finished_dimensions_use_authoritative_cutline_not_detail_support_bounds(self) -> None:
+        settings = TemplateSettings(threshold=35, smoothing=2, speck_area=60, hole_area=220)
+        source = Image.open(io.BytesIO(disconnected_accessory_fixture())).convert("RGBA")
+        retained_mask = _subject_mask(source, settings)
+        cutline_bounds = pipeline._mask_bounds(pipeline._authoritative_cut_line_mask(retained_mask))
+        expected_width = settings.finished_height_in * ((cutline_bounds[2] - cutline_bounds[0]) / (cutline_bounds[3] - cutline_bounds[1]))
+
+        analysis = analyze_template(disconnected_accessory_fixture(), settings)
+
+        self.assertAlmostEqual(analysis.finished_width_in, expected_width, places=2)
 
     def test_baked_checkerboard_background_is_excluded_from_subject_mask_and_palette(self) -> None:
         settings = TemplateSettings(

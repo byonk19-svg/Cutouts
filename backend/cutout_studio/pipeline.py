@@ -234,20 +234,15 @@ class TemplateAnalysis:
 
 def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> TemplateAnalysis:
     source = _load_image(image_bytes)
-    initial_mask = _initial_subject_mask(source, settings)
-    mask = _clean_subject_mask(
-        initial_mask,
-        settings,
-        preserve_sparse_alpha=_looks_like_sparse_alpha_subject(source, initial_mask),
-    )
-    bounds = _mask_bounds(mask)
-    cropped_source = source.crop(bounds)
-    cropped_mask = mask.crop(bounds)
-    cropped_cut_line_mask = _authoritative_cut_line_mask(cropped_mask)
-    finished_width = settings.finished_height_in * (cropped_source.width / cropped_source.height)
+    initial_mask, mask, cut_line_mask, support_bounds, cut_line_bounds = _subject_geometry(source, settings)
+    cropped_source = source.crop(support_bounds)
+    cropped_mask = mask.crop(support_bounds)
+    cropped_cut_line_mask = cut_line_mask.crop(support_bounds)
+    finished_width = settings.finished_height_in * ((cut_line_bounds[2] - cut_line_bounds[0]) / (cut_line_bounds[3] - cut_line_bounds[1]))
+    trace_width, trace_height = _trace_extent_in(support_bounds, cut_line_bounds, settings.finished_height_in)
     tile_cols, tile_rows = tile_grid(
-        finished_width,
-        settings.finished_height_in,
+        trace_width,
+        trace_height,
         settings.minimum_tile_cols,
         settings.minimum_tile_rows,
     )
@@ -264,7 +259,7 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
         source,
         initial_mask,
         mask,
-        bounds,
+        support_bounds,
         preview_mask.size,
         outer_cut_path,
         _detail_extraction_mode_used(cropped_source, cropped_mask, settings.template_style, settings.detail_extraction_mode),
@@ -274,7 +269,7 @@ def analyze_template(image_bytes: bytes, settings: TemplateSettings) -> Template
     return TemplateAnalysis(
         source_width_px=source.width,
         source_height_px=source.height,
-        subject_bounds_px=bounds,
+        subject_bounds_px=support_bounds,
         finished_width_in=finished_width,
         finished_height_in=settings.finished_height_in,
         tile_cols=tile_cols,
@@ -299,10 +294,9 @@ def propose_cutline_reinforcement(
     minimum_width_in: float,
 ) -> tuple[ThinSilhouetteProposal, bytes]:
     source = _load_image(image_bytes)
-    mask = _subject_mask(source, settings)
-    bounds = _mask_bounds(mask)
-    cropped_source = source.crop(bounds)
-    cropped_mask = _authoritative_cut_line_mask(mask.crop(bounds))
+    _initial_mask, mask, cut_line_mask, support_bounds, _cut_line_bounds = _subject_geometry(source, settings)
+    cropped_source = source.crop(support_bounds)
+    cropped_mask = cut_line_mask.crop(support_bounds)
     preview_mask = _preview_mask(cropped_source, cropped_mask)
     proposal = propose_reinforced_silhouette(preview_mask, settings.finished_height_in, minimum_width_in)
     outer_line = _outer_line_from_mask(Image.fromarray(proposal.mask.astype(np.uint8) * 255, mode="L"), 3)
@@ -311,19 +305,19 @@ def propose_cutline_reinforcement(
 
 def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_detail_png: bytes | None = None) -> bytes:
     source = _load_image(image_bytes)
-    mask = _subject_mask(source, settings)
-    bounds = _mask_bounds(mask)
-    cropped_source = source.crop(bounds)
-    cropped_mask = mask.crop(bounds)
-    finished_width = settings.finished_height_in * (cropped_source.width / cropped_source.height)
+    _initial_mask, mask, _cut_line_mask, support_bounds, cut_line_bounds = _subject_geometry(source, settings)
+    cropped_source = source.crop(support_bounds)
+    cropped_mask = mask.crop(support_bounds)
+    finished_width = settings.finished_height_in * ((cut_line_bounds[2] - cut_line_bounds[0]) / (cut_line_bounds[3] - cut_line_bounds[1]))
+    trace_width, trace_height = _trace_extent_in(support_bounds, cut_line_bounds, settings.finished_height_in)
     tile_cols, tile_rows = tile_grid(
-        finished_width,
-        settings.finished_height_in,
+        trace_width,
+        trace_height,
         settings.minimum_tile_cols,
         settings.minimum_tile_rows,
     )
     edited_detail_for_trace = edited_detail_png
-    trace = _make_trace_image(cropped_source, cropped_mask, settings, finished_width, settings.finished_height_in, edited_detail_for_trace)
+    trace = _make_trace_image(cropped_source, cropped_mask, settings, trace_width, trace_height, edited_detail_for_trace)
     palette = extract_palette(cropped_source, cropped_mask, settings.palette_size)
     manual_stroke_source_size = _manual_stroke_source_size(cropped_source, settings)
 
@@ -340,8 +334,8 @@ def build_template_pdf(image_bytes: bytes, settings: TemplateSettings, edited_de
         pdf,
         settings.project_name,
         trace,
-        finished_width,
-        settings.finished_height_in,
+        trace_width,
+        trace_height,
         tile_cols,
         tile_rows,
         settings.manual_strokes,
@@ -489,12 +483,35 @@ def _load_image(image_bytes: bytes) -> Image.Image:
 
 
 def _subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image:
+    _initial_mask, mask, _cut_line_mask, _support_bounds, _cut_line_bounds = _subject_geometry(image, settings)
+    return mask
+
+
+def _subject_geometry(
+    image: Image.Image,
+    settings: TemplateSettings,
+) -> tuple[Image.Image, Image.Image, Image.Image, tuple[int, int, int, int], tuple[int, int, int, int]]:
     initial_mask = _initial_subject_mask(image, settings)
-    return _clean_subject_mask(
+    mask = _clean_subject_mask(
         initial_mask,
         settings,
         preserve_sparse_alpha=_looks_like_sparse_alpha_subject(image, initial_mask),
     )
+    cut_line_mask = _authoritative_cut_line_mask(mask)
+    return initial_mask, mask, cut_line_mask, _mask_bounds(mask), _mask_bounds(cut_line_mask)
+
+
+def _trace_extent_in(
+    support_bounds: tuple[int, int, int, int],
+    cut_line_bounds: tuple[int, int, int, int],
+    finished_height_in: float,
+) -> tuple[float, float]:
+    cut_width = max(1, cut_line_bounds[2] - cut_line_bounds[0])
+    cut_height = max(1, cut_line_bounds[3] - cut_line_bounds[1])
+    pixels_per_inch = cut_height / finished_height_in
+    support_width = max(1, support_bounds[2] - support_bounds[0])
+    support_height = max(1, support_bounds[3] - support_bounds[1])
+    return support_width / pixels_per_inch, support_height / pixels_per_inch
 
 
 def _initial_subject_mask(image: Image.Image, settings: TemplateSettings) -> Image.Image:
@@ -1031,6 +1048,7 @@ def _make_preview_layers(image: Image.Image, mask: Image.Image, settings: Templa
         template_style=settings.template_style,
         detail_extraction_mode=detail_extraction_mode,
         print_scale=False,
+        speck_area=settings.speck_area,
     )
     paint_guide = _on_white(preview_image)
     return (
@@ -1101,6 +1119,7 @@ def _make_trace_image(
         template_style=settings.template_style,
         detail_extraction_mode=detail_extraction_mode,
         print_scale=True,
+        speck_area=settings.speck_area,
     )
     if settings.accepted_cut_line_path.strip():
         outer = _accepted_cut_line_layer(
@@ -1148,6 +1167,7 @@ def _line_art_layers(
     template_style: str,
     print_scale: bool,
     detail_extraction_mode: str = "auto",
+    speck_area: int = 60,
 ) -> tuple[Image.Image, Image.Image, Image.Image]:
     mask_l = mask.convert("L")
     cut_line_mask = _authoritative_cut_line_mask(mask_l)
@@ -1167,6 +1187,7 @@ def _line_art_layers(
             print_scale,
             template_style=template_style,
             detail_extraction_mode=detail_extraction_mode,
+            speck_area=speck_area,
         )
         if detail_line_width > 1:
             detail_mask = detail_mask.filter(ImageFilter.MaxFilter(_odd_filter_size(detail_line_width)))
@@ -1300,6 +1321,7 @@ def _detail_line_mask(
     print_scale: bool,
     template_style: str = "detailed",
     detail_extraction_mode: str = "auto",
+    speck_area: int = 60,
 ) -> Image.Image:
     extraction_mode = _detail_extraction_mode_used(image, mask, template_style, detail_extraction_mode)
     if extraction_mode == "lineArt":
@@ -1323,20 +1345,13 @@ def _detail_line_mask(
     if template_style == "marker":
         cleanup = max(cleanup, 90)
         detail = _marker_template_line_mask(image, mask, cleanup, print_scale)
-        return _suppress_exterior_detail_band(detail, mask, print_scale)
+        detail = _suppress_exterior_detail_band(detail, mask, print_scale)
+        return _restore_detail_support_boundaries(detail, mask, speck_area)
     if template_style == "clean":
         cleanup = max(cleanup, 76)
-        detail = _clean_feature_line_mask(image, mask, cleanup, print_scale)
+        detail = _clean_feature_line_mask(image, mask, cleanup, print_scale, speck_area=speck_area)
         detail = _suppress_exterior_detail_band(detail, mask, print_scale)
-        hole_boundary = _enclosed_hole_boundary_mask(mask, min_area=24)
-        accessory_boundary = _nearby_component_boundary_mask(mask)
-        return Image.fromarray(
-            np.maximum(
-                np.asarray(detail.convert("L"), dtype=np.uint8),
-                np.maximum(hole_boundary, accessory_boundary).astype(np.uint8) * 255,
-            ),
-            mode="L",
-        )
+        return _restore_detail_support_boundaries(detail, mask, speck_area)
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     blur_radius = 1.0 + (cleanup / 100) * (2.2 if print_scale else 1.6)
     cluster_count = 2 + round(((100 - cleanup) / 100) * 4)
@@ -1390,7 +1405,13 @@ def _suppress_exterior_detail_band(detail: Image.Image, mask: Image.Image, print
     return Image.fromarray(np.where(interior_arr > 0, detail_arr, 0).astype(np.uint8), mode="L")
 
 
-def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int, print_scale: bool) -> Image.Image:
+def _clean_feature_line_mask(
+    image: Image.Image,
+    mask: Image.Image,
+    cleanup: int,
+    print_scale: bool,
+    speck_area: int = 60,
+) -> Image.Image:
     work_image, work_mask, original_size = _detail_work_image(image, mask)
     blur_radius, edge_threshold, min_area = _clean_feature_line_tuning(cleanup, print_scale)
     flattened = _flatten_detail_work_image(work_image, cleanup, "clean")
@@ -1407,10 +1428,8 @@ def _clean_feature_line_mask(image: Image.Image, mask: Image.Image, cleanup: int
     color_detail_arr = np.asarray(_clean_color_boundary_mask(flattened, work_mask, cleanup, print_scale).convert("L")) > 0
     head_detail_arr = np.asarray(_head_feature_boost_mask(flattened, work_mask, cleanup).convert("L")) > 0
     enclosed_hole_arr = _enclosed_hole_boundary_mask(work_mask, min_area)
-    detail = Image.fromarray(
-        ((detail_arr | color_detail_arr | head_detail_arr | enclosed_hole_arr).astype(np.uint8) * 255),
-        mode="L",
-    )
+    detail = Image.fromarray(((detail_arr | color_detail_arr | head_detail_arr | enclosed_hole_arr).astype(np.uint8) * 255), mode="L")
+    detail = _restore_detail_support_boundaries(detail, work_mask, speck_area)
     detail = _remove_small_components(detail, max(24, min_area - 14))
     detail = _filter_clean_detail_components(detail)
     if detail.size != original_size:
@@ -2001,8 +2020,8 @@ def _enclosed_hole_boundary_mask(mask: Image.Image, min_area: int) -> np.ndarray
     return boundary
 
 
-def _nearby_component_boundary_mask(mask: Image.Image) -> np.ndarray:
-    labels, selected = _nearby_subject_component_labels(mask, speck_area=60)
+def _nearby_component_boundary_mask(mask: Image.Image, speck_area: int) -> np.ndarray:
+    labels, selected = _nearby_subject_component_labels(mask, speck_area=speck_area)
     if not selected:
         return np.zeros(labels.shape, dtype=bool)
     largest = min(selected, key=lambda label: -np.count_nonzero(labels == label))
@@ -2014,6 +2033,22 @@ def _nearby_component_boundary_mask(mask: Image.Image) -> np.ndarray:
         component = (labels == label).astype(np.uint8)
         boundary |= (component > 0) & ~(cv2.erode(component, kernel, iterations=1) > 0)
     return boundary
+
+
+def _restore_detail_support_boundaries(
+    detail: Image.Image,
+    mask: Image.Image,
+    speck_area: int,
+    *,
+    include_nearby: bool = True,
+) -> Image.Image:
+    support = _enclosed_hole_boundary_mask(mask, min_area=24)
+    if include_nearby:
+        support = np.maximum(support, _nearby_component_boundary_mask(mask, speck_area))
+    return Image.fromarray(
+        np.maximum(np.asarray(detail.convert("L"), dtype=np.uint8), support.astype(np.uint8) * 255),
+        mode="L",
+    )
 
 
 def _detail_work_image(
