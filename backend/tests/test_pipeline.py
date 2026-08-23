@@ -918,6 +918,31 @@ class PrintPipelineTest(unittest.TestCase):
         self.assertTrue(analysis.trace_quality["fakeCheckerboardBackground"])
         self.assertTrue(any("checkerboard background" in warning for warning in analysis.trace_quality["warnings"]))
 
+    def test_trace_quality_warns_when_many_foreground_components_are_discarded(self) -> None:
+        image = Image.new("RGBA", (400, 400), (0, 0, 0, 255))
+        initial = Image.new("L", image.size, 0)
+        ImageDraw.Draw(initial).rectangle((80, 60, 300, 340), fill=255)
+        draw = ImageDraw.Draw(initial)
+        for index in range(12):
+            x = 12 + (index % 6) * 18
+            y = 12 + (index // 6) * 18
+            draw.rectangle((x, y, x + 3, y + 3), fill=255)
+        final = Image.new("L", image.size, 0)
+        ImageDraw.Draw(final).rectangle((80, 60, 300, 340), fill=255)
+
+        quality = pipeline._trace_quality_summary(
+            image,
+            initial,
+            final,
+            (80, 60, 301, 341),
+            (300, 380),
+            "M 1 1 L 200 1 L 200 300 Z",
+            "rendered",
+            "auto",
+        )
+
+        self.assertTrue(any("defining accessories" in warning for warning in quality["warnings"]))
+
     def test_trace_quality_detects_subtle_baked_in_checkerboard_backgrounds(self) -> None:
         settings = TemplateSettings(finished_height_in=18, threshold=35, detail_lines=False)
 
