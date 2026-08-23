@@ -525,7 +525,7 @@ test("Editor Transactions keep Undo and Redo artifact-only while preserving pain
     await colorDetails.locator(":scope > summary").click();
   }
   await addProjectPaintColor(page, "#315c78", "Lifecycle paint");
-  await page.getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByRole("button", { name: "Skip Paint Guide" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
 
   await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
@@ -575,7 +575,7 @@ test("Editor Transactions keep Undo and Redo artifact-only while preserving pain
   await expect.poll(async () => (await savedProjectSnapshot(page))?.manualStrokes.length).toBe(1);
 
   await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
-  await page.getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByRole("button", { name: "Skip Paint Guide" }).click();
   await guidedWorkflow.getByRole("button", { name: /Clean Lines/ }).click();
   if (!await moreTools.evaluate((element) => element instanceof HTMLDetailsElement && element.open)) {
     await moreTools.locator("summary").click();
