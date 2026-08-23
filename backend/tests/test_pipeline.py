@@ -124,7 +124,7 @@ def disconnected_accessory_fixture() -> bytes:
     # A dark accessory body inside the light torso becomes an enclosed mask hole.
     draw.ellipse((220, 225, 280, 335), fill=(12, 16, 20, 255))
     # The narrow accessory is intentionally separated from the hand by a small gap.
-    draw.line((325, 250, 370, 160), fill=accessory, width=18)
+    draw.line((345, 250, 370, 160), fill=accessory, width=18)
     draw.ellipse((360, 145, 380, 175), fill=accessory)
     out = io.BytesIO()
     image.save(out, format="PNG")
@@ -811,7 +811,7 @@ class PrintPipelineTest(unittest.TestCase):
 
         # The accessory is a meaningful, nearby foreground component rather than
         # a page speck and must remain available to the generated trace layers.
-        self.assertGreater(mask.getpixel((344, 211)), 0)
+        self.assertGreater(mask.getpixel((354, 211)), 0)
         self.assertGreater(mask.getpixel((370, 160)), 0)
         self.assertEqual(mask.getpixel((10, 40)), 0)
 
@@ -824,6 +824,56 @@ class PrintPipelineTest(unittest.TestCase):
             detail_extraction_mode="rendered",
         )
         self.assertGreater(detail.getpixel((219, 280)), 0)
+
+    def test_disconnected_accessory_stays_detail_only_and_not_outer_cutline(self) -> None:
+        settings = TemplateSettings(
+            threshold=35,
+            smoothing=2,
+            speck_area=60,
+            hole_area=220,
+            detail_lines=True,
+        )
+        analysis = analyze_template(disconnected_accessory_fixture(), settings)
+        outer = Image.open(io.BytesIO(analysis.outer_line_png)).convert("RGBA")
+        detail = Image.open(io.BytesIO(analysis.detail_line_png)).convert("RGBA")
+
+        accessory_region = (235, 90, 292, 230)
+        self.assertEqual(outer.crop(accessory_region).getchannel("A").getbbox(), None)
+        self.assertIsNotNone(detail.crop(accessory_region).getchannel("A").getbbox())
+        self.assertEqual(analysis.outer_cut_path.count("M "), 1)
+
+    def test_disconnected_accessory_classification_scales_with_resolution(self) -> None:
+        settings = TemplateSettings(threshold=35, smoothing=2, speck_area=60, hole_area=220)
+        source = Image.open(io.BytesIO(disconnected_accessory_fixture())).convert("RGBA")
+        high_resolution = source.resize((1600, 2400), Image.Resampling.NEAREST)
+
+        low_mask = _subject_mask(source, settings)
+        high_mask = _subject_mask(high_resolution, settings)
+
+        self.assertGreater(low_mask.getpixel((354, 211)), 0)
+        self.assertGreater(high_mask.getpixel((1416, 844)), 0)
+        self.assertEqual(low_mask.getpixel((10, 40)), 0)
+        self.assertEqual(high_mask.getpixel((40, 160)), 0)
+        high_detail = _detail_line_mask(
+            high_resolution,
+            high_mask,
+            cleanup=88,
+            print_scale=False,
+            template_style="clean",
+            detail_extraction_mode="rendered",
+        )
+        self.assertIsNotNone(high_detail.crop((940, 360, 1168, 920)).getbbox())
+
+    def test_thin_silhouette_reinforcement_uses_only_the_authoritative_cutline(self) -> None:
+        settings = TemplateSettings(threshold=35, smoothing=2, speck_area=60, hole_area=220)
+        _proposal, outer_png = pipeline.propose_cutline_reinforcement(
+            disconnected_accessory_fixture(),
+            settings,
+            minimum_width_in=0.5,
+        )
+        outer = Image.open(io.BytesIO(outer_png)).convert("RGBA")
+
+        self.assertEqual(outer.crop((235, 90, 292, 230)).getchannel("A").getbbox(), None)
 
     def test_baked_checkerboard_background_is_excluded_from_subject_mask_and_palette(self) -> None:
         settings = TemplateSettings(
