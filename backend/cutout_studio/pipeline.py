@@ -651,6 +651,11 @@ def _trace_quality_summary(
         warnings.append("The detected subject bounds are small compared with the uploaded image. Crop or remove extra page/background space before tracing.")
     if discarded_component_count > 0 and discarded_component_coverage > 0.003:
         warnings.append("Small isolated marks were removed from the detected subject. Check for page numbers, tile labels, or background specks.")
+    elif discarded_component_count >= 8 and discarded_component_coverage > 0.001:
+        warnings.append(
+            "Several isolated foreground regions were discarded during cleanup. "
+            "Check defining accessories, small limbs, and other important features in Clean Lines."
+        )
     if _looks_like_finished_tile_page(image, initial_mask, subject_coverage):
         warnings.append("This input may be a finished trace tile or PDF page. Upload one complete source image instead of an output template page.")
     if path_bounds is not None:
