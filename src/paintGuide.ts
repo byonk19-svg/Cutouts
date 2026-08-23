@@ -67,7 +67,7 @@ export type PaintGuideReadiness = {
 export function paintGuideReadiness(entries: PaintGuideEntry[]): PaintGuideReadiness {
   const included = entries.filter((entry) => entry.included);
   const genericLabelCount = included.filter((entry) => isGenericPaintLabel(entry.label)).length;
-  const placeholderLabelCount = included.filter((entry) => entry.labelReviewed === false).length;
+  const placeholderLabelCount = included.filter((entry) => entry.labelReviewed !== true).length;
   const unresolvedPaintCount = included.filter((entry) => !entry.selectedMatch && !entry.manualOverride.trim()).length;
   return {
     includedCount: included.length,
@@ -253,7 +253,7 @@ export function mergeProjectPaintColors(palette: ProjectPaintColor[], ids: strin
 
 export function filterPaintGuideEntries(entries: PaintGuideEntry[], filter: PaintReviewFilter) {
   if (filter === "included") return entries.filter((entry) => entry.included);
-  if (filter === "missing") return entries.filter((entry) => entry.labelReviewed === false || (!entry.selectedMatch && !entry.manualOverride));
+  if (filter === "missing") return entries.filter((entry) => entry.labelReviewed !== true || (!entry.selectedMatch && !entry.manualOverride));
   return entries;
 }
 
@@ -330,7 +330,7 @@ export function paintSanityWarnings(entries: PaintGuideEntry[]): PaintSanityWarn
       reason
     });
 
-    if (entry.labelReviewed === false) {
+    if (entry.labelReviewed !== true) {
       addWarning(isGenericPaintLabel(entry.label) ? "Needs label" : "Needs area label review");
     }
     if (unresolved) {
