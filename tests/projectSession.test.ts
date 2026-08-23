@@ -1191,8 +1191,23 @@ function completePendingAiProposal(session: ReturnType<typeof createProjectSessi
   });
   assertEqual(bypassedGenericSettings.session.project.settings.includePaintGuidePage, false, "generic settings updates should not bypass the color-review policy");
 
+  const unreviewedGuide = createProjectSession({
+    ...lifecycleProject,
+    projectPalette: defaultProjectPalette.map((color, index) => index === 0 ? { ...color, labelReviewed: false } : color),
+    workflowProgress: { activeStep: "colors" as const, lineworkReviewed: true, colorsOutcome: "incomplete" as const }
+  });
+  const blockedReviewed = transitionProjectSession(unreviewedGuide, { type: "complete-color-review", outcome: "reviewed" });
+  assertEqual(blockedReviewed.outcome.status, "rejected", "reviewed Color Guide completion should require explicit area review");
+  assertEqual(blockedReviewed.session, unreviewedGuide, "unreviewed Color Guide completion should preserve the session");
+
   const revisited = transitionProjectSession(skipped.session, { type: "navigate-workflow", target: "colors" });
-  const completedLater = transitionProjectSession(revisited.session, { type: "complete-color-review", outcome: "reviewed" });
+  const paintDecision = transitionProjectSession(revisited.session, {
+    type: "update-project-paint-color",
+    id: revisited.session.project.projectPalette[0].id,
+    patch: { selectedMatchId: navyPaintMatch.id }
+  });
+  const completedLater = transitionProjectSession(paintDecision.session, { type: "complete-color-review", outcome: "reviewed" });
+  assertEqual(completedLater.outcome.status, "applied", "a revisited Color Guide should be reviewable after the explicit decision gate");
   const ordinaryExportEdit = transitionProjectSession(completedLater.session, { type: "set-color-guide-included", included: false });
   assertEqual(ordinaryExportEdit.outcome.status, "applied", "a reviewed Color Guide should remain an editable export option");
   assertEqual(ordinaryExportEdit.session.project.workflowProgress?.colorsOutcome, "reviewed", "ordinary Color Guide edits should retain completed review");

@@ -2762,7 +2762,7 @@ function App() {
                 <>
                   {!colorGuideReadiness.ready ? <ColorGuideReadinessCard readiness={colorGuideReadiness} /> : null}
                   <div className="colors-step-actions" aria-label="Colors step actions">
-                  <button className="primary-action" onClick={() => finishColorReview("reviewed")} disabled={!projectCapabilities.guidedWorkflow.canCompleteColorReview}>Continue to Export</button>
+                  <button className="primary-action" onClick={() => finishColorReview("reviewed")} disabled={!projectCapabilities.guidedWorkflow.canCompleteColorReview || !colorGuideReadiness.ready}>Continue to Export</button>
                   <button className="tool-button" onClick={() => finishColorReview("skipped")} disabled={!projectCapabilities.guidedWorkflow.canCompleteColorReview}>Skip Paint Guide</button>
                   </div>
                 </>

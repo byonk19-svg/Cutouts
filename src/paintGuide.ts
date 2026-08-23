@@ -67,7 +67,7 @@ export type PaintGuideReadiness = {
 export function paintGuideReadiness(entries: PaintGuideEntry[]): PaintGuideReadiness {
   const included = entries.filter((entry) => entry.included);
   const genericLabelCount = included.filter((entry) => isGenericPaintLabel(entry.label)).length;
-  const placeholderLabelCount = included.filter((entry) => entry.labelReviewed !== true).length;
+  const placeholderLabelCount = included.filter((entry) => entry.labelReviewed === false).length;
   const unresolvedPaintCount = included.filter((entry) => !entry.selectedMatch && !entry.manualOverride.trim()).length;
   return {
     includedCount: included.length,
@@ -151,7 +151,7 @@ export function paintGuideEntriesForProjectPalette(projectPalette: ProjectPaintC
     label: color.label.trim() || `Color ${index + 1}`,
     note: color.note.trim(),
     manualOverride: color.manualOverride.trim(),
-    labelReviewed: color.labelReviewed ?? false,
+    labelReviewed: color.labelReviewed,
     selectedMatch: color.matches.find((match) => match.id === color.selectedMatchId) ?? null
   }));
 }
@@ -209,7 +209,7 @@ export function updateProjectPaintColor(
         ? patch.labelReviewed ?? false
         : patch.label !== undefined
           ? Boolean(patch.label.trim() && !isCoveragePlaceholder(patch.label))
-          : color.labelReviewed ?? false,
+          : color.labelReviewed,
       included: patch.included ?? color.included,
       selectedMatchId: nextSelectedMatchId,
       manualOverride: patch.manualOverride ?? color.manualOverride,
@@ -253,7 +253,7 @@ export function mergeProjectPaintColors(palette: ProjectPaintColor[], ids: strin
 
 export function filterPaintGuideEntries(entries: PaintGuideEntry[], filter: PaintReviewFilter) {
   if (filter === "included") return entries.filter((entry) => entry.included);
-  if (filter === "missing") return entries.filter((entry) => entry.labelReviewed !== true || (!entry.selectedMatch && !entry.manualOverride));
+  if (filter === "missing") return entries.filter((entry) => entry.labelReviewed === false || (!entry.selectedMatch && !entry.manualOverride));
   return entries;
 }
 
@@ -330,7 +330,7 @@ export function paintSanityWarnings(entries: PaintGuideEntry[]): PaintSanityWarn
       reason
     });
 
-    if (entry.labelReviewed !== true) {
+    if (entry.labelReviewed === false) {
       addWarning(isGenericPaintLabel(entry.label) ? "Needs label" : "Needs area label review");
     }
     if (unresolved) {

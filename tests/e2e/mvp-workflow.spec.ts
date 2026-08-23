@@ -1172,6 +1172,11 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await expect.poll(() => savedProjectColorsOutcome(page)).toBe("skipped");
   await guidedWorkflow.getByRole("button", { name: /Colors/ }).click();
   await expect(editColorDetails.getByLabel("Paint Palette Editor")).toBeVisible();
+  for (let index = 0; index < await primaryColorRows.count(); index += 1) {
+    const row = primaryColorRows.nth(index);
+    await row.getByLabel(/Area label for/).fill(`Reviewed color area ${index + 1}`);
+    await row.getByLabel(/Selected paint for/).selectOption({ index: 1 });
+  }
   await colorsWorkspace.getByRole("button", { name: "Continue to Export" }).click();
   await expect(guidedWorkflow.getByRole("button", { name: /Export/ })).toHaveAttribute("aria-current", "step");
   await expect(page.getByText("Complete color review before including the Color Guide.")).toHaveCount(0);
@@ -1299,15 +1304,18 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   expect(await paintRows.nth(0).evaluate((element) => element instanceof HTMLDetailsElement)).toBe(true);
   await expect(paintReview).toBeVisible();
   await expect(page.getByLabel("Project Palette Summary")).toBeVisible();
-  await expect(page.getByText("Needs area review").first()).toBeVisible();
-  await paintRows.nth(0).locator(":scope > summary").click();
-  await paintRows.nth(0).locator('input[type="checkbox"]').first().check();
-  await expect(paintRows.nth(0).locator('input[type="checkbox"]').first()).toBeChecked();
+  await expect(page.getByText("Needs area review")).toHaveCount(0);
 
   await addProjectPaintColor(page, "#f1c7a5", "Skin tone");
-  await expect(page.locator(".palette-row").filter({ hasText: "Skin tone" })).toBeVisible();
+  const skinToneRow = page.locator(".palette-row").filter({ hasText: "Skin tone" });
+  await expect(skinToneRow).toBeVisible();
+  await skinToneRow.locator("summary").click();
+  await skinToneRow.locator("select").selectOption({ index: 1 });
   await addProjectPaintColor(page, "#0c143a", "Blue hair");
-  await expect(page.locator(".palette-row").filter({ hasText: "Blue hair" })).toBeVisible();
+  const blueHairRow = page.locator(".palette-row").filter({ hasText: "Blue hair" });
+  await expect(blueHairRow).toBeVisible();
+  await blueHairRow.locator("summary").click();
+  await blueHairRow.locator("select").selectOption({ index: 1 });
 
   await updatePaintRow(paintRows.nth(0), "Hair", "blue hair and outline");
   await paintRows.nth(0).locator(".paint-match-chip").first().click();
@@ -1317,7 +1325,8 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   await paintRows.nth(1).locator('input[placeholder*="brand"]').fill("Bring source swatch and choose a yellow craft paint");
 
   await updatePaintRow(paintRows.nth(2), "Boots", "rain boots");
-  await paintRows.nth(2).locator("select").selectOption("");
+  await paintRows.nth(2).locator("select").selectOption("__manual__");
+  await paintRows.nth(2).locator('input[placeholder*="brand"]').fill("Bring source swatch and choose a brown craft paint");
 
   await updatePaintRow(paintRows.nth(3), "Background test", "exclude from shopping list");
   await paintRows.nth(3).getByLabel("Include in shopping list").uncheck();
@@ -1325,7 +1334,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   const shoppingList = page.locator(".shopping-list-preview");
   await expect(shoppingList).toContainText("Hair");
   await expect(shoppingList).toContainText("Bring source swatch and choose a yellow craft paint - Coat");
-  await expect(shoppingList).toContainText("No match / choose in store - Boots");
+  await expect(shoppingList).toContainText("Bring source swatch and choose a brown craft paint - Boots");
   await expect(shoppingList).not.toContainText("Background test");
 
   await fileMenu.getByText("File", { exact: true }).click();
