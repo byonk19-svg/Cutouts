@@ -136,6 +136,25 @@ const analysis = {
 }
 
 {
+  const supportCanvasSvg = buildTraceLineworkSvg({
+    projectName: "Support canvas scale",
+    analysis: {
+      ...analysis,
+      finishedWidthIn: 14,
+      finishedHeightIn: 36,
+      traceWidthIn: 18,
+      traceHeightIn: 42,
+      previewWidthPx: 360,
+      previewHeightPx: 840
+    },
+    manualStrokes: []
+  });
+  assert(supportCanvasSvg.includes('width="18in" height="42in"'), "SVG should size the full support canvas physically");
+  assert(supportCanvasSvg.includes('width="20" height="20"'), "SVG calibration should use support-canvas pixels per inch");
+  assert(supportCanvasSvg.includes("Finished size 14 in wide by 36 in tall"), "SVG description should retain authoritative finished dimensions");
+}
+
+{
   for (const [logicalWidth, expectedPoints] of [[10, 2.5], [20, 4], [34, 6]] as const) {
     for (const [previewHeightPx, finishedHeightIn] of [[480, 24], [1440, 48]] as const) {
       const variantAnalysis = {

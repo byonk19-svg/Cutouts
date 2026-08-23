@@ -24,9 +24,11 @@ export function buildTraceLineworkSvg({
 }: TraceLineworkSvgInput) {
   const width = formatNumber(analysis.previewWidthPx);
   const height = formatNumber(analysis.previewHeightPx);
+  const traceWidthIn = analysis.traceWidthIn ?? analysis.finishedWidthIn;
+  const traceHeightIn = analysis.traceHeightIn ?? analysis.finishedHeightIn;
   const title = escapeXml(projectName.trim() || "Cutout Studio Linework");
   const parts = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${formatNumber(analysis.finishedWidthIn)}in" height="${formatNumber(analysis.finishedHeightIn)}in" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="title desc">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${formatNumber(traceWidthIn)}in" height="${formatNumber(traceHeightIn)}in" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="title desc">`,
     `<title id="title">${title}</title>`,
     `<desc id="desc">Printable cutout linework. Print at 100% / actual size. Finished size ${formatNumber(analysis.finishedWidthIn)} in wide by ${formatNumber(analysis.finishedHeightIn)} in tall.</desc>`
   ];
@@ -55,14 +57,14 @@ export function buildTraceLineworkSvg({
     const strokeWidth = traceStrokeWidthViewBox(
       stroke.width,
       analysis.previewHeightPx,
-      analysis.finishedHeightIn
+      traceHeightIn
     );
     parts.push(`<path id="${escapeXml(stroke.id)}" d="${pathData}" stroke-width="${formatNumber(strokeWidth)}"/>`);
   }
   parts.push("</g>");
 
   if (includeCalibration) {
-    parts.push(calibrationMarkup(analysis));
+    parts.push(calibrationMarkup(analysis, traceHeightIn));
   }
 
   parts.push("</svg>");
@@ -98,8 +100,8 @@ function strokePathData(stroke: TraceStroke) {
   ].join(" ");
 }
 
-function calibrationMarkup(analysis: CutoutProjectAnalysis) {
-  const pxPerIn = analysis.previewHeightPx / analysis.finishedHeightIn;
+function calibrationMarkup(analysis: CutoutProjectAnalysis, traceHeightIn: number) {
+  const pxPerIn = analysis.previewHeightPx / traceHeightIn;
   const size = formatNumber(pxPerIn);
   const margin = formatNumber(Math.max(pxPerIn * 0.25, 12));
   const labelY = formatNumber(Math.max(pxPerIn * 0.25, 12) + pxPerIn + Math.max(pxPerIn * 0.18, 10));
