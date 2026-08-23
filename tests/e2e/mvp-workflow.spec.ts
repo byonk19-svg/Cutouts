@@ -83,7 +83,7 @@ test("thin silhouette reinforcement stays preview-only until the maker accepts i
   expect(reinforcedPath).not.toBe(originalPath);
 
   await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
-  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Skip Paint Guide" }).click();
   await downloadFrom(page, "Download Printable PDF");
   expect(exportRequestText).toContain('"acceptedCutLinePath"');
   expect(exportRequestText).toContain(reinforcedPath);
@@ -289,7 +289,7 @@ test("accepted authored detail keeps its native resolution when analysis is rend
   expect(Math.max(...manualStrokePoints.map((point) => point.y))).toBeLessThanOrEqual(generated.analysis.previewHeightPx);
 
   await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
-  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Skip Paint Guide" }).click();
   await downloadFrom(page, "Download Printable PDF");
   const requestText = pdfRequestBody ? new TextDecoder("latin1").decode(pdfRequestBody) : "";
   const pdfDetailDataUrl = requestText.match(/name="editedDetail"[\s\S]*?(data:image\/png;base64,[A-Za-z0-9+/=]+)/)?.[1];
@@ -485,7 +485,7 @@ test("authored detail and Feature Lines stay aligned through restore and both ex
   await expect.poll(() => canvasVisiblePixelCount(page.locator(".feature-line-layer"))).toBeGreaterThan(0);
 
   await page.getByLabel("Clean Lines primary controls").getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
-  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Skip Paint Guide" }).click();
   const exportWorkspace = page.getByLabel("Export workspace");
   await downloadFrom(page, "Download Printable PDF");
   expect(pdfRequestBody).not.toBeNull();
@@ -756,7 +756,7 @@ test("automatic maker strokes survive size changes and save/reopen, then reset c
   await expect.poll(async () => (await savedProjectSnapshot(page))?.editedDetailPngDataUrl).toBeNull();
 
   await cleanControls.getByRole("button", { name: "Looks Good - Continue to Colors" }).click();
-  await page.getByLabel("Colors workspace").getByRole("button", { name: "Continue to Export" }).click();
+  await page.getByLabel("Colors workspace").getByRole("button", { name: "Skip Paint Guide" }).click();
   await downloadFrom(page, "Download Printable PDF");
   const requestText = pdfRequestBody ? new TextDecoder("latin1").decode(pdfRequestBody) : "";
   expect(requestText).toContain('"manualStrokes":[{"id":"stroke-1"');
