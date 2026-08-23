@@ -43,6 +43,7 @@ import {
   matchDisplayName,
   paintGuideEditsFromProjectPalette,
   paintGuideEntriesForProjectPalette,
+  paintGuideReadiness,
   paintSanityWarnings,
   seedProjectPaletteFromDetected,
   shoppingListText,
@@ -417,6 +418,7 @@ function App() {
   const primaryTraceActionLabel = traceActionLabel({ image: selectedImage, analysis, busy, traceMode });
   const paintGuideEntries = paintGuideEntriesForProjectPalette(projectPalette);
   const paintWarnings = paintSanityWarnings(paintGuideEntries);
+  const colorGuideReadiness = paintGuideReadiness(paintGuideEntries);
   const visiblePaintGuideEntries = filterPaintGuideEntries(paintGuideEntries, paintReviewFilter);
   const paintShoppingList = shoppingListText(paintGuideEntries);
   const paintGuideColorCountLabel = `${paintGuideEntries.length} ${paintGuideEntries.length === 1 ? "color" : "colors"}`;
@@ -2756,10 +2758,13 @@ function App() {
                 </section>
               ) : null}
               {workflowProgress.activeStep === "colors" ? (
-                <div className="colors-step-actions" aria-label="Colors step actions">
+                <>
+                  {!colorGuideReadiness.ready ? <ColorGuideReadinessCard readiness={colorGuideReadiness} /> : null}
+                  <div className="colors-step-actions" aria-label="Colors step actions">
                   <button className="primary-action" onClick={() => finishColorReview("reviewed")} disabled={!projectCapabilities.guidedWorkflow.canCompleteColorReview}>Continue to Export</button>
                   <button className="tool-button" onClick={() => finishColorReview("skipped")} disabled={!projectCapabilities.guidedWorkflow.canCompleteColorReview}>Skip Paint Guide</button>
-                </div>
+                  </div>
+                </>
               ) : null}
               {colorsStepActive ? (
                 <section className="colors-step-header">
@@ -3645,6 +3650,20 @@ function ThinSilhouetteReinforcementCard({
         <button className="primary-action" onClick={onAccept} disabled={!canAccept || !proposal}>Use reinforced</button>
         <button className="secondary-action" onClick={onKeepOriginal}>Keep original</button>
       </div>
+    </section>
+  );
+}
+
+function ColorGuideReadinessCard({ readiness }: { readiness: ReturnType<typeof paintGuideReadiness> }) {
+  const labelText = readiness.genericLabelCount === 1 ? "1 label still uses a generic Color number" : `${readiness.genericLabelCount} labels still use generic Color numbers`;
+  const paintText = readiness.unresolvedPaintCount === 1 ? "1 paint choice is unresolved" : `${readiness.unresolvedPaintCount} paint choices are unresolved`;
+  return (
+    <section className="color-guide-readiness-card" aria-label="Color Guide readiness">
+      <div>
+        <strong>Color Guide needs your decisions</strong>
+        <p>{labelText}; {paintText}. Rename swatches and choose a match, or skip the guide below instead of exporting an apparently finished generic guide.</p>
+      </div>
+      <span>{readiness.includedCount} included</span>
     </section>
   );
 }

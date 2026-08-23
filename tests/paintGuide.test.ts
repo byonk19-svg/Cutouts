@@ -8,6 +8,7 @@ import {
   mergeProjectPaintColors,
   paintGuideEntriesForPalette,
   paintGuideEntriesForProjectPalette,
+  paintGuideReadiness,
   seedProjectPaletteFromDetected,
   shoppingListText,
   updateProjectPaintColor,
@@ -44,6 +45,29 @@ const palette: ProjectPaletteColor[] = [
   assertEqual(entries[0].label, "Color 1", "default paint labels should be numbered");
   assertEqual(entries[1].hex, "#f1ce2d", "palette hex should be normalized");
   assertEqual(entries[2].included, true, "palette colors should default into the shopping list");
+}
+
+{
+  const entries = paintGuideEntriesForPalette(palette, []);
+  const readiness = paintGuideReadiness(entries);
+
+  assertEqual(readiness.includedCount, 3, "readiness should count included colors");
+  assertEqual(readiness.genericLabelCount, 3, "default palette should report generic labels");
+  assertEqual(readiness.unresolvedPaintCount, 3, "default palette should report unresolved paint choices");
+  assertEqual(readiness.ready, false, "generic unresolved guide should require an explicit review decision");
+}
+
+{
+  const entries = paintGuideEntriesForPalette(palette, [
+    { hex: "#0C143A", label: "Hat", note: "hat", included: true, selectedMatchId: "folkart-outdoor-navy", manualOverride: "" },
+    { hex: "#f1ce2d", label: "Shirt", note: "shirt", included: true, selectedMatchId: "apple-barrel-bright-yellow", manualOverride: "" },
+    { hex: "#6a5424", label: "Shoes", note: "shoes", included: true, selectedMatchId: null, manualOverride: "Choose in store" }
+  ]);
+  const readiness = paintGuideReadiness(entries);
+
+  assertEqual(readiness.genericLabelCount, 0, "meaningful labels should clear generic-label readiness");
+  assertEqual(readiness.unresolvedPaintCount, 0, "an explicit choose-in-store decision should count as resolved");
+  assertEqual(readiness.ready, true, "explicit color decisions should make the guide reviewable");
 }
 
 {
