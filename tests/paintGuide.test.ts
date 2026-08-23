@@ -42,7 +42,8 @@ const palette: ProjectPaletteColor[] = [
 {
   const entries = paintGuideEntriesForPalette(palette, []);
 
-  assertEqual(entries[0].label, "Color 1", "default paint labels should be numbered");
+  assertEqual(entries[0].label, "Largest area", "default paint labels should describe coverage rank");
+  assertEqual(entries[0].note, "Detected in approximately 32% of the subject; review before painting.", "default paint notes should disclose coverage-based labeling");
   assertEqual(entries[1].hex, "#f1ce2d", "palette hex should be normalized");
   assertEqual(entries[2].included, true, "palette colors should default into the shopping list");
 }
@@ -52,7 +53,7 @@ const palette: ProjectPaletteColor[] = [
   const readiness = paintGuideReadiness(entries);
 
   assertEqual(readiness.includedCount, 3, "readiness should count included colors");
-  assertEqual(readiness.genericLabelCount, 3, "default palette should report generic labels");
+  assertEqual(readiness.genericLabelCount, 0, "coverage-based palette labels should not be generic");
   assertEqual(readiness.unresolvedPaintCount, 3, "default palette should report unresolved paint choices");
   assertEqual(readiness.ready, false, "generic unresolved guide should require an explicit review decision");
 }

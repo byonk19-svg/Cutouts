@@ -1299,7 +1299,7 @@ test("maker can complete the MVP trace, restore, paint review, and export workfl
   expect(await paintRows.nth(0).evaluate((element) => element instanceof HTMLDetailsElement)).toBe(true);
   await expect(paintReview).toBeVisible();
   await expect(page.getByLabel("Project Palette Summary")).toBeVisible();
-  await expect(page.getByText("Needs label").first()).toBeVisible();
+  await expect(page.getByText("Largest area").first()).toBeVisible();
 
   await addProjectPaintColor(page, "#f1c7a5", "Skin tone");
   await expect(page.locator(".palette-row").filter({ hasText: "Skin tone" })).toBeVisible();

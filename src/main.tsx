@@ -3657,11 +3657,20 @@ function ThinSilhouetteReinforcementCard({
 function ColorGuideReadinessCard({ readiness }: { readiness: ReturnType<typeof paintGuideReadiness> }) {
   const labelText = readiness.genericLabelCount === 1 ? "1 label still uses a generic Color number" : `${readiness.genericLabelCount} labels still use generic Color numbers`;
   const paintText = readiness.unresolvedPaintCount === 1 ? "1 paint choice is unresolved" : `${readiness.unresolvedPaintCount} paint choices are unresolved`;
+  const decisionText = [
+    readiness.genericLabelCount > 0 ? labelText : "",
+    readiness.unresolvedPaintCount > 0 ? paintText : ""
+  ].filter(Boolean).join("; ");
+  const guidance = readiness.genericLabelCount > 0
+    ? readiness.unresolvedPaintCount > 0
+      ? "Rename swatches and choose a match, or skip the guide below instead of exporting an apparently finished generic guide."
+      : "Rename the swatches or skip the guide below instead of exporting an apparently finished generic guide."
+    : "Choose a paint match or record a manual choice, or skip the guide below instead of exporting an apparently unfinished guide.";
   return (
     <section className="color-guide-readiness-card" aria-label="Color Guide readiness">
       <div>
         <strong>Color Guide needs your decisions</strong>
-        <p>{labelText}; {paintText}. Rename swatches and choose a match, or skip the guide below instead of exporting an apparently finished generic guide.</p>
+        <p>{decisionText}. {guidance}</p>
       </div>
       <span>{readiness.includedCount} included</span>
     </section>
