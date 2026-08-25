@@ -48,15 +48,32 @@ def recover_accessory_detail(
     crop = image_rgb[y0:y1, x0:x1].copy()
     crop_include = include[y0:y1, x0:x1]
     crop_exclude = exclude[y0:y1, x0:x1]
-
-    include_zone = cv2.dilate(
-        crop_include.astype(np.uint8),
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17)),
+    exclusion_radius = max(3, round(min(image_rgb.shape[:2]) * 0.04))
+    exclude_zone = cv2.dilate(
+        crop_exclude.astype(np.uint8),
+        cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (exclusion_radius * 2 + 1, exclusion_radius * 2 + 1),
+        ),
     ) > 0
-    grabcut_mask = np.full(crop_include.shape, cv2.GC_BGD, dtype=np.uint8)
-    grabcut_mask[include_zone] = cv2.GC_PR_BGD
+
+    # Unmarked pixels inside the bounded crop are evidence-bearing and must
+    # remain probable background rather than definite background. Only the
+    # crop edge is treated as confidently known background.
+    grabcut_mask = np.full(crop_include.shape, cv2.GC_PR_BGD, dtype=np.uint8)
+    grabcut_mask[[0, -1], :] = cv2.GC_BGD
+    grabcut_mask[:, [0, -1]] = cv2.GC_BGD
+    foreground_support_radius = max(3, round(min(image_rgb.shape[:2]) * 0.015))
+    foreground_support = cv2.dilate(
+        crop_include.astype(np.uint8),
+        cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (foreground_support_radius * 2 + 1, foreground_support_radius * 2 + 1),
+        ),
+    ) > 0
+    grabcut_mask[foreground_support] = cv2.GC_PR_FGD
     grabcut_mask[crop_include] = cv2.GC_FGD
-    grabcut_mask[crop_exclude] = cv2.GC_BGD
+    grabcut_mask[exclude_zone] = cv2.GC_BGD
     background_model = np.zeros((1, 65), np.float64)
     foreground_model = np.zeros((1, 65), np.float64)
     try:
@@ -66,14 +83,14 @@ def recover_accessory_detail(
             None,
             background_model,
             foreground_model,
-            5,
+            10,
             cv2.GC_INIT_WITH_MASK,
         )
     except cv2.error:
         return None
 
     foreground = (grabcut_mask == cv2.GC_FGD) | (grabcut_mask == cv2.GC_PR_FGD)
-    foreground[crop_exclude] = False
+    foreground[exclude_zone] = False
     _count, labels, stats, _centroids = cv2.connectedComponentsWithStats(foreground.astype(np.uint8), connectivity=8)
     selected = np.zeros_like(foreground)
     include_labels = set(np.unique(labels[crop_include]).tolist()) - {0}
@@ -92,7 +109,7 @@ def recover_accessory_detail(
         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
     )
     selected = selected_u8 > 0
-    selected[crop_exclude] = False
+    selected[exclude_zone] = False
     if not np.any(selected):
         return None
 
@@ -102,7 +119,7 @@ def recover_accessory_detail(
     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
     source_edges = cv2.Canny(gray, 24, 72)
     detail = np.maximum(detail, np.where(selected, source_edges, 0).astype(np.uint8))
-    detail[crop_exclude] = 0
+    detail[exclude_zone] = 0
     authoritative_crop = authoritative_mask[y0:y1, x0:x1].astype(np.uint8) * 255
     authoritative_inner = cv2.erode(
         authoritative_crop,

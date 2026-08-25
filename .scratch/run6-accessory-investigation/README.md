@@ -7,6 +7,8 @@ enclosed detail, an intentional small gap, dark-background exposure, and a
 distant artifact that should remain excluded.
 
 The low and high resolution PNGs are proportional renders of the same source.
+Each source also has a matching `*-accessory-mask.png` ground-truth mask used
+for recall, overlap, leakage, and annotation-coverage measurements.
 The fixture is intentionally neutral and must not be identified with a named
 character or real-world instrument in production logic.
 
