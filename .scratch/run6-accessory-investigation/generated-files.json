@@ -1,0 +1,18 @@
+{
+  "fixtures": [
+    {
+      "id": "compound-defining-accessory-low",
+      "path": "sources/compound-defining-accessory-low.png",
+      "widthPx": 400,
+      "heightPx": 500,
+      "sha256": "f9caa1f21e5abb31c0553968fc506af8bab223543120fb64c8dee5191138394f"
+    },
+    {
+      "id": "compound-defining-accessory-high",
+      "path": "sources/compound-defining-accessory-high.png",
+      "widthPx": 800,
+      "heightPx": 1000,
+      "sha256": "84bab6f13b8befa1d5d57c2267bb66746785e4372193c0f6f9faf566bc21d0c1"
+    }
+  ]
+}
