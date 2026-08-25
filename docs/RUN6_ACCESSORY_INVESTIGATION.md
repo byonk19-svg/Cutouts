@@ -99,8 +99,8 @@ Two diagnostic alternatives were prototyped without changing production code:
    region.
 
 The second alternative violates the existing exterior-band suppression
-   contract and cannot be made source-general with the available deterministic
-   evidence. It was rejected rather than shipped.
+contract and cannot be made source-general with the available deterministic
+evidence. It was rejected rather than shipped.
 
 ## Decision and next boundary
 
