@@ -17,25 +17,34 @@ The experiment accepts:
 - optional maker **exclude strokes**.
 
 It creates a bounded local region around the include strokes, seeds OpenCV
-GrabCut with those semantic hints, keeps only recovered components touched by
-the include strokes, suppresses the authoritative silhouette boundary, and
-returns a separate Detail Line proposal. Empty or contradictory annotations
-return no proposal. The authoritative mask is never modified.
+GrabCut with those semantic hints, keeps unmarked pixels as probable
+background rather than definite background, uses resolution-relative probable
+foreground support and exclude influence, keeps only recovered components
+touched by the include strokes, suppresses the authoritative silhouette
+boundary, and returns a separate Detail Line proposal. Empty or contradictory
+annotations return no proposal. The authoritative mask is never modified.
+The spike uses the source image as its canonical processing space; all dilation
+radii are derived as proportions of the source dimensions rather than fixed
+pixel values.
 
 ## Synthetic result
 
-The four spike tests pass for both proportional fixture sizes:
+The six spike tests pass for both proportional fixture sizes:
 
 ```text
 python -m unittest backend.tests.test_accessory_recovery_spike
 ....
-Ran 4 tests ...
+Ran 6 tests ...
 OK
 ```
 
-The low-resolution fixture preserves the accessory body, connector, and
+The tests measure ground-truth accessory recall, intersection-over-union,
+outside-accessory leakage, annotation coverage, recovery beyond a relative
+seed zone, and low/high metric similarity. The sparse annotations cover less
+than 35% of the ground-truth accessory while the proposal expands materially
+beyond the seed zone. Both fixture scales preserve the body, connector, and
 crossing component while excluding the distant artifact and nearby subject
-material. The high-resolution fixture preserves the same relationships.
+material.
 
 ## Local Run 6 result
 
@@ -44,18 +53,18 @@ source image or annotation masks. The source SHA-256 remained:
 
 `0D68FAC935D14228E5E1823E5E0E740ADCD50BC85C99965953346BF1A83B6BB4`
 
-The stored local annotation set used three broad include strokes and three
-exclude strokes. The resulting proposal metadata is in the local diagnostic
-output directory `output/run6-guided-local-v2/`.
+The stored local annotation set used three sparse include strokes and one
+exclude stroke (four total marks). The resulting proposal metadata is in the
+local diagnostic output directory `output/run6-guided-local-sparse-v4/`.
 
 Measured detail pixels by review region:
 
 | Region | Detail pixels |
 | --- | ---: |
-| Accessory body | 1,574 |
-| Accessory neck | 1,283 |
-| Bow | 1,842 |
-| Hat | 9 |
+| Accessory body | 3,212 |
+| Accessory neck | 2,557 |
+| Bow | 2,995 |
+| Hat | 3 |
 | Torso | 0 |
 | Footwear | 0 |
 
@@ -72,17 +81,18 @@ modified.
 
 ## Feasibility decision
 
-The local deterministic hypothesis **passes this spike**:
+The corrected sparse-recovery hypothesis passes the **synthetic** gate but is
+rejected for the real Run 6 product lane:
 
-> A small number of explicit include/exclude strokes can supply enough local
-> semantic information to recover a defining accessory without broad global
-> dark-region expansion.
+> Sparse include/exclude strokes can recover controlled synthetic geometry, but
+> Run 6 still requires more semantic separation than this deterministic method
+> can provide without clothing contamination.
 
-This justifies a separate maker-facing design/implementation task. It does not
+This does not justify a maker-facing smart-recovery feature. It does not
 authorize automatic recovery, Cut Line changes, export integration, or a claim
-that Run 6 has passed the field-test promise. Run 6 remains Fail until a real
-workflow proposal is surfaced, accepted, exported, and judged under the existing
-cleanup budget.
+that Run 6 has passed the field-test promise. Run 6 remains Fail. The rejection
+details and the four-mark real-source result are recorded in
+`docs/RUN6_SPARSE_RECOVERY_REJECTION.md`.
 
 ## Safety boundary for the next task
 

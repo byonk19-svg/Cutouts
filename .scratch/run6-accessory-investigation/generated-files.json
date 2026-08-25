@@ -5,14 +5,22 @@
       "path": "sources/compound-defining-accessory-low.png",
       "widthPx": 400,
       "heightPx": 500,
-      "sha256": "f9caa1f21e5abb31c0553968fc506af8bab223543120fb64c8dee5191138394f"
+      "sha256": "f9caa1f21e5abb31c0553968fc506af8bab223543120fb64c8dee5191138394f",
+      "accessoryMask": {
+        "path": "sources/compound-defining-accessory-low-accessory-mask.png",
+        "sha256": "717234effceb31fb97085868d986dd340f1892affbc6e0ad91636a37ed9e094d"
+      }
     },
     {
       "id": "compound-defining-accessory-high",
       "path": "sources/compound-defining-accessory-high.png",
       "widthPx": 800,
       "heightPx": 1000,
-      "sha256": "84bab6f13b8befa1d5d57c2267bb66746785e4372193c0f6f9faf566bc21d0c1"
+      "sha256": "84bab6f13b8befa1d5d57c2267bb66746785e4372193c0f6f9faf566bc21d0c1",
+      "accessoryMask": {
+        "path": "sources/compound-defining-accessory-high-accessory-mask.png",
+        "sha256": "25c36d19f2b528003434ff84f2bd82104692156612b0f26a1243f52ff57db827"
+      }
     }
   ]
 }

@@ -51,6 +51,17 @@ def build_fixture(scale: int) -> Image.Image:
     return image
 
 
+def build_accessory_mask(scale: int) -> Image.Image:
+    mask = Image.new("L", (400 * scale, 500 * scale), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((42 * scale, 205 * scale, 190 * scale, 315 * scale), fill=255)
+    draw.polygon(_scaled_points([(150, 236), (238, 188), (246, 198), (158, 250)], scale), fill=255)
+    draw.line(_scaled_points([(218, 192), (360, 102)], scale), fill=255, width=4 * scale)
+    draw.line(_scaled_points([(58, 235), (345, 115)], scale), fill=255, width=2 * scale)
+    draw.line(_scaled_points([(64, 255), (330, 140)], scale), fill=255, width=2 * scale)
+    return mask
+
+
 def main() -> None:
     SOURCE_DIR.mkdir(parents=True, exist_ok=True)
     entries: list[dict[str, object]] = []
@@ -58,12 +69,18 @@ def main() -> None:
         image = build_fixture(scale)
         path = SOURCE_DIR / f"{fixture_id}.png"
         image.save(path, format="PNG", optimize=False)
+        accessory_mask_path = SOURCE_DIR / f"{fixture_id}-accessory-mask.png"
+        build_accessory_mask(scale).save(accessory_mask_path, format="PNG", optimize=False)
         entries.append({
             "id": fixture_id,
             "path": path.relative_to(ROOT).as_posix(),
             "widthPx": image.width,
             "heightPx": image.height,
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "accessoryMask": {
+                "path": accessory_mask_path.relative_to(ROOT).as_posix(),
+                "sha256": hashlib.sha256(accessory_mask_path.read_bytes()).hexdigest(),
+            },
         })
     (ROOT / "generated-files.json").write_text(json.dumps({"fixtures": entries}, indent=2) + "\n", encoding="utf-8")
 
