@@ -38,7 +38,11 @@ def build_paint_in_detail_proposal(
     # Suppress the authoritative Cut Line perimeter, while leaving all other
     # maker-painted detail strictly inside the selected region.
     authoritative_u8 = authoritative_mask.astype(np.uint8) * 255
-    perimeter_radius = max(3, round(min(image_rgb.shape[:2]) * 0.01))
+    cutline_points = cv2.findNonZero(authoritative_u8)
+    if cutline_points is None:
+        return None
+    _left, _top, cutline_width, cutline_height = cv2.boundingRect(cutline_points)
+    perimeter_radius = max(3, round(min(cutline_width, cutline_height) * 0.01))
     perimeter_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
         (perimeter_radius * 2 + 1, perimeter_radius * 2 + 1),
