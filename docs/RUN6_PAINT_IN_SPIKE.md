@@ -15,6 +15,11 @@ region. Empty paint returns no proposal.
 The helper is not imported by the production pipeline. Its output is a
 non-accepted Detail Line proposal only.
 
+The comparison harness uses a symmetric, resolution-relative protected band
+around the authoritative Cut Line. A straddling-paint regression proves that
+neither the inside nor outside perimeter becomes a duplicate Detail Line while
+farther support detail remains available.
+
 ## Synthetic result
 
 Four focused tests pass for both proportional fixture sizes. The proposal:
@@ -65,3 +70,6 @@ fallback materially reduces real work.
 
 No Cut Line, finished size, PDF/SVG, project state, provider, or physical
 behavior changed in this spike.
+
+The disposable pointer-comparison surface is local-only at
+`output/paint-in-comparison/index.html`; it is not production UI.
