@@ -4,6 +4,7 @@ import hashlib
 import unittest
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -75,6 +76,26 @@ class PaintInDetailSpikeTest(unittest.TestCase):
         digest = hashlib.sha256(authoritative.tobytes()).hexdigest()
         build_paint_in_detail_proposal(source, authoritative, paint_mask((source.shape[1], source.shape[0])))
         self.assertEqual(hashlib.sha256(authoritative.tobytes()).hexdigest(), digest)
+
+    def test_straddling_paint_suppresses_both_sides_of_cutline_but_keeps_far_support_detail(self) -> None:
+        source = np.asarray(Image.open(FIXTURE_ROOT / "compound-defining-accessory-low.png").convert("RGB"))
+        settings = TemplateSettings()
+        authoritative = np.asarray(_subject_mask(Image.fromarray(source).convert("RGBA"), settings)) > 0
+        painted_image = Image.new("L", (source.shape[1], source.shape[0]), 0)
+        draw = ImageDraw.Draw(painted_image)
+        draw.line([(78, 260), (145, 260)], fill=255, width=16)
+        draw.line([(38, 260), (62, 260)], fill=255, width=8)
+        painted = np.asarray(painted_image) > 0
+        proposal = build_paint_in_detail_proposal(source, authoritative, painted)
+        self.assertIsNotNone(proposal)
+        assert proposal is not None
+        radius = max(3, round(min(source.shape[:2]) * 0.01))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1))
+        band = (cv2.dilate(authoritative.astype(np.uint8), kernel) > 0) & (
+            cv2.erode(authoritative.astype(np.uint8), kernel) == 0
+        )
+        self.assertEqual(np.count_nonzero(proposal.detail_mask[band]), 0)
+        self.assertGreater(np.count_nonzero(proposal.detail_mask[painted & ~band]), 0)
 
 
 if __name__ == "__main__":
