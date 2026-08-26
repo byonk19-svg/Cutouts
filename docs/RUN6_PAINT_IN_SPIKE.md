@@ -20,6 +20,11 @@ around the authoritative Cut Line. A straddling-paint regression proves that
 neither the inside nor outside perimeter becomes a duplicate Detail Line while
 farther support detail remains available.
 
+The tests now pass the actual one-component Cut Line mask returned by
+`_subject_geometry`, not the broader cleaned support mask. They also prove
+subject-relative behavior with large blank padding and keep a disconnected
+support accessory eligible without treating it as a second Cut Line.
+
 ## Synthetic result
 
 Four focused tests pass for both proportional fixture sizes. The proposal:

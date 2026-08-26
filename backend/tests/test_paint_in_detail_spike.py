@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
-from backend.cutout_studio.pipeline import TemplateSettings, _subject_mask
+from backend.cutout_studio.pipeline import TemplateSettings, _subject_geometry
 from backend.cutout_studio.paint_in_detail_spike import build_paint_in_detail_proposal
 
 
@@ -37,7 +37,8 @@ class PaintInDetailSpikeTest(unittest.TestCase):
     def _run_fixture(self, filename: str, scale: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         source = np.asarray(Image.open(FIXTURE_ROOT / filename).convert("RGB"))
         settings = TemplateSettings(threshold=42, smoothing=2, speck_area=60, hole_area=220)
-        authoritative = np.asarray(_subject_mask(Image.fromarray(source).convert("RGBA"), settings)) > 0
+        _initial, _support, cutline, _support_bounds, _cutline_bounds = _subject_geometry(Image.fromarray(source).convert("RGBA"), settings)
+        authoritative = np.asarray(cutline) > 0
         painted = paint_mask((source.shape[1], source.shape[0]), scale)
         proposal = build_paint_in_detail_proposal(source, authoritative, painted)
         self.assertIsNotNone(proposal)
@@ -65,14 +66,16 @@ class PaintInDetailSpikeTest(unittest.TestCase):
     def test_empty_paint_returns_no_proposal(self) -> None:
         source = np.asarray(Image.open(FIXTURE_ROOT / "compound-defining-accessory-low.png").convert("RGB"))
         settings = TemplateSettings()
-        authoritative = np.asarray(_subject_mask(Image.fromarray(source).convert("RGBA"), settings)) > 0
+        _initial, _support, cutline, _support_bounds, _cutline_bounds = _subject_geometry(Image.fromarray(source).convert("RGBA"), settings)
+        authoritative = np.asarray(cutline) > 0
         empty = np.zeros(authoritative.shape, dtype=bool)
         self.assertIsNone(build_paint_in_detail_proposal(source, authoritative, empty))
 
     def test_paint_in_does_not_modify_authoritative_mask(self) -> None:
         source = np.asarray(Image.open(FIXTURE_ROOT / "compound-defining-accessory-low.png").convert("RGB"))
         settings = TemplateSettings()
-        authoritative = np.asarray(_subject_mask(Image.fromarray(source).convert("RGBA"), settings)) > 0
+        _initial, _support, cutline, _support_bounds, _cutline_bounds = _subject_geometry(Image.fromarray(source).convert("RGBA"), settings)
+        authoritative = np.asarray(cutline) > 0
         digest = hashlib.sha256(authoritative.tobytes()).hexdigest()
         build_paint_in_detail_proposal(source, authoritative, paint_mask((source.shape[1], source.shape[0])))
         self.assertEqual(hashlib.sha256(authoritative.tobytes()).hexdigest(), digest)
@@ -80,7 +83,8 @@ class PaintInDetailSpikeTest(unittest.TestCase):
     def test_straddling_paint_suppresses_both_sides_of_cutline_but_keeps_far_support_detail(self) -> None:
         source = np.asarray(Image.open(FIXTURE_ROOT / "compound-defining-accessory-low.png").convert("RGB"))
         settings = TemplateSettings()
-        authoritative = np.asarray(_subject_mask(Image.fromarray(source).convert("RGBA"), settings)) > 0
+        _initial, _support, cutline, _support_bounds, _cutline_bounds = _subject_geometry(Image.fromarray(source).convert("RGBA"), settings)
+        authoritative = np.asarray(cutline) > 0
         painted_image = Image.new("L", (source.shape[1], source.shape[0]), 0)
         draw = ImageDraw.Draw(painted_image)
         draw.line([(78, 260), (145, 260)], fill=255, width=16)
@@ -89,13 +93,52 @@ class PaintInDetailSpikeTest(unittest.TestCase):
         proposal = build_paint_in_detail_proposal(source, authoritative, painted)
         self.assertIsNotNone(proposal)
         assert proposal is not None
-        radius = max(3, round(min(source.shape[:2]) * 0.01))
+        _x, _y, width, height = cv2.boundingRect(cv2.findNonZero(authoritative.astype(np.uint8)))
+        radius = max(3, round(min(width, height) * 0.01))
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1))
         band = (cv2.dilate(authoritative.astype(np.uint8), kernel) > 0) & (
             cv2.erode(authoritative.astype(np.uint8), kernel) == 0
         )
         self.assertEqual(np.count_nonzero(proposal.detail_mask[band]), 0)
         self.assertGreater(np.count_nonzero(proposal.detail_mask[painted & ~band]), 0)
+
+    def test_padded_source_uses_subject_relative_perimeter_behavior(self) -> None:
+        source = np.asarray(Image.open(FIXTURE_ROOT / "compound-defining-accessory-low.png").convert("RGB"))
+        settings = TemplateSettings()
+        _initial, _support, cutline, _support_bounds, _cutline_bounds = _subject_geometry(Image.fromarray(source).convert("RGBA"), settings)
+        authoritative = np.asarray(cutline) > 0
+        painted = paint_mask((source.shape[1], source.shape[0]))
+        base = build_paint_in_detail_proposal(source, authoritative, painted)
+        self.assertIsNotNone(base)
+        padding = 600
+        padded_source = np.pad(source, ((padding, padding), (padding, padding), (0, 0)), constant_values=24)
+        padded_authoritative = np.pad(authoritative, ((padding, padding), (padding, padding)), constant_values=False)
+        padded_painted = np.pad(painted, ((padding, padding), (padding, padding)), constant_values=False)
+        padded = build_paint_in_detail_proposal(padded_source, padded_authoritative, padded_painted)
+        self.assertIsNotNone(padded)
+        assert base is not None and padded is not None
+        translated = padded.detail_mask[padding:padding + source.shape[0], padding:padding + source.shape[1]]
+        self.assertLess(np.count_nonzero(np.logical_xor(base.detail_mask > 0, translated > 0)), 80)
+
+    def test_support_accessory_is_not_treated_as_a_second_cutline(self) -> None:
+        source = np.asarray(Image.open(FIXTURE_ROOT / "compound-defining-accessory-low.png").convert("RGB"))
+        settings = TemplateSettings()
+        authoritative_image = Image.new("L", (source.shape[1], source.shape[0]), 0)
+        ImageDraw.Draw(authoritative_image).ellipse((105, 170, 330, 430), fill=255)
+        authoritative = np.asarray(authoritative_image) > 0
+        support = authoritative.copy()
+        support[205:315, 42:190] = True
+        painted_image = Image.new("L", (source.shape[1], source.shape[0]), 0)
+        ImageDraw.Draw(painted_image).line([(60, 260), (160, 270)], fill=255, width=30)
+        painted = np.asarray(painted_image) > 0
+        # The helper receives only the authoritative Cut Line mask. The test
+        # keeps a broader support mask to prove that it is not used as a second
+        # perimeter owner.
+        proposal = build_paint_in_detail_proposal(source, authoritative, painted)
+        self.assertIsNotNone(proposal)
+        assert proposal is not None
+        self.assertGreater(region_pixels(proposal.detail_mask, (42, 205, 190, 315)), 0)
+        self.assertEqual(np.count_nonzero(authoritative & ~support), 0)
 
 
 if __name__ == "__main__":
