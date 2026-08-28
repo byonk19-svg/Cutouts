@@ -18,7 +18,7 @@ from typing import Any
 import cv2
 import fitz
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 INK_THRESHOLD = 180
@@ -39,6 +39,16 @@ class LineQualityMetrics:
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class LineworkPage:
+    image: Image.Image
+    trace_page_index: int | None
+    pdf_page_index: int | None
+    row: int | None
+    column: int | None
+    label: str | None
 
 
 def analyze_linework(image: Image.Image | np.ndarray) -> LineQualityMetrics:
@@ -92,18 +102,82 @@ def compare_linework(
 
 
 def load_linework_images(value: bytes | bytearray | Path | str) -> list[Image.Image]:
+    return [page.image for page in load_linework_page_records(value)]
+
+
+def load_linework_page_records(value: bytes | bytearray | Path | str) -> list[LineworkPage]:
     payload = Path(value).read_bytes() if isinstance(value, (Path, str)) else bytes(value)
     if payload.startswith(b"%PDF"):
         return _render_pdf_trace_pages(payload)
     with Image.open(io.BytesIO(payload)) as image:
-        return [image.convert("RGB").copy()]
+        return [LineworkPage(image.convert("RGB").copy(), 1, None, None, None, None)]
+
+
+def load_pdf_layers(value: bytes | bytearray | Path | str) -> list[dict[str, Any]]:
+    """Extract complete, furniture-only, and embedded trace rasters per PDF page."""
+    payload = Path(value).read_bytes() if isinstance(value, (Path, str)) else bytes(value)
+    if not payload.startswith(b"%PDF"):
+        raise ValueError("PDF layer extraction requires PDF bytes or a PDF path.")
+    document = fitz.open(stream=payload, filetype="pdf")
+    pages = list(document)
+    parsed: list[tuple[int, Any, re.Match[str] | None, re.Match[str] | None]] = []
+    for pdf_index, page in enumerate(pages, start=1):
+        text = page.get_text()
+        page_match = re.search(r"Page\s+(\d+)\s+of\s+(\d+)", text)
+        row_match = re.search(r"Row\s+(\d+)\s*/\s*Column\s+(\d+)", text)
+        if page_match:
+            parsed.append((pdf_index, page, page_match, row_match))
+    selected = parsed or [(index, page, None, None) for index, page in enumerate(pages, start=1)]
+    layers: list[dict[str, Any]] = []
+    for trace_index, (pdf_index, page, page_match, row_match) in enumerate(selected, start=1):
+        complete = _render_page(page)
+        furniture = complete.copy()
+        image_rects: list[fitz.Rect] = []
+        for image_info in page.get_images(full=True):
+            image_rects.extend(page.get_image_rects(image_info[0]))
+        if image_rects:
+            draw = ImageDraw.Draw(furniture)
+            for rect in image_rects:
+                draw.rectangle((rect.x0, rect.y0, rect.x1, rect.y1), fill="white")
+        trace = _extract_largest_embedded_image(document, page)
+        layers.append({
+            "complete": complete,
+            "furniture": furniture,
+            "trace": trace,
+            "tracePageIndex": int(page_match.group(1)) if page_match else trace_index,
+            "pdfPageIndex": pdf_index,
+            "row": int(row_match.group(1)) if row_match else None,
+            "column": int(row_match.group(2)) if row_match else None,
+            "label": page.get_text().splitlines()[0].strip() if page.get_text().splitlines() else None,
+        })
+    document.close()
+    return layers
 
 
 def build_report(value: bytes | bytearray | Path | str) -> dict[str, Any]:
-    images = load_linework_images(value)
-    metrics = [analyze_linework(image).to_json() for image in images]
+    pages = load_linework_page_records(value)
+    metrics = [
+        {
+            **analyze_linework(page.image).to_json(),
+            "tracePageIndex": page.trace_page_index,
+            "pdfPageIndex": page.pdf_page_index,
+            "row": page.row,
+            "column": page.column,
+            "label": page.label,
+        }
+        for page in pages
+    ]
+    for field in ("width_p90_px", "broad_ink_fraction", "boundary_complexity"):
+        maximum = max((page[field] for page in metrics), default=0)
+        flag = {
+            "width_p90_px": "isMaxWidthP90",
+            "broad_ink_fraction": "isMaxBroadInk",
+            "boundary_complexity": "isMaxComplexity",
+        }[field]
+        for page in metrics:
+            page[flag] = page[field] == maximum
     return {
-        "pageCount": len(images),
+        "pageCount": len(pages),
         "pages": metrics,
         "aggregate": {
             "widthP90MedianPx": round(float(np.median([page["width_p90_px"] for page in metrics])), 3) if metrics else 0.0,
@@ -112,6 +186,25 @@ def build_report(value: bytes | bytearray | Path | str) -> dict[str, Any]:
             "boundaryComplexityMedian": round(float(np.median([page["boundary_complexity"] for page in metrics])), 6) if metrics else 0.0,
         },
     }
+
+
+def build_pdf_layer_report(value: bytes | bytearray | Path | str) -> dict[str, Any]:
+    """Measure complete-page, furniture-only, and embedded trace layers."""
+    pages: list[dict[str, Any]] = []
+    for layer_page in load_pdf_layers(value):
+        layer_metrics: dict[str, dict[str, Any] | None] = {}
+        for layer_name in ("complete", "furniture", "trace"):
+            image = layer_page[layer_name]
+            layer_metrics[layer_name] = analyze_linework(image).to_json() if image is not None else None
+        pages.append({
+            "tracePageIndex": layer_page["tracePageIndex"],
+            "pdfPageIndex": layer_page["pdfPageIndex"],
+            "row": layer_page["row"],
+            "column": layer_page["column"],
+            "label": layer_page["label"],
+            "layers": layer_metrics,
+        })
+    return {"pageCount": len(pages), "pages": pages}
 
 
 def _to_grayscale(image: Image.Image | np.ndarray) -> np.ndarray:
@@ -150,17 +243,50 @@ def _boundary_complexity(
     return weighted_sum / max(1, weight_total)
 
 
-def _render_pdf_trace_pages(payload: bytes) -> list[Image.Image]:
+def _render_pdf_trace_pages(payload: bytes) -> list[LineworkPage]:
     document = fitz.open(stream=payload, filetype="pdf")
     pages = list(document)
-    trace_pages = [page for page in pages if re.search(r"Page\s+\d+\s+of\s+\d+", page.get_text())]
-    selected = trace_pages or pages
-    rendered: list[Image.Image] = []
-    for page in selected:
-        pixmap = page.get_pixmap(matrix=fitz.Matrix(1.0, 1.0), alpha=False)
-        rendered.append(Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples))
+    parsed: list[tuple[int, Any, re.Match[str] | None, re.Match[str] | None]] = []
+    for pdf_index, page in enumerate(pages, start=1):
+        text = page.get_text()
+        page_match = re.search(r"Page\s+(\d+)\s+of\s+(\d+)", text)
+        row_match = re.search(r"Row\s+(\d+)\s*/\s*Column\s+(\d+)", text)
+        if page_match:
+            parsed.append((pdf_index, page, page_match, row_match))
+    selected = parsed or [(index, page, None, None) for index, page in enumerate(pages, start=1)]
+    rendered: list[LineworkPage] = []
+    for trace_index, (pdf_index, page, page_match, row_match) in enumerate(selected, start=1):
+        image = _render_page(page)
+        rendered.append(LineworkPage(
+            image=image,
+            trace_page_index=int(page_match.group(1)) if page_match else trace_index,
+            pdf_page_index=pdf_index,
+            row=int(row_match.group(1)) if row_match else None,
+            column=int(row_match.group(2)) if row_match else None,
+            label=page.get_text().splitlines()[0].strip() if page.get_text().splitlines() else None,
+        ))
     document.close()
     return rendered
+
+
+def _render_page(page: Any) -> Image.Image:
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(1.0, 1.0), alpha=False)
+    return Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+
+
+def _extract_largest_embedded_image(document: Any, page: Any) -> Image.Image | None:
+    candidates: list[tuple[int, Image.Image]] = []
+    for image_info in page.get_images(full=True):
+        try:
+            pixmap = fitz.Pixmap(document, image_info[0])
+            if pixmap.n - pixmap.alpha > 3:
+                pixmap = fitz.Pixmap(fitz.csRGB, pixmap)
+            mode = "L" if pixmap.n - pixmap.alpha == 1 else "RGB"
+            image = Image.frombytes(mode, (pixmap.width, pixmap.height), pixmap.samples).convert("RGB")
+            candidates.append((image.width * image.height, image))
+        except Exception:
+            continue
+    return max(candidates, key=lambda candidate: candidate[0])[1] if candidates else None
 
 
 def main(argv: list[str] | None = None) -> int:

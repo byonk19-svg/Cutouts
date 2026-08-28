@@ -26,9 +26,11 @@ visual inspection.
 
 ## What this shows
 
-- Runs 3, 9, and 10 have the strongest page-level broad-band and P90-width
-  spikes, matching the repeated visual reports of doubled or banded interior
-  details.
+- Run 8 has the highest median contour complexity.
+- Run 9 has the highest page-level maximum complexity/broad-band signal, and Run
+  5 has the second-highest page-level maximum.
+- Runs 3, 9, and 10 remain the strongest authored-SVG/opaque-PNG candidates for
+  doubled or banded interior details based on their selected outlier pages.
 - Run 4 shows the same pattern at a lower maximum intensity.
 - Run 8 has the highest contour-complexity values, consistent with its separate
   thin-silhouette/jaggedness problem rather than the authored-SVG banding
@@ -39,6 +41,24 @@ visual inspection.
 These metrics are diagnostic evidence, not automatic maker-quality verdicts.
 The rendered artifact and human/physical review remain authoritative. No field-
 test classification or production behavior was changed by this report.
+
+## Layer attribution follow-up
+
+The layer-aware report separates page furniture from the embedded trace raster.
+Across the primary cases, furniture-only P90 width is 2.8 px with zero broad
+ink, while the combined trace raster is substantially higher:
+
+| Run | Combined trace P90 median | Combined trace broad-ink median |
+| --- | ---: | ---: |
+| 3 | 14.594 px | 0.476927 |
+| 4 | 12.188 px | 0.433230 |
+| 9 | 10.788 px | 0.396699 |
+| 10 | 11.588 px | 0.421293 |
+
+This proves the packet spikes are carried by trace content rather than labels,
+crop marks, overlap guides, or calibration furniture. The PDF raster still
+combines Cut Line and Detail Lines, so it does not by itself prove that Detail
+Lines alone cause every spike.
 
 ## Reproduction
 
