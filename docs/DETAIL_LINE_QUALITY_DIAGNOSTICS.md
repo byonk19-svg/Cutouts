@@ -19,6 +19,13 @@ when labels are absent, every page is rendered:
 python -m backend.cutout_studio.detail_quality_diagnostics path/to/template.pdf --output output/detail-quality.json
 ```
 
+For layer attribution, use the Python API `build_pdf_layer_report(...)`. Each
+selected page then includes metrics for the complete rendered page, a
+furniture-only render with embedded trace images masked out, and the largest
+embedded trace raster. The embedded raster is the combined Cut Line plus Detail
+Lines layer; separating those two requires source-stage artifacts or an
+accepted Cut Line mask and should not be inferred from whole-page pixels.
+
 ## Reported signals
 
 - `image_width_px` and `image_height_px`: raster dimensions used for the
