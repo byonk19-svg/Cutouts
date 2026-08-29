@@ -101,8 +101,8 @@ does not create the first abnormal signal; it carries forward source-derived
 edge bands and adds a bounded width expansion.
 
 The fresh current-main PDF is
-`output/run10-final-diagnosis-v3/run-10-current-main.pdf` with SHA-256
-`5698DEFEC15A485953316B10E6482DA7123B70A683AA18A34015DA90A0D0E813`.
+`output/run10-final-diagnosis-v4/run-10-current-main.pdf` with SHA-256
+`772FCE5DD4ED9A5F8A856573004FABB7E39BEF1957A6AB5853A84AC28F38F1B3`.
 Its rendered trace pages reproduce the historical symptom on outlier trace
 page 7 (row 2 / column 2). The historical corrected-baseline PDF remains
 `C:\Users\byonk\Downloads\run-10-corrected-baseline-mustache-cartoon-guy-cutout-template-pack.pdf`
@@ -112,22 +112,23 @@ The current packet has the same 20 trace-page structure and nearly identical
 layer metrics, so the symptom is reproduced rather than removed.
 
 The complete hashable stage manifest and canonical/ROI artifacts are under
-`output/run10-final-diagnosis-v3/run-10/manifest.json` (local-only output).
+`output/run10-final-diagnosis-v4/run-10/manifest.json` (local-only output).
 
 ### Controls
 
 The accepted Max fixture was captured with its exact 24-inch, smoothing-4,
 2-by-4 layout settings. It uses the authored `lineArt` path: the fixed ROI is
-about `2.0 pt` P90 before width expansion and `4.2 pt` after, with no harmful
-4-point broadening transition. Its fresh PDF has eight trace pages and SHA-256
-`CDA43EA0E27986FEF706925DBCAB033D8AD8F986A71E12D6434BF16F4AEDAC8A`.
+about `2.0 pt` P90 before width expansion and `4.2 pt` after antialiasing, with
+no harmful 4-point broadening transition. Its fresh PDF has eight trace pages
+and SHA-256
+`DB9AE4CC77734C5FC210874A1B16E7BCC8803C98C148D06B9A9DD3409F680E6B`.
 
 Run 7 was used as the narrow raster control. Its final print detail is about
 `2.0 pt` P90 before expansion and `4.2 pt` after, with no Run 10-like ROI
 transition. Its fresh PDF SHA-256 is
-`B699E8C2E41BB64399185F4EB235C0CC636459A08A524F64DD3633E360BF627E`.
+`C4AFB375D8E94F3FD7FBDC9CF47C8C79F7C8B142326ADF637FDE5562B14DF566`.
 The control summary is recorded in
-`output/run10-final-diagnosis-v3/run-07-control-summary.json` (local-only
+`output/run10-final-diagnosis-v4/run-07-control-summary.json` (local-only
 output); its final physical-plane transitions are narrow before expansion and
 remain near the 4-point line-width boundary after expansion.
 

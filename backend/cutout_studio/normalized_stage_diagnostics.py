@@ -25,6 +25,7 @@ from .detail_quality_diagnostics import analyze_linework, build_pdf_layer_report
 from .pipeline import (
     PRINT_DPI,
     TemplateSettings,
+    _antialias_line_art_mask,
     _authoritative_cut_line_mask,
     _clean_color_boundary_mask,
     _clean_feature_line_tuning,
@@ -111,11 +112,12 @@ def _rendered_detail_stages(
     cleanup: int,
     print_scale: bool,
     speck_area: int,
+    physical_width_in: float,
     on_stage: Callable[[_Stage], None] | None = None,
 ) -> tuple[list[_Stage], Image.Image]:
     """Mirror _clean_feature_line_mask and expose each real transition."""
     work_image, work_mask, original_size = _detail_work_image(image, mask)
-    native_dpi = CANONICAL_DPI if print_scale else max(image.width / 31.82, image.height / 36.0)
+    native_dpi = work_image.width / max(0.01, physical_width_in)
     stages: list[_Stage] = []
 
     def emit(stage: _Stage) -> None:
@@ -173,10 +175,11 @@ def _line_art_stages(
     cleanup: int,
     print_scale: bool,
     template_style: str = "clean",
+    physical_width_in: float = 1.0,
     on_stage: Callable[[_Stage], None] | None = None,
 ) -> tuple[list[_Stage], Image.Image]:
     work_image, work_mask, _original_size = _detail_work_image(image, mask, max_work_edge=1800 if print_scale else 1400)
-    native_dpi = CANONICAL_DPI if print_scale else max(image.width / 31.82, image.height / 36.0)
+    native_dpi = work_image.width / max(0.01, physical_width_in)
     rgb = np.asarray(work_image.convert("RGB"), dtype=np.uint8)
     median = cv2.medianBlur(rgb, 3)
     stages: list[_Stage] = []
@@ -266,13 +269,13 @@ def capture_source_stages(
             "roiPath": str(roi_path),
             "nativeSize": list(view.size),
             "canonicalSize": list(canonical.size),
-            "nativeDpi": round(stage.native_dpi, 6),
+            "nativeDpi": round(view.width / trace_width, 6),
             "effectiveDpi": round(view.width / trace_width, 6),
             "comparisonDpi": CANONICAL_DPI,
             "physicalSizeIn": [round(trace_width, 6), round(trace_height, 6)],
             "sha256": _sha256(canonical_path.read_bytes()),
             "nativeSha256": _sha256(native_path.read_bytes()),
-            "metrics": _metrics(view, stage.native_dpi),
+            "metrics": _metrics(view, view.width / trace_width),
             "canonicalMetrics": _metrics(canonical, CANONICAL_DPI),
             "roiMetrics": _metrics(roi_image, CANONICAL_DPI),
         })
@@ -292,9 +295,9 @@ def capture_source_stages(
         settings.detail_extraction_mode,
     )
     preview_stages, preview_final = (
-        _line_art_stages(preview_source, preview_support, settings.detail_cleanup, False, template_style=settings.template_style)
+        _line_art_stages(preview_source, preview_support, settings.detail_cleanup, False, template_style=settings.template_style, physical_width_in=trace_width)
         if preview_mode == "lineArt"
-        else _rendered_detail_stages(preview_source, preview_support, settings.detail_cleanup, False, settings.speck_area)
+        else _rendered_detail_stages(preview_source, preview_support, settings.detail_cleanup, False, settings.speck_area, trace_width)
     )
     for stage in preview_stages:
         if stage.name == "flattened-work-image":
@@ -305,6 +308,8 @@ def capture_source_stages(
 
     print_image = cropped_source.resize(canonical_size, Image.Resampling.LANCZOS)
     resized_support = cropped_support.resize(canonical_size, Image.Resampling.LANCZOS)
+    if settings.smoothing > 0:
+        resized_support = resized_support.filter(ImageFilter.GaussianBlur(radius=max(1, settings.smoothing * 2)))
     print_support = resized_support.point(lambda px: 255 if px >= 128 else 0)
     print_cut_line = cropped_cut_line.resize(canonical_size, Image.Resampling.NEAREST)
     for stage in (
@@ -321,6 +326,7 @@ def capture_source_stages(
             settings.detail_cleanup,
             True,
             template_style=settings.template_style,
+            physical_width_in=trace_width,
             on_stage=lambda stage: record_stage(_Stage(f"print-{stage.name}", stage.image, CANONICAL_DPI, stage.binary)),
         )
     else:
@@ -330,14 +336,18 @@ def capture_source_stages(
             settings.detail_cleanup,
             True,
             settings.speck_area,
+            trace_width,
             on_stage=lambda stage: record_stage(_Stage(f"print-{stage.name}", stage.image, CANONICAL_DPI, stage.binary)),
         )
     detail_before_width = print_final
     width = _detail_line_width(settings, print_scale=True, detail_extraction_mode=print_mode)
     expanded = detail_before_width.filter(ImageFilter.MaxFilter(max(1, width if width % 2 else width + 1)))
     record_stage(_Stage("print-detail-after-width-expansion", expanded, CANONICAL_DPI))
-    rgba_detail = Image.new("RGBA", expanded.size, (0, 0, 0, 0))
-    rgba_detail.putalpha(expanded)
+    antialiased = _antialias_line_art_mask(expanded) if print_mode == "lineArt" else expanded
+    if print_mode == "lineArt":
+        record_stage(_Stage("print-detail-after-antialias", antialiased, CANONICAL_DPI))
+    rgba_detail = Image.new("RGBA", antialiased.size, (0, 0, 0, 0))
+    rgba_detail.putalpha(antialiased)
     record_stage(_Stage("print-final-rgba-detail-layer", rgba_detail, CANONICAL_DPI, False))
     cut_only = _authoritative_cut_line_mask(print_support)
     eroded = _erode_for_diagnostic(cut_only, 3)
@@ -414,13 +424,17 @@ def run_control_summary(source_path: Path, settings: TemplateSettings, output_ro
     trace_width, trace_height = _trace_extent_in(support_bounds, cut_line, cut_line_bounds, settings.finished_height_in)
     canonical_size = (max(1, round(trace_width * CANONICAL_DPI)), max(1, round(trace_height * CANONICAL_DPI)))
     print_image = cropped_source.resize(canonical_size, Image.Resampling.LANCZOS)
-    print_support = cropped_support.resize(canonical_size, Image.Resampling.LANCZOS).point(lambda px: 255 if px >= 128 else 0)
+    resized_support = cropped_support.resize(canonical_size, Image.Resampling.LANCZOS)
+    if settings.smoothing > 0:
+        resized_support = resized_support.filter(ImageFilter.GaussianBlur(radius=max(1, settings.smoothing * 2)))
+    print_support = resized_support.point(lambda px: 255 if px >= 128 else 0)
     mode = _detail_extraction_mode_used(cropped_source, cropped_support, settings.template_style, settings.detail_extraction_mode)
     before = _detail_line_mask(print_image, print_support, settings.detail_cleanup, True, template_style=settings.template_style, detail_extraction_mode=mode, speck_area=settings.speck_area)
     width = _detail_line_width(settings, print_scale=True, detail_extraction_mode=mode)
     after = before.filter(ImageFilter.MaxFilter(max(1, width if width % 2 else width + 1)))
+    after_for_measurement = _antialias_line_art_mask(after) if mode == "lineArt" else after
     roi_before = _crop_roi(_linework_view(before, True), DEFAULT_ROI)
-    roi_after = _crop_roi(_linework_view(after, True), DEFAULT_ROI)
+    roi_after = _crop_roi(_linework_view(after_for_measurement, True), DEFAULT_ROI)
     pdf = build_template_pdf(source_path.read_bytes(), settings)
     output_root.mkdir(parents=True, exist_ok=True)
     pdf_path = output_root / f"{label}-current-main.pdf"
@@ -436,7 +450,8 @@ def run_control_summary(source_path: Path, settings: TemplateSettings, output_ro
         "roi": {"normalizedSupport": list(DEFAULT_ROI), "cutLineExcluded": True},
         "transitions": {
             "detailBeforeWidthExpansion": {"canonicalMetrics": _metrics(_linework_view(before, True), CANONICAL_DPI), "roiMetrics": _metrics(roi_before, CANONICAL_DPI)},
-            "detailAfterWidthExpansion": {"canonicalMetrics": _metrics(_linework_view(after, True), CANONICAL_DPI), "roiMetrics": _metrics(roi_after, CANONICAL_DPI)},
+            "detailAfterWidthExpansion": {"canonicalMetrics": _metrics(_linework_view(after, True), CANONICAL_DPI), "roiMetrics": _metrics(_crop_roi(_linework_view(after, True), DEFAULT_ROI), CANONICAL_DPI)},
+            "detailAfterAntialias": {"canonicalMetrics": _metrics(_linework_view(after_for_measurement, True), CANONICAL_DPI), "roiMetrics": _metrics(roi_after, CANONICAL_DPI)},
         },
         "freshPdf": {"path": str(pdf_path), "sha256": _sha256(pdf), "layerReport": build_pdf_layer_report(pdf)},
     }
