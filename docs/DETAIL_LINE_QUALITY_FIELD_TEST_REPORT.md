@@ -44,21 +44,23 @@ test classification or production behavior was changed by this report.
 
 ## Layer attribution follow-up
 
-The layer-aware report separates page furniture from the embedded trace raster.
-Across the primary cases, furniture-only P90 width is 2.8 px with zero broad
-ink, while the combined trace raster is substantially higher:
+The layer-aware report now removes the trace image XObject before rendering
+furniture-only pages and resamples the embedded trace raster to its PDF
+placement rectangle at the same 72 DPI comparison plane. Across the primary
+cases, furniture-only P90 width is 2.0-2.8 px with zero broad ink, while the
+normalized combined trace raster is higher:
 
 | Run | Combined trace P90 median | Combined trace broad-ink median |
 | --- | ---: | ---: |
-| 3 | 14.594 px | 0.476927 |
-| 4 | 12.188 px | 0.433230 |
-| 9 | 10.788 px | 0.396699 |
-| 10 | 11.588 px | 0.421293 |
+| 3 | 7.797 px | 0.103835 |
+| 4 | 6.794 px | 0.020124 |
+| 9 | 6.000 px | 0.001236 |
+| 10 | 6.000 px | 0.002054 |
 
 This proves the packet spikes are carried by trace content rather than labels,
-crop marks, overlap guides, or calibration furniture. The PDF raster still
-combines Cut Line and Detail Lines, so it does not by itself prove that Detail
-Lines alone cause every spike.
+crop marks, overlap guides, or calibration furniture. The normalized PDF raster
+still combines Cut Line and Detail Lines, so it does not by itself prove that
+Detail Lines alone cause every spike.
 
 ## Reproduction
 

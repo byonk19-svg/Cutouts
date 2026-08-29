@@ -20,11 +20,12 @@ python -m backend.cutout_studio.detail_quality_diagnostics path/to/template.pdf 
 ```
 
 For layer attribution, use the Python API `build_pdf_layer_report(...)`. Each
-selected page then includes metrics for the complete rendered page, a
-furniture-only render with embedded trace images masked out, and the largest
-embedded trace raster. The embedded raster is the combined Cut Line plus Detail
-Lines layer; separating those two requires source-stage artifacts or an
-accepted Cut Line mask and should not be inferred from whole-page pixels.
+selected page then includes metrics for the complete rendered page, a true
+furniture-only render with image XObjects suppressed in a diagnostic PDF copy,
+and the largest embedded trace raster resampled to its PDF placement rectangle.
+The embedded raster is the combined Cut Line plus Detail Lines layer;
+separating those two requires source-stage artifacts or an accepted Cut Line
+mask and should not be inferred from whole-page pixels.
 
 ## Reported signals
 
@@ -32,6 +33,8 @@ accepted Cut Line mask and should not be inferred from whole-page pixels.
   measurement; use these to normalize comparisons across render sizes.
 - `width_p50_px`, `width_p90_px`, and `width_p95_px`: effective local ink width
   from the raster distance transform. High percentiles expose oversized bands.
+- `width_p50_pt`, `width_p90_pt`, and `width_p95_pt`: the same widths converted
+  to points using `72 / comparison_dpi`.
 - `ink_density`: fraction of pixels carrying dark linework.
 - `component_count`: connected line component count.
 - `broad_ink_fraction`: fraction of ink pixels at least 8 pixels wide.

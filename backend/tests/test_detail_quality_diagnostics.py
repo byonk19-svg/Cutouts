@@ -56,6 +56,9 @@ def pdf_with_trace_images() -> bytes:
         document.drawString(24, 770, f"Page {page_number} of 2")
         document.drawString(24, 756, f"Row 1 / Column {page_number}")
         document.drawImage(ImageReader(image_buffer), 0, 0, width=letter[0], height=letter[1], preserveAspectRatio=False)
+        document.setStrokeColorRGB(0, 0, 0)
+        document.setLineWidth(2)
+        document.line(30, 30, 90, 30)
         document.showPage()
     document.save()
     return output.getvalue()
@@ -69,6 +72,13 @@ class DetailQualityDiagnosticsTest(unittest.TestCase):
         self.assertGreater(banded.width_p90_px, clean.width_p90_px * 2)
         self.assertGreater(banded.ink_density, clean.ink_density * 2)
         self.assertGreater(banded.broad_ink_fraction, clean.broad_ink_fraction)
+
+    def test_width_metrics_include_comparison_plane_physical_units(self) -> None:
+        metrics = analyze_linework(thick_banded_linework(), comparison_dpi=144)
+
+        self.assertEqual(metrics.comparison_dpi, 144)
+        self.assertAlmostEqual(metrics.width_p90_pt, metrics.width_p90_px * 0.5, places=3)
+        self.assertAlmostEqual(metrics.width_p90_pt / 72, metrics.width_p90_px / 144, places=4)
 
     def test_jagged_boundary_has_higher_complexity(self) -> None:
         clean = analyze_linework(clean_linework())
@@ -117,6 +127,8 @@ class DetailQualityDiagnosticsTest(unittest.TestCase):
         self.assertEqual(layers[0]["complete"].size, (612, 792))
         self.assertEqual(layers[0]["furniture"].size, (612, 792))
         self.assertIsNotNone(layers[0]["trace"])
+        self.assertEqual(layers[0]["trace"].size, layers[0]["complete"].size)
+        self.assertGreater(analyze_linework(layers[0]["furniture"].crop((30, 750, 100, 780))).ink_density, 0)
         self.assertLess(
             analyze_linework(layers[0]["furniture"]).ink_density,
             analyze_linework(layers[0]["complete"]).ink_density,

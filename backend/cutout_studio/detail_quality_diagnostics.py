@@ -19,6 +19,8 @@ import cv2
 import fitz
 import numpy as np
 from PIL import Image, ImageDraw
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import DecodedStreamObject, NameObject
 
 
 INK_THRESHOLD = 180
@@ -28,9 +30,13 @@ INK_THRESHOLD = 180
 class LineQualityMetrics:
     image_width_px: int
     image_height_px: int
+    comparison_dpi: float
     width_p50_px: float
     width_p90_px: float
     width_p95_px: float
+    width_p50_pt: float
+    width_p90_pt: float
+    width_p95_pt: float
     ink_density: float
     component_count: int
     broad_ink_fraction: float
@@ -51,14 +57,31 @@ class LineworkPage:
     label: str | None
 
 
-def analyze_linework(image: Image.Image | np.ndarray) -> LineQualityMetrics:
+def analyze_linework(image: Image.Image | np.ndarray, comparison_dpi: float = 72.0) -> LineQualityMetrics:
+    if comparison_dpi <= 0:
+        raise ValueError("comparison_dpi must be greater than zero")
     gray = _to_grayscale(image)
     ink = gray < INK_THRESHOLD
     ink_pixels = int(np.count_nonzero(ink))
     total_pixels = max(1, int(ink.size))
     density = ink_pixels / total_pixels
     if ink_pixels == 0:
-        return LineQualityMetrics(gray.shape[1], gray.shape[0], 0.0, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.0)
+        return LineQualityMetrics(
+            image_width_px=gray.shape[1],
+            image_height_px=gray.shape[0],
+            comparison_dpi=comparison_dpi,
+            width_p50_px=0.0,
+            width_p90_px=0.0,
+            width_p95_px=0.0,
+            width_p50_pt=0.0,
+            width_p90_pt=0.0,
+            width_p95_pt=0.0,
+            ink_density=0.0,
+            component_count=0,
+            broad_ink_fraction=0.0,
+            boundary_complexity=0.0,
+            small_component_fraction=0.0,
+        )
 
     distances = cv2.distanceTransform(ink.astype(np.uint8), cv2.DIST_L2, 5)
     widths = distances[ink] * 2.0
@@ -71,12 +94,20 @@ def analyze_linework(image: Image.Image | np.ndarray) -> LineQualityMetrics:
         / max(1, ink_pixels)
     )
     complexity = _boundary_complexity(ink, labels, stats, component_count)
+    width_p50_px = float(np.percentile(widths, 50))
+    width_p90_px = float(np.percentile(widths, 90))
+    width_p95_px = float(np.percentile(widths, 95))
+    pixels_to_points = 72.0 / comparison_dpi
     return LineQualityMetrics(
         image_width_px=gray.shape[1],
         image_height_px=gray.shape[0],
-        width_p50_px=round(float(np.percentile(widths, 50)), 3),
-        width_p90_px=round(float(np.percentile(widths, 90)), 3),
-        width_p95_px=round(float(np.percentile(widths, 95)), 3),
+        comparison_dpi=comparison_dpi,
+        width_p50_px=round(width_p50_px, 3),
+        width_p90_px=round(width_p90_px, 3),
+        width_p95_px=round(width_p95_px, 3),
+        width_p50_pt=round(width_p50_px * pixels_to_points, 3),
+        width_p90_pt=round(width_p90_px * pixels_to_points, 3),
+        width_p95_pt=round(width_p95_px * pixels_to_points, 3),
         ink_density=round(density, 6),
         component_count=max(0, component_count - 1),
         broad_ink_fraction=round(broad_fraction, 6),
@@ -119,6 +150,7 @@ def load_pdf_layers(value: bytes | bytearray | Path | str) -> list[dict[str, Any
     if not payload.startswith(b"%PDF"):
         raise ValueError("PDF layer extraction requires PDF bytes or a PDF path.")
     document = fitz.open(stream=payload, filetype="pdf")
+    furniture_document = fitz.open(stream=_pdf_without_image_xobjects(payload), filetype="pdf")
     pages = list(document)
     parsed: list[tuple[int, Any, re.Match[str] | None, re.Match[str] | None]] = []
     for pdf_index, page in enumerate(pages, start=1):
@@ -131,19 +163,24 @@ def load_pdf_layers(value: bytes | bytearray | Path | str) -> list[dict[str, Any
     layers: list[dict[str, Any]] = []
     for trace_index, (pdf_index, page, page_match, row_match) in enumerate(selected, start=1):
         complete = _render_page(page)
-        furniture = complete.copy()
-        image_rects: list[fitz.Rect] = []
-        for image_info in page.get_images(full=True):
-            image_rects.extend(page.get_image_rects(image_info[0]))
-        if image_rects:
-            draw = ImageDraw.Draw(furniture)
-            for rect in image_rects:
-                draw.rectangle((rect.x0, rect.y0, rect.x1, rect.y1), fill="white")
+        furniture = _render_page(furniture_document[pdf_index - 1])
         trace = _extract_largest_embedded_image(document, page)
+        trace_native_size = list(trace.size) if trace is not None else None
+        placement = _largest_image_rect(page)
+        if trace is not None and placement is not None:
+            target_size = (max(1, round(placement.width)), max(1, round(placement.height)))
+            trace = trace.resize(target_size, Image.Resampling.LANCZOS)
         layers.append({
             "complete": complete,
             "furniture": furniture,
             "trace": trace,
+            "traceNativeSize": trace_native_size,
+            "tracePlacementRect": (
+                [round(placement.x0, 3), round(placement.y0, 3), round(placement.x1, 3), round(placement.y1, 3)]
+                if placement is not None else None
+            ),
+            "comparisonDpi": 72,
+            "traceResampling": "LANCZOS to PDF placement rectangle",
             "tracePageIndex": int(page_match.group(1)) if page_match else trace_index,
             "pdfPageIndex": pdf_index,
             "row": int(row_match.group(1)) if row_match else None,
@@ -151,6 +188,7 @@ def load_pdf_layers(value: bytes | bytearray | Path | str) -> list[dict[str, Any
             "label": page.get_text().splitlines()[0].strip() if page.get_text().splitlines() else None,
         })
     document.close()
+    furniture_document.close()
     return layers
 
 
@@ -203,6 +241,10 @@ def build_pdf_layer_report(value: bytes | bytearray | Path | str) -> dict[str, A
             "column": layer_page["column"],
             "label": layer_page["label"],
             "layers": layer_metrics,
+            "traceNativeSize": layer_page["traceNativeSize"],
+            "tracePlacementRect": layer_page["tracePlacementRect"],
+            "comparisonDpi": layer_page["comparisonDpi"],
+            "traceResampling": layer_page["traceResampling"],
         })
     return {"pageCount": len(pages), "pages": pages}
 
@@ -287,6 +329,58 @@ def _extract_largest_embedded_image(document: Any, page: Any) -> Image.Image | N
         except Exception:
             continue
     return max(candidates, key=lambda candidate: candidate[0])[1] if candidates else None
+
+
+def _largest_image_rect(page: Any) -> Any | None:
+    rects: list[Any] = []
+    for image_info in page.get_images(full=True):
+        rects.extend(page.get_image_rects(image_info[0]))
+    return max(rects, key=lambda rect: rect.width * rect.height) if rects else None
+
+
+def _pdf_without_image_xobjects(payload: bytes) -> bytes:
+    reader = PdfReader(io.BytesIO(payload))
+    pages = list(reader.pages)
+    writer = PdfWriter()
+    for page in pages:
+        resources = page.get("/Resources")
+        xobjects = resources.get("/XObject") if resources else None
+        if not xobjects:
+            continue
+        image_names = [
+            str(name).lstrip("/")
+            for name, reference in xobjects.items()
+            if _is_trace_xobject(reference.get_object(), str(name))
+        ]
+        if not image_names:
+            continue
+        contents = page.get_contents()
+        if contents is None:
+            continue
+        data = contents.get_data()
+        for image_name in image_names:
+            data = re.sub(rb"/" + re.escape(image_name.encode("ascii")) + rb"\s+Do\b", b"", data)
+        stream = DecodedStreamObject()
+        stream.set_data(data)
+        page[NameObject("/Contents")] = stream
+    for page in pages:
+        writer.add_page(page)
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def _is_trace_xobject(value: Any, name: str) -> bool:
+    subtype = value.get("/Subtype")
+    if subtype == "/Image":
+        return True
+    if subtype != "/Form":
+        return False
+    nested_resources = value.get("/Resources")
+    nested_xobjects = nested_resources.get("/XObject") if nested_resources else None
+    if nested_xobjects:
+        return any(reference.get_object().get("/Subtype") == "/Image" for reference in nested_xobjects.values())
+    return name.startswith("/FormXob")
 
 
 def main(argv: list[str] | None = None) -> int:
