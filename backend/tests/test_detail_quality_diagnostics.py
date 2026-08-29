@@ -79,6 +79,16 @@ class DetailQualityDiagnosticsTest(unittest.TestCase):
         self.assertEqual(metrics.comparison_dpi, 144)
         self.assertAlmostEqual(metrics.width_p90_pt, metrics.width_p90_px * 0.5, places=3)
         self.assertAlmostEqual(metrics.width_p90_pt / 72, metrics.width_p90_px / 144, places=4)
+        self.assertIn("broad_ink_fraction_4pt", metrics.to_json())
+
+    def test_four_point_broad_fraction_uses_comparison_dpi(self) -> None:
+        image = Image.new("L", (240, 120), 255)
+        ImageDraw.Draw(image).line([(20, 40), (220, 40)], fill=0, width=8)
+        at_72 = analyze_linework(image, comparison_dpi=72)
+        at_144 = analyze_linework(image.resize((480, 240), Image.Resampling.NEAREST), comparison_dpi=144)
+
+        self.assertGreater(at_72.broad_ink_fraction_4pt, 0.5)
+        self.assertGreater(at_144.broad_ink_fraction_4pt, 0.5)
 
     def test_jagged_boundary_has_higher_complexity(self) -> None:
         clean = analyze_linework(clean_linework())

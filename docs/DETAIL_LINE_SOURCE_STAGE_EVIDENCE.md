@@ -1,7 +1,7 @@
 # Source-stage Detail Line evidence
 
-Date: 2026-08-28
-Baseline: `ffde73b134c6f62ed73c8b6ba1985b4cd2f033c9`
+Date: 2026-08-29
+Baseline: `24e4465bb23a34e81c8e522342e8a00e7fd2e1fd`
 
 ## Run 10: opaque PNG rendered path
 
@@ -65,3 +65,87 @@ dark-ink extraction, Cut Line clearing, accepted-canvas state, or print resize.
 - Run 10 has a reproducible print-detail broadening signal.
 - SVG and PNG causes are not assumed to be shared.
 - No production tracing change is justified by this evidence package.
+
+## Final normalized Run 10 decision
+
+The earlier print-first interpretation is superseded by this normalized pass.
+The canonical comparison plane is the final trace geometry at 144 DPI. Preview
+stages are resampled into that plane with nearest-neighbor for binary masks and
+LANCZOS for source/flattened imagery; native dimensions and effective DPI are
+retained in the manifests. Broad ink is reported at a physical threshold of
+4.0 pt (`thresholdPx = 4 * comparisonDpi / 72`).
+
+### Fixed ROI
+
+The fixed ROI is the face interior containing both eyes, nose, mustache, and
+mouth. It is expressed in support-crop normalized coordinates
+`[0.27, 0.24, 0.73, 0.54]`, mapped to source, preview, and print coordinates in
+the Run 10 manifest. It is wholly inside the authoritative Cut Line; no Cut
+Line pixels are included.
+
+Run 10 source: `tmp/field-test-sources/run-10-mustache-cartoon-guy.png`
+(`F9A5D3085E961958F4F39C6A31638E2759563AE53A6A71AB6B9B9B5599D2FD94`).
+Recorded finished size is `31.760748 x 36.0 in`; the canonical plane is
+`4574 x 5184` pixels.
+
+### Normalized transition
+
+The fixed ROI does not show a narrow-to-broad transition introduced by print
+export. In the production-equivalent rendered path, the print luminance-edge
+candidate is already about `5.394 pt` P90 in the ROI. The color-boundary
+candidate increases that to `10.0 pt`, and the combined raw candidate reaches
+`11.984 pt`; the final width expansion reaches `13.784 pt`. The normalized
+preview candidate is already `27.0 pt` P90 in the same ROI because the source
+is only about 15 DPI before print resampling. In other words, print preparation
+does not create the first abnormal signal; it carries forward source-derived
+edge bands and adds a bounded width expansion.
+
+The fresh current-main PDF is
+`output/run10-final-diagnosis-v5/run-10-current-main.pdf` with SHA-256
+`06C92E2B0106E6CE49DFEF5BBD70752295E51E73804A5271308D6E017D5A990F`.
+Its rendered trace pages reproduce the historical symptom on outlier trace
+page 7 (row 2 / column 2). The historical corrected-baseline PDF remains
+`C:\Users\byonk\Downloads\run-10-corrected-baseline-mustache-cartoon-guy-cutout-template-pack.pdf`
+with SHA-256
+`81C8B344DEF30947152B1F92C66B37022E67A0CBF12E3C3336CA1F3601E4FCC4`.
+The current packet has the same 20 trace-page structure and nearly identical
+layer metrics, so the symptom is reproduced rather than removed.
+
+The complete hashable stage manifest and canonical/ROI artifacts are under
+`output/run10-final-diagnosis-v5/run-10/manifest.json` (local-only output).
+
+### Controls
+
+The accepted Max fixture was captured with its exact 24-inch, smoothing-4,
+2-by-4 layout settings. It uses the authored `lineArt` path: the fixed ROI is
+about `2.0 pt` P90 before width expansion and `4.2 pt` after antialiasing, with
+no harmful 4-point broadening transition. Its fresh PDF has eight trace pages
+and SHA-256
+`DB9AE4CC77734C5FC210874A1B16E7BCC8803C98C148D06B9A9DD3409F680E6B`.
+
+Run 7 was used as the narrow raster control. Its final print detail is about
+`2.0 pt` P90 before expansion and `4.2 pt` after, with no Run 10-like ROI
+transition. Its fresh PDF SHA-256 is
+`C4AFB375D8E94F3FD7FBDC9CF47C8C79F7C8B142326ADF637FDE5562B14DF566`.
+The control summary is recorded in
+`output/run10-final-diagnosis-v4/run-07-control-summary.json` (local-only
+output); its final physical-plane transitions are narrow before expansion and
+remain near the 4-point line-width boundary after expansion.
+
+### Forced decision: Outcome B - park Run 10
+
+No safe, bounded production correction is justified by this evidence. The
+first harmful width is distributed across source-derived luminance/color edge
+candidates rather than introduced by one isolated export step; the preview
+and print branches differ because of effective resolution; and any change to
+color-boundary or edge interpretation would be a broad rendered-source
+heuristic without semantic knowledge of whether paired edges are intentional
+boundaries or one maker transfer line. The Max and narrow controls remain
+healthy, but that contrast is not enough to establish a universally safe
+replacement rule.
+
+Run 10 is therefore parked. No production issue was created, no field-test
+classification changed, and no further Run 10 diagnostic follow-up is
+authorized without new evidence (for example, a source-class-specific semantic
+signal or a reviewed maker workflow that defines which paired edges may be
+collapsed).
