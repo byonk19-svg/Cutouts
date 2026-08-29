@@ -311,14 +311,19 @@ def capture_source_stages(
     if settings.smoothing > 0:
         resized_support = resized_support.filter(ImageFilter.GaussianBlur(radius=max(1, settings.smoothing * 2)))
     print_support = resized_support.point(lambda px: 255 if px >= 128 else 0)
-    print_cut_line = cropped_cut_line.resize(canonical_size, Image.Resampling.NEAREST)
+    print_cut_line = _authoritative_cut_line_mask(print_support)
     for stage in (
         _Stage("print-source-resized-144dpi", print_image, CANONICAL_DPI, False),
         _Stage("print-support-mask", print_support, CANONICAL_DPI),
         _Stage("print-authoritative-cut-line-mask", print_cut_line, CANONICAL_DPI),
     ):
         record_stage(stage)
-    print_mode = "lineArt" if settings.detail_extraction_mode == "lineArt" else preview_mode
+    print_mode = _detail_extraction_mode_used(
+        print_image,
+        print_support,
+        settings.template_style,
+        settings.detail_extraction_mode,
+    )
     if print_mode == "lineArt":
         print_stages, print_final = _line_art_stages(
             print_image,

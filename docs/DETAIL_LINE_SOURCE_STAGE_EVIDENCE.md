@@ -101,8 +101,8 @@ does not create the first abnormal signal; it carries forward source-derived
 edge bands and adds a bounded width expansion.
 
 The fresh current-main PDF is
-`output/run10-final-diagnosis-v4/run-10-current-main.pdf` with SHA-256
-`772FCE5DD4ED9A5F8A856573004FABB7E39BEF1957A6AB5853A84AC28F38F1B3`.
+`output/run10-final-diagnosis-v5/run-10-current-main.pdf` with SHA-256
+`06C92E2B0106E6CE49DFEF5BBD70752295E51E73804A5271308D6E017D5A990F`.
 Its rendered trace pages reproduce the historical symptom on outlier trace
 page 7 (row 2 / column 2). The historical corrected-baseline PDF remains
 `C:\Users\byonk\Downloads\run-10-corrected-baseline-mustache-cartoon-guy-cutout-template-pack.pdf`
@@ -112,7 +112,7 @@ The current packet has the same 20 trace-page structure and nearly identical
 layer metrics, so the symptom is reproduced rather than removed.
 
 The complete hashable stage manifest and canonical/ROI artifacts are under
-`output/run10-final-diagnosis-v4/run-10/manifest.json` (local-only output).
+`output/run10-final-diagnosis-v5/run-10/manifest.json` (local-only output).
 
 ### Controls
 
