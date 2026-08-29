@@ -15,6 +15,9 @@ remain local; this document records metrics and stage conclusions only.
 The layer-aware analyzer records 1-based trace-page and PDF-page indices, row /
 column labels, per-page P50/P90/P95 width, broad-ink fraction, density,
 complexity, and packet-maximum flags.
+Its furniture-only regression includes a crop mark drawn over the trace-image
+placement area, proving that vector page furniture is retained when the image
+XObject is suppressed.
 Width is reported in both comparison-plane pixels and physical points; the
 normalized PDF layer reports use 72 DPI, so one comparison pixel equals one
 point.
