@@ -40,6 +40,7 @@ class LineQualityMetrics:
     ink_density: float
     component_count: int
     broad_ink_fraction: float
+    broad_ink_fraction_4pt: float
     boundary_complexity: float
     small_component_fraction: float
 
@@ -79,6 +80,7 @@ def analyze_linework(image: Image.Image | np.ndarray, comparison_dpi: float = 72
             ink_density=0.0,
             component_count=0,
             broad_ink_fraction=0.0,
+            broad_ink_fraction_4pt=0.0,
             boundary_complexity=0.0,
             small_component_fraction=0.0,
         )
@@ -89,6 +91,8 @@ def analyze_linework(image: Image.Image | np.ndarray, comparison_dpi: float = 72
         ink.astype(np.uint8), connectivity=8
     )
     broad_fraction = float(np.count_nonzero(widths >= 8.0) / max(1, len(widths)))
+    broad_width_px = 4.0 * comparison_dpi / 72.0
+    broad_fraction_4pt = float(np.count_nonzero(widths >= broad_width_px) / max(1, len(widths)))
     small_fraction = float(
         sum(int(stats[label, cv2.CC_STAT_AREA]) for label in range(1, component_count) if stats[label, cv2.CC_STAT_AREA] < 16)
         / max(1, ink_pixels)
@@ -111,6 +115,7 @@ def analyze_linework(image: Image.Image | np.ndarray, comparison_dpi: float = 72
         ink_density=round(density, 6),
         component_count=max(0, component_count - 1),
         broad_ink_fraction=round(broad_fraction, 6),
+        broad_ink_fraction_4pt=round(broad_fraction_4pt, 6),
         boundary_complexity=round(complexity, 6),
         small_component_fraction=round(small_fraction, 6),
     )

@@ -38,6 +38,9 @@ mask and should not be inferred from whole-page pixels.
 - `ink_density`: fraction of pixels carrying dark linework.
 - `component_count`: connected line component count.
 - `broad_ink_fraction`: fraction of ink pixels at least 8 pixels wide.
+- `broad_ink_fraction_4pt`: fraction of ink pixels at least 4 physical points
+  wide at the reported comparison DPI. Use this field for cross-resolution
+  conclusions; the fixed-pixel field is retained for historical reports.
 - `boundary_complexity`: area-weighted contour-to-convex-hull ratio. Higher values
   indicate more irregular/jagged boundaries.
 - `small_component_fraction`: fraction of ink in tiny isolated components.
